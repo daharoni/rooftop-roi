@@ -20,8 +20,11 @@ export function renderCashflow({ cell, fin }) {
   const years = Array.from({ length: H + 1 }, (_, y) => y);
 
   // Every line is a change in wealth against the same starting point: holding
-  // the pool of starting cash (`cashRef`, the same for every system in the sweep -
-  // the dearest one's price) and doing nothing with it.
+  // this system's cash price (`cashRef`) and doing nothing with it.  That makes
+  // the lines comparable across financing modes for one system, not across
+  // systems of different price - which is why no absolute wealth figure sits in
+  // the headline tiles; NPV (the gap between the two system lines and the
+  // market line at the horizon, discounted) is the cross-system number.
   //   market      leave it all invested
   //   system      spend `upfront` of it, keep the rest invested, and reinvest each
   //               year's net cash flow (savings less O&M, replacements, payments)
@@ -45,13 +48,13 @@ export function renderCashflow({ cell, fin }) {
   lineChart("c-cash", years, [
     { label: "System, cash in hand", data: system, color: T.s1, fill: true },
     { label: "System, savings reinvested", data: reinvested, color: T.s3 },
-    { label: "Starting cash left in the market", data: market, color: T.s2 },
+    { label: "Same cash left in the market", data: market, color: T.s2 },
   ], { yFmt: fmtCompact, xTitle: "years from install" });
 
   legendHTML("l-cash", [
     { label: "System, cash in hand", color: T.s1, line: true },
     { label: `System, savings reinvested at ${fmtPct(fin.investReturn, 1)}`, color: T.s3, line: true },
-    { label: `${fmtCompact(cashRef)} starting cash left in the market`, color: T.s2, line: true },
+    { label: `The same ${fmtCompact(cashRef)} left in the market`, color: T.s2, line: true },
   ]);
 
   const table = $("t-cash");

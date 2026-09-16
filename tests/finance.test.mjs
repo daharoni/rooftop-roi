@@ -283,20 +283,6 @@ test("mid-year timing: flows dated when they arrive, loans no longer flattered",
   near(midYearCost, monthly, 0.005 * monthly, "mid-year dating matches month-by-month timing within 0.5%");
 });
 
-test("rebase: one pool of starting cash for every system compared", () => {
-  const r = Finance.evaluate(SIM, FLAT);
-  near(r.cashRef, 1000, 1e-12, "on its own, the pool is the system's price");
-  const big = Finance.evaluate(SIM, { ...FLAT, cashPool: 5000 });
-  near(big.cashRef, 5000, 1e-12, "cashPool overrides it");
-  near(big.wealthInvest, 5000 * 1.21, 1e-9, "the market arm invests the pool");
-  near(big.wealthSystem, 4000 * 1.21 + 1000 * 1.1 + 1000, 1e-9, "the buyer keeps the other $4,000 invested");
-  near(big.wealthDelta, big.npv * 1.21, 1e-9, "the gap is still NPV compounded");
-  near(big.npv, r.npv, 1e-12, "and NPV itself does not depend on the pool");
-  const re = Finance.rebase(Finance.evaluate(SIM, FLAT), 5000);
-  near(re.wealthInvest, big.wealthInvest, 1e-9, "rebase() reaches the same market arm");
-  near(re.wealthSystem, big.wealthSystem, 1e-9, "and the same system arm");
-});
-
 // ================================================================== lease
 test("lease: no upfront, escalating payments, no ownership incentives", () => {
   const sim = { ...SIM, kwdc: 10, savings: 3000, baselineBill: 3600, bill: 600 };

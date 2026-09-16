@@ -206,14 +206,6 @@ export function priceGrid(grid, finance, objective, basis) {
       finance: fin,
     };
   });
-  // One pool of starting cash for the whole grid - the dearest system's cash price -
-  // so wealth at the horizon compares like with like.  A bigger system then shows
-  // more wealth only when it earns more NPV, not because it put more money to work.
-  const cashPool = cells.reduce((m, c) => Math.max(m, c.netCost || 0), 0);
-  for (const c of cells) {
-    Finance.rebase(c.finance, cashPool);
-    c.wealthSystem = c.finance.wealthSystem; c.wealthInvest = c.finance.wealthInvest;
-  }
   let best = null;
   const better = OBJECTIVES[obj].better;
   cells.forEach(function (c) {
@@ -223,7 +215,7 @@ export function priceGrid(grid, finance, objective, basis) {
   // Doing nothing still wins if every real option destroys value.
   const doNothing = cells.find((c) => c.panels === 0 && c.batteries === 0);
   if (best && best.npv <= 0 && obj === "npv") best.beatenByDoingNothing = true;
-  return { cells, best, doNothing, cashPool,
+  return { cells, best, doNothing,
            panelList: grid.panelList, battList: grid.battList, planes: grid.planes,
            baseline, objective: obj, basis: asRec ? "asRecorded" : "sameFlex" };
 }

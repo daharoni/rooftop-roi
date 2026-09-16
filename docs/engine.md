@@ -314,10 +314,9 @@ payback      = first year Σ netSav_y ≥ totalCost, totalCost = upfront + Σ pa
                for cash this is the classic simple payback; a dear loan lengthens it, as it should
 discountedPayback = the same with both sides discounted at investReturn
 cashFlowPayback   = first year the running total of cashflows turns positive (0 = from day one)
-pool         = cashPool if set, else netCost
-wealthInvest = pool × (1 + investReturn)^H             the pool, left in the market
-wealthSystem = (pool − upfront) × (1 + investReturn)^H + Σ cashflows_y × (1 + investReturn)^(H−t_y)
-             = wealthInvest + NPV × (1 + investReturn)^H   (in every financing mode, for any pool)
+wealthInvest = netCost × (1 + investReturn)^H          the cash price, left in the market
+wealthSystem = (netCost − upfront) × (1 + investReturn)^H + Σ cashflows_y × (1 + investReturn)^(H−t_y)
+             = wealthInvest + NPV × (1 + investReturn)^H   (in every financing mode)
 lifetimeCost = upfront + Σ (bill_y + O&M_y + extras_y + payment_y) / (1 + discountRate)^t_y
 LCOE         = (upfront + PV of O&M + extras + payments) / PV of kWh generated
 ```
@@ -329,17 +328,16 @@ make a two-year loan at 8.25% look cheaper than cash when the market pays 7%. Co
 timed it loses, as it should. The reference fixtures pass `midYear: false` to reproduce the
 prototype's year-end arithmetic.
 
-**Pool.** Both wealth arms start from the same pool of cash. `evaluate()` on its own uses
-the system's cash price (the sticker price under a lease); `priceGrid()` then calls
-`rebase()` on every cell with one pool for the whole sweep, the dearest system's price, and
-reports it as `cashPool`. Without that, a bigger system would carry a bigger pool into both
-arms and read "more wealth" for that reason alone. With it, a bigger system shows more
-wealth only when it earns more NPV — which can happen at a lower IRR: more money at work,
-still beating the market. The market arm leaves the pool invested; the system arm spends
-`upfront` of it (everything for cash, the down payment for a loan, nothing for a lease),
-keeps the rest invested at the same return, and reinvests each year's net cash flow, loan or
-lease payments included. Counting only the cash flows would forget the borrower's
-still-invested principal and make a cheap loan look worse than paying cash.
+**Wealth.** Both wealth arms start from the same cash — what buying the system outright
+would cost (the sticker price under a lease). The market arm leaves all of it invested; the
+system arm spends `upfront` of it (everything for cash, the down payment for a loan, nothing
+for a lease), keeps the rest invested at the same return, and reinvests each year's net cash
+flow, loan or lease payments included. Counting only the cash flows would forget the
+borrower's still-invested principal and make a cheap loan look worse than paying cash.
+Because the starting cash is the system's own price, the two absolute figures compare
+financing modes for one system; they are not comparable across systems of different price
+(a dearer system starts from more cash), which is why the dashboard headline carries NPV
+and not wealth, and shows the wealth curves only for the chosen system, with that caveat.
 
 With no year-0 outlay (a lease, or a loan with nothing down) the levered `irr` is `null` —
 there is no investment to earn a return on — and `cashFlowPayback` is 0. Neither is a useful

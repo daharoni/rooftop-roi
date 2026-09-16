@@ -58,10 +58,6 @@ export const DEFAULTS = {
   // them at year end would credit a borrower with a year of market return on money
   // already paid out and make a dear short loan look cheaper than cash.
   midYear: true,
-  // Starting cash both wealth arms begin from.  0 means this system's own cash
-  // price; the optimiser sets one pool for the whole grid (see priceGrid) so wealth
-  // at the horizon is comparable across systems.
-  cashPool: 0,
   financing: {
     mode: "cash",                                                    // "cash"|"loan"|"lease"
     loan: { sharePct: 1.0, apr: 0.0699, termYears: 15, dealerFeePct: 0.0 },
@@ -346,19 +342,18 @@ export function evaluate(sim, f) {
   const projectIrr = netCost > 0 ? irrOf([-netCost].concat(netSav.slice(1)), times) : null;
 
   // "Same cash in the market" comparison, stated as two end-of-horizon numbers.
-  // Both arms start from the same pool of cash: `cashPool` when the caller sets one
-  // (the optimiser uses the dearest system's price for the whole grid), otherwise
-  // what buying this system outright costs (`netCost`; the sticker price under a
-  // lease, where nothing is bought).  The market arm leaves all of it invested.
-  // The system arm spends `upfront` of it - all the price for cash, the down
-  // payment for a loan, nothing for a lease - keeps the rest invested, and
-  // reinvests every year's net cash flow (savings less O&M, replacements and any
-  // loan or lease payment) at the same return from the day it arrives.  Counting
-  // only the cash flows would forget the borrower's still-invested principal and
-  // make a cheap loan look worse than paying cash.  The identity
-  // wealthSystem - wealthInvest = NPV x (1 + r)^H holds in every mode and for any
-  // pool, which is what rebase() leans on.
-  const cashRef = f.cashPool > 0 ? f.cashPool : netCost;
+  // Both arms start from the same cash: what buying this system outright costs
+  // (`netCost`; the sticker price under a lease, where nothing is bought).  The
+  // market arm leaves all of it invested.  The system arm spends `upfront` of it
+  // - all the price for cash, the down payment for a loan, nothing for a lease -
+  // keeps the rest invested, and reinvests every year's net cash flow (savings
+  // less O&M, replacements and any loan or lease payment) at the same return from
+  // the day it arrives.  Counting only the cash flows would forget the borrower's
+  // still-invested principal and make a cheap loan look worse than paying cash.
+  // The identity wealthSystem - wealthInvest = NPV x (1 + r)^H holds in every mode.
+  // Because the pool is this system's own price, the two absolute numbers are not
+  // comparable across systems of different price; their gap (NPV) is.
+  const cashRef = netCost;
   const wealthInvest = cashRef * Math.pow(1 + f.investReturn, H);
   let wealthSystem = (cashRef - upfront) * Math.pow(1 + f.investReturn, H);
   for (let y = 1; y <= H; y++) wealthSystem += cf[y] * Math.pow(1 + f.investReturn, H - times[y]);
@@ -427,23 +422,6 @@ export function evaluate(sim, f) {
 }
 
 /**
- * Restate an evaluate() result's wealth arms from a different pool of starting cash,
- * in place.  Only the two absolute numbers move; their gap is NPV compounded to the
- * horizon whatever the pool, so nothing else needs recomputing.  priceGrid() uses it
- * to give every cell in a sweep the same pool - the dearest system's cash price - so
- * "wealth at the horizon" is comparable across cells instead of quietly handing a
- * bigger system a bigger pool and reading "more wealth" for that alone.
- */
-export function rebase(result, pool) {
-  const K = Math.pow(1 + result.inputs.investReturn, result.horizon);
-  result.cashRef = pool;
-  result.wealthInvest = pool * K;
-  result.wealthDelta = result.npv * K;
-  result.wealthSystem = result.wealthInvest + result.wealthDelta;
-  return result;
-}
-
-/**
  * Price at which NPV crosses zero, holding everything else fixed.
  *
  * NPV is very nearly linear in $/W and $/kWh - both scale the year-0 outlay and
@@ -473,6 +451,6 @@ export function breakEven(sim, f, key) {
   return Math.abs(y1) <= Math.abs(slope) * 1e-6 ? x1 : null;
 }
 
-const SolarFinance = { evaluate, breakEven, rebase, withDefaults, effectiveDiscount,
+const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount,
                        npvOf, irrOf, flowTimes, crossing, loanPayment, amortize, DEFAULTS };
 export default SolarFinance;

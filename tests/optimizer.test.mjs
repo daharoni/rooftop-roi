@@ -22,22 +22,6 @@ const ESC = { escalation: TARIFF.meta.escalation.recommended_default };
 // A small sweep is enough for every structural assertion.
 const SMALL = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 20, maxBatteries: 2, step: 2 });
 
-test("every cell is measured from the same pool of starting cash", () => {
-  const priced = Optimizer.priceGrid(SMALL, {}, "npv", "sameFlex");
-  const dearest = Math.max(...priced.cells.map((c) => c.netCost));
-  near(priced.cashPool, dearest, 1e-9, "the pool is the dearest system's cash price");
-  for (const c of priced.cells) {
-    near(c.finance.cashRef, dearest, 1e-9, `${c.panels}p/${c.batteries}b starts from the pool`);
-    near(c.wealthInvest, priced.cells[0].wealthInvest, 1e-6, "so the market arm is the same everywhere");
-    near(c.wealthSystem - c.wealthInvest, c.npv * Math.pow(1 + c.finance.inputs.investReturn, c.finance.horizon),
-         1e-6, "and wealth differences between cells are NPV differences, compounded");
-  }
-  const byWealth = [...priced.cells].sort((a, b) => b.wealthSystem - a.wealthSystem);
-  const byNpv = [...priced.cells].sort((a, b) => b.npv - a.npv);
-  assert.deepEqual(byWealth.map((c) => [c.panels, c.batteries]), byNpv.map((c) => [c.panels, c.batteries]),
-                   "ranking by wealth is ranking by NPV, not by how much money was put to work");
-});
-
 test("each objective selects its own extremum", () => {
   const priced = Optimizer.priceGrid(SMALL, {}, "npv", "sameFlex");
   const real = priced.cells.filter((c) => !(c.panels === 0 && c.batteries === 0));
