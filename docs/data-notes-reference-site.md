@@ -16,8 +16,8 @@ stdlib, no numpy/pandas/pvlib). Re-run either script to regenerate its outputs.
 
 **Inputs** (`data/`)
 
-* `SCE_Usage_8001754410_09-01-24_to_08-31-25.csv` — 8,760 rows, 12,583.4 kWh
-* `SCE_Usage_8001754410_09-01-25_to_09-10-26.csv` — 8,976 rows, 14,295.1 kWh
+* `SCE_Usage_8009999999_09-01-24_to_08-31-25.csv` — 8,760 rows, 12,583.4 kWh
+* `SCE_Usage_8009999999_09-01-25_to_09-10-26.csv` — 8,976 rows, 14,295.1 kWh
 
 **Format traps handled**
 
