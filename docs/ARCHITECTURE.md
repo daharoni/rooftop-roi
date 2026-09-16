@@ -181,14 +181,18 @@ Landing (before data): what the tool does in three sentences, a privacy statemen
 literally true (list the exact network calls), a drop zone for Green Button XML/CSV, a
 "Try the demo household" button, and a location field (address → geocode, ZIP, or click the map).
 
-App (after data): one screen, tabs, no page scroll at desktop height (each tab scrolls
-internally if it must). Tabs: **Home** (headline result tiles + optimum), **Roof** (roof builder),
-**Loads** (detected flexible loads, schedules, add EV/pool/custom), **System** (heatmap, slices,
-overrides, strategy), **Bills** (before/after by month, plan and provider tables, bill replay
-check), **Money** (cash flow vs investing, financing knobs, tornado, break-evens), **Assumptions**
-(method, sources, data quality, rate effective dates). Controls live in a left rail that
-changes per tab; results re-render live (finance-only changes instant; simulation changes
-debounced, run in a Blob worker with a main-thread fallback).
+App (after data): one **Dashboard** carrying every control in collapsible rail groups, so a
+person can move any knob and watch everything they care about move at once: the NPV verdict
+and its tiles, the panel × battery grid with slices, a typical weekday hour by hour, the money
+over time, flexible-load summary, per-face allocation, and "what to try next" chips.  Secondary
+tabs: **Roof** (roof builder), **Loads** (detected flexible loads, schedules, add EV/pool/custom),
+**Bills & money** (before/after by month, first-year monthly outlay, plan and provider tables,
+weather spread, tornado, break-evens, bill replay check), **Assumptions** (method, sources, data
+quality, rate effective dates).  Control declarations live in `app/ui/knobs.js` and are shared
+between tabs.  Results re-render live (finance-only changes instant; simulation changes
+debounced, run in a Blob worker with a main-thread fallback).  "Share link" copies the URL: the
+fragment already carries every non-default setting, the roof faces and the load schedules, plus
+a `demo=1` flag when the scenario was built on the demo household so the link reproduces it.
 
 Roof builder paths (all produce `roof.planes`): **Simple** (one face: pitch picker with gable
 icons 2°/4:12/6:12/9:12/12:12 or degrees, direction dial, max panels), **Trace on map**

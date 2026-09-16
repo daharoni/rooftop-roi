@@ -244,7 +244,7 @@ export function mountRoofBuilder(el, opts = {}) {
       h('button', { type: 'submit', class: 'rb-btn rb-btn-primary', text: 'Use this location' }),
       st.site && h('button', { type: 'button', class: 'rb-btn', text: 'Cancel', onclick: () => { st.editingSite = false; renderSite(); } }));
     siteBar.append(
-      h('div', { class: 'rb-site-txt' }, st.site ? 'Move the roof location.' : 'Set the roof location to trace on the satellite photo. Coordinates only here — search by address on the Home tab.'),
+      h('div', { class: 'rb-site-txt' }, st.site ? 'Move the roof location.' : 'Set the roof location to trace on the satellite photo. Coordinates only here — search by address on the landing page.'),
       form);
   }
 

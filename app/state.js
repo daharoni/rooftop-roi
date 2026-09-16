@@ -22,7 +22,7 @@ export const DB_NAME = "rooftop-roi";
 export const DB_STORE = "loads";
 export const LOAD_KEY = "current";
 
-export const TABS = ["home", "roof", "loads", "system", "bills", "money", "assumptions"];
+export const TABS = ["dashboard", "roof", "loads", "bills", "assumptions"];
 
 /** Defaults. Anything equal to these is omitted from the hash and from storage. */
 export const DEFAULTS = {
@@ -53,7 +53,7 @@ export const DEFAULTS = {
     },
   },
   ui: {
-    tab: "home", basis: "sameFlex", season: 0, weatherKey: "tmy", objective: "npv",
+    tab: "dashboard", demo: false, basis: "sameFlex", season: 0, weatherKey: "tmy", objective: "npv",
     replayStart: "", replayEnd: "", replayActual: 0,
     // Rail entries that are verbs or one-shot pickers, not persisted settings.
     addPreset: "", customEnabled: false, assumptionsJump: "method", runReplay: false,
@@ -93,7 +93,7 @@ const SCALARS = [
   ["lsmon", "fin.financing.lease.monthly", "num"], ["lsesc", "fin.financing.lease.escalatorPct", "num"],
   ["lsterm", "fin.financing.lease.termYears", "num"], ["lsbuy", "fin.financing.lease.buyout", "num"],
 
-  ["tab", "ui.tab", "str"], ["basis", "ui.basis", "str"], ["season", "ui.season", "num"],
+  ["tab", "ui.tab", "str"], ["demo", "ui.demo", "bool"], ["basis", "ui.basis", "str"], ["season", "ui.season", "num"],
   ["wx", "ui.weatherKey", "str"], ["obj", "ui.objective", "str"],
 ];
 

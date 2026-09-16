@@ -24,6 +24,11 @@ and simulated in your browser and stored only in your browser's local storage un
 
 No analytics, no uploads, no cookies.
 
+**Sharing a scenario.** Every setting you change — prices, financing, roof faces, load schedules —
+is packed into the URL after `#`, so the address bar is always a link that reproduces your exact
+dashboard. "Share link" copies it. The link never contains your meter data; someone opening it adds
+their own file, or, if you built the scenario on the demo household, the demo loads automatically.
+
 ## What you need
 
 1. **Green Button data** from your utility: a year or more of hourly (or 15-minute) usage.

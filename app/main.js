@@ -32,18 +32,19 @@ import { destroyAll } from "./charts/base.js";
 import { fmtKwh, fmtMoney, fmtNum, fmtPct } from "./ui/format.js";
 import { adoptGeocodeNote } from "./privacy.js";
 
-import * as homeTab from "./tabs/home.js";
+import * as dashboardTab from "./tabs/dashboard.js";
 import * as roofTab from "./tabs/roof.js";
 import * as loadsTab from "./tabs/loads.js";
-import * as systemTab from "./tabs/system.js";
 import * as billsTab from "./tabs/bills.js";
-import * as moneyTab from "./tabs/money.js";
 import * as assumptionsTab from "./tabs/assumptions.js";
 
 const TAB_MODULES = {
-  home: homeTab, roof: roofTab, loads: loadsTab, system: systemTab,
-  bills: billsTab, money: moneyTab, assumptions: assumptionsTab,
+  dashboard: dashboardTab, roof: roofTab, loads: loadsTab, bills: billsTab, assumptions: assumptionsTab,
 };
+
+/** Tab ids from links and sessions saved before the dashboard existed. */
+const LEGACY_TABS = { home: "dashboard", system: "dashboard", money: "bills" };
+const normalizeTab = (id) => (State.TABS.includes(id) ? id : LEGACY_TABS[id] || "dashboard");
 
 const NGOM_COST_DEFAULT = 600;   // one-time metering charge; overridden from the tariff file
 
@@ -372,6 +373,24 @@ function afterDetail() {
     ctx.annualPerKw = mine ? mine.perKw : null;
   }
 
+  // The cheapest plan and provider for this system, for the dashboard's
+  // "what to try next" chips. Cheapest with-system bill, not biggest saving:
+  // a plan with a ruinous baseline can show a huge saving and still cost more.
+  ctx.bestPlan = null; ctx.bestPlanGain = 0;
+  ctx.bestProvider = null; ctx.bestProviderGain = 0;
+  if (ctx.detail && Array.isArray(ctx.detail.plans) && ctx.detail.plans.length) {
+    const best = ctx.detail.plans.reduce((a, p) => (p.bill < a.bill ? p : a));
+    const mine = ctx.detail.plans.find((p) => p.planId === s.tariff.planId);
+    ctx.bestPlan = { planId: best.planId, name: best.name || best.planId };
+    ctx.bestPlanGain = mine ? mine.bill - best.bill : 0;
+  }
+  if (ctx.detail && Array.isArray(ctx.detail.providers) && ctx.detail.providers.length) {
+    const best = ctx.detail.providers.reduce((a, p) => (p.bill < a.bill ? p : a));
+    const mine = ctx.detail.providers.find((p) => p.id === s.tariff.providerId);
+    ctx.bestProvider = { id: best.id, name: best.name || best.id };
+    ctx.bestProviderGain = mine ? mine.bill - best.bill : 0;
+  }
+
   ctx.week = buildWeek();
   ctx.planLabel = planLabel();
 }
@@ -469,13 +488,13 @@ function buildTabStrip() {
 }
 
 function goTab(id) {
-  if (!State.TABS.includes(id)) id = "home";
-  State.setAt("ui.tab", id, "tab");
+  State.setAt("ui.tab", normalizeTab(id), "tab");
 }
 
 function mountTab() {
   const s = State.get();
-  const mod = TAB_MODULES[s.ui.tab] || TAB_MODULES.home;
+  if (!State.TABS.includes(s.ui.tab)) s.ui.tab = normalizeTab(s.ui.tab);
+  const mod = TAB_MODULES[s.ui.tab] || TAB_MODULES.dashboard;
   if (mountedTab === mod) return;
   if (mountedTab && typeof mountedTab.unmount === "function") mountedTab.unmount();
   destroyAll();
@@ -534,6 +553,7 @@ const queueSim = debounce(runGrid, 160);
 function onControlSet(path, value, spec) {
   // A handful of rail entries are verbs, not values.
   if (path === "ui.runReplay") { runReplay(); return; }
+  if (path === "ui.goLoads") { goTab("loads"); return; }
   if (path === "ui.addPreset") { if (value) addPreset(value); return; }
   if (path === "ui.assumptionsJump") { const n = $(value); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (path === "ui.customEnabled") { toast("Custom rates from a bill are not wired up yet — pick the closest published plan."); return; }
@@ -581,6 +601,11 @@ const ACTIONS = {
   goTab,
   pickCell,
   addPreset,
+  setSeason: (v) => State.setAt("ui.season", Number(v), "ui"),
+  clearOverride: () => State.update((s) => {
+    s.system.override.batteries = null;
+    s.system.override.panelsByPlane = null;
+  }, "finance"),
   setProvider: (id) => State.setAt("tariff.providerId", id, "sim"),
   setPlan: (id) => State.setAt("tariff.planId", id, "sim"),
   setStrategy: (v) => State.setAt("system.strategy", v, "sim"),
@@ -773,6 +798,7 @@ async function onFiles(files) {
   landingError("");
   try {
     const loadSet = await readFiles(files);
+    State.update((s) => { s.ui.demo = false; }, "silent");
     await adoptLoadSet(loadSet);
   } catch (err) {
     console.error(err);
@@ -792,6 +818,8 @@ async function onDemo() {
     const sets = texts.map((t, i) => Core.greenbutton.parse(t, { filename: names[i] }));
     const loadSet = Core.greenbutton.mergeLoadSets(sets);
     State.update((s) => {
+      // Flagged in the hash so a shared link built on the demo loads the demo.
+      s.ui.demo = true;
       s.site.lat = 34.145; s.site.lon = -118.76; s.site.elevationM = 280;
       s.site.tz = "America/Los_Angeles"; s.site.utilityId = "sce";
       s.site.addressLabel = "Demo household, Agoura Hills CA 91301";
@@ -979,8 +1007,26 @@ async function forgetEverything() {
   location.href = location.pathname;
 }
 
+/**
+ * The whole scenario — every non-default knob, the roof faces, the flexible
+ * loads and their schedules — is already in the URL fragment, written on every
+ * change.  "Share link" just copies it.  The meter data itself is never in the
+ * link (it is private and about a megabyte); a link built on the demo household
+ * carries a flag that loads the demo, so it reproduces exactly.
+ */
+async function shareLink() {
+  State.writeHash(State.get());
+  const ok = await copyToClipboard(location.href);
+  const s = State.get();
+  toast(ok
+    ? (s.ui.demo ? "Link copied — it opens with these settings on the demo household."
+      : "Link copied — it carries every setting. The recipient adds their own meter data.")
+    : "Could not reach the clipboard — copy the address bar instead.");
+}
+
 function bindShell() {
   $("btn-forget").addEventListener("click", forgetEverything);
+  $("btn-share").addEventListener("click", shareLink);
   $("btn-copy").addEventListener("click", async () => {
     const ok = await copyToClipboard(summaryText(State.get(), ctx));
     toast(ok ? "Summary copied." : "Could not reach the clipboard — press Ctrl/Cmd+C.");
@@ -1010,7 +1056,9 @@ function bindShell() {
   window.addEventListener("hashchange", () => {
     const before = State.toHash(State.get());
     if (location.hash.replace(/^#/, "") === before) return;   // our own replaceState
-    State.replace(State.fromHash(location.hash, State.get()), "load");
+    const next = State.fromHash(location.hash, State.get());
+    next.ui.tab = normalizeTab(next.ui.tab);
+    State.replace(next, "load");
     if (ctx.loadSet) {
       mountedTab = null;
       mountTab();
@@ -1030,6 +1078,7 @@ async function boot() {
   const stored = State.loadLocal();
   let start = stored ? State.fromStorage(stored, State.freshState()) : State.freshState();
   if (location.hash) start = State.fromHash(location.hash, start);
+  start.ui.tab = normalizeTab(start.ui.tab);
   State.replace(start, "silent");
 
   renderLanding($("landing"), { onFiles, onDemo, onAddress, onZip, onMap });
@@ -1068,6 +1117,10 @@ async function boot() {
       } catch { /* detection is optional */ }
     }
     await enterApp();
+  } else if (State.get().ui.demo && location.hash) {
+    // A shared link built on the demo household: load the demo so the
+    // recipient sees exactly what the sender saw.
+    await onDemo();
   }
 }
 
