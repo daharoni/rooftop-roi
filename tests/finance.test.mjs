@@ -16,10 +16,12 @@ const near = (a, b, tol, msg) =>
 
 /** 1 kW at $1/W saving $1,000/yr, no O&M, no degradation - everything hand-checkable. */
 const SIM = { savings: 1000, bill: 0, baselineBill: 1000, pvKwh: 1000, kwdc: 1, battKWhTotal: 0 };
+// Year-end timing keeps the hand arithmetic below on whole-year powers; the mid-year
+// default (and the difference it makes) has its own tests further down.
 const FLAT = { costPerW: 1, adder: 0, taxCreditPct: 0, incentiveMode: "none", sgipPerKwh: 0,
                rebates: 0, horizon: 2, escalation: 0, investReturn: 0.10, discountRate: 0,
                panelDeg: 0, battDeg: 0, omPerYear: 0, battReplYear: 99, inverterYear: 99,
-               resaleValue: 0 };
+               resaleValue: 0, midYear: false };
 
 // ================================================================== cash (prototype)
 test("cash: NPV / IRR / payback against hand arithmetic", () => {
@@ -235,6 +237,64 @@ test("loan: monthly outlay against today's bill", () => {
        "and the delta answers 'is my monthly outlay lower than today's bill?'");
   const cash = Finance.evaluate(sim, { ...FLAT, costPerW: 2, horizon: 25 });
   near(cash.firstYearMonthlyOutlay, 900 / 12, 1e-9, "a cash buyer's outlay is just the new bill");
+});
+
+// ================================================================== timing
+test("mid-year timing: flows dated when they arrive, loans no longer flattered", () => {
+  assert.equal(Finance.DEFAULTS.midYear, true, "mid-year is the default");
+  assert.deepEqual(Finance.flowTimes(3), [0, 0.5, 1.5, 2.5], "day one, then the middle of each year");
+  assert.deepEqual(Finance.flowTimes(3, false), [0, 1, 2, 3], "or year end on request");
+
+  const endY = Finance.evaluate(SIM, FLAT);
+  const midY = Finance.evaluate(SIM, { ...FLAT, midYear: true });
+  assert.deepEqual(midY.flowTimes, [0, 0.5, 1.5], "the result reports its own dating");
+  near(midY.npv, -1000 + 1000 / 1.1 ** 0.5 + 1000 / 1.1 ** 1.5, 1e-6, "NPV discounts to t = 0.5 and 1.5");
+  near(midY.npv, endY.cashflows[0] + (endY.npv - endY.cashflows[0]) * 1.1 ** 0.5, 1e-6,
+       "which is the year-end NPV of the later flows brought forward half a year");
+  assert.ok(midY.irr > endY.irr, "earlier receipts mean a higher IRR");
+  near(midY.payback, endY.payback, 1e-12, "simple payback is undiscounted and does not move");
+  near(midY.wealthDelta, midY.npv * 1.21, 1e-9, "the wealth identity holds under mid-year timing");
+  near(midY.wealthSystem, 1000 * 1.1 ** 1.5 + 1000 * 1.1 ** 0.5, 1e-6,
+       "savings reinvested from the middle of each year");
+
+  // The bug this fixes: a 2-year loan at 8.25% while the market pays 7%.  Dated at
+  // year end, each payment was credited with up to a year of return it never earned
+  // and borrowing beat cash; dated when it is paid, it loses, as it must.
+  const sim = { savings: 3000, bill: 600, baselineBill: 3600, pvKwh: 15000, kwdc: 10, battKWhTotal: 0 };
+  const base = { ...FLAT, costPerW: 3, horizon: 25, investReturn: 0.07, midYear: true };
+  const loan = { mode: "loan", loan: { sharePct: 1, apr: 0.0825, termYears: 2, dealerFeePct: 0 } };
+  const cash = Finance.evaluate(sim, base);
+  const dear = Finance.evaluate(sim, { ...base, financing: loan });
+  assert.ok(dear.npv < cash.npv, `borrowing at 8.25% loses to cash when the market pays 7% (${Math.round(dear.npv - cash.npv)})`);
+  const oldDear = Finance.evaluate(sim, { ...base, midYear: false, financing: loan });
+  const oldCash = Finance.evaluate(sim, { ...base, midYear: false });
+  assert.ok(oldDear.npv > oldCash.npv, "(year-end dating had it the other way round)");
+  // Borrowing at the market rate is very nearly a wash - only monthly compounding
+  // makes 7.00% APR a touch dearer than 7% a year - and always within 1% of the price.
+  const par = Finance.evaluate(sim, { ...base, financing: { ...loan, loan: { ...loan.loan, apr: 0.07 } } });
+  assert.ok(par.npv < cash.npv && cash.npv - par.npv < 0.01 * cash.netCost,
+            `a 7% loan against a 7% market is a small loss (${Math.round(par.npv - cash.npv)})`);
+  // And the exact monthly schedule agrees with the mid-year shortcut to a fraction of a percent.
+  const a = Finance.amortize(dear.netCost, 0.0825, 2);
+  let monthly = 0;
+  for (let m = 1; m <= 24; m++) monthly += a.payment * 1.07 ** (25 - m / 12);
+  let midYearCost = 0;
+  for (const row of a.rows) midYearCost += row.payment * 1.07 ** (25 - (row.year - 0.5));
+  near(midYearCost, monthly, 0.005 * monthly, "mid-year dating matches month-by-month timing within 0.5%");
+});
+
+test("rebase: one pool of starting cash for every system compared", () => {
+  const r = Finance.evaluate(SIM, FLAT);
+  near(r.cashRef, 1000, 1e-12, "on its own, the pool is the system's price");
+  const big = Finance.evaluate(SIM, { ...FLAT, cashPool: 5000 });
+  near(big.cashRef, 5000, 1e-12, "cashPool overrides it");
+  near(big.wealthInvest, 5000 * 1.21, 1e-9, "the market arm invests the pool");
+  near(big.wealthSystem, 4000 * 1.21 + 1000 * 1.1 + 1000, 1e-9, "the buyer keeps the other $4,000 invested");
+  near(big.wealthDelta, big.npv * 1.21, 1e-9, "the gap is still NPV compounded");
+  near(big.npv, r.npv, 1e-12, "and NPV itself does not depend on the pool");
+  const re = Finance.rebase(Finance.evaluate(SIM, FLAT), 5000);
+  near(re.wealthInvest, big.wealthInvest, 1e-9, "rebase() reaches the same market arm");
+  near(re.wealthSystem, big.wealthSystem, 1e-9, "and the same system arm");
 });
 
 // ================================================================== lease

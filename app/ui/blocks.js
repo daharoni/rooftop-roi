@@ -27,8 +27,8 @@ export function card({ id, title, tag, sub, body, dataView }) {
 
 export function tiles(id) { return el("div.tiles", { id }); }
 
-export function tile({ k, v, d }) {
-  return el("div.tile", {}, [
+export function tile({ k, v, d, key }) {
+  return el("div.tile" + (key ? ".key" : ""), {}, [
     el("span.k", { text: k }),
     el("span.v.num", { text: v }),
     el("span.d", { text: d || "" }),

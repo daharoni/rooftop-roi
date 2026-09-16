@@ -302,9 +302,11 @@ reference. Only the `payment` column of `financingSchedule[]` is meaningful.
 ### Outputs
 
 ```
+t_0 = 0, t_y = y − 0.5           every year's flows are dated mid-year (`midYear: true`, the default);
+                                   `midYear: false` dates them at year end, t_y = y
 cashflows[0] = −upfront
 cashflows[y] = savings_y − O&M_y − extras_y − payment_y + (y = H ? resaleValue : 0)
-NPV          = Σ cashflows_y / (1 + investReturn)^y
+NPV          = Σ cashflows_y / (1 + investReturn)^t_y
 IRR          = bisection on the same array (levered); null unless the first cash flow is an outlay
 projectIrr   = bisection on [−netCost, netSav_y…] where netSav_y = savings_y − O&M_y − extras_y (+ resale)
                the return the system earns on its cash price, whoever pays it; the objective uses this
@@ -312,18 +314,31 @@ payback      = first year Σ netSav_y ≥ totalCost, totalCost = upfront + Σ pa
                for cash this is the classic simple payback; a dear loan lengthens it, as it should
 discountedPayback = the same with both sides discounted at investReturn
 cashFlowPayback   = first year the running total of cashflows turns positive (0 = from day one)
-wealthInvest = netCost × (1 + investReturn)^H          the cash price, left in the market
-wealthSystem = (netCost − upfront) × (1 + investReturn)^H + Σ cashflows_y × (1 + investReturn)^(H−y)
-             = wealthInvest + NPV × (1 + investReturn)^H   (in every financing mode)
-lifetimeCost = upfront + Σ (bill_y + O&M_y + extras_y + payment_y) / (1 + discountRate)^y
+pool         = cashPool if set, else netCost
+wealthInvest = pool × (1 + investReturn)^H             the pool, left in the market
+wealthSystem = (pool − upfront) × (1 + investReturn)^H + Σ cashflows_y × (1 + investReturn)^(H−t_y)
+             = wealthInvest + NPV × (1 + investReturn)^H   (in every financing mode, for any pool)
+lifetimeCost = upfront + Σ (bill_y + O&M_y + extras_y + payment_y) / (1 + discountRate)^t_y
 LCOE         = (upfront + PV of O&M + extras + payments) / PV of kWh generated
 ```
 
-Both wealth arms start from the same cash — what buying the system outright would cost
-(the sticker price under a lease). The market arm leaves all of it invested; the system arm
-spends `upfront` of it (everything for cash, the down payment for a loan, nothing for a
-lease), keeps the rest invested at the same return, and reinvests each year's net cash flow,
-loan or lease payments included. Counting only the cash flows would forget the borrower's
+**Timing.** The upfront price is paid on day one. Bills, savings and loan or lease payments
+arrive through the year, so each year's flows are dated mid-year. Booking them at year end
+credited a borrower with up to a year of market return on money already paid out, enough to
+make a two-year loan at 8.25% look cheaper than cash when the market pays 7%. Correctly
+timed it loses, as it should. The reference fixtures pass `midYear: false` to reproduce the
+prototype's year-end arithmetic.
+
+**Pool.** Both wealth arms start from the same pool of cash. `evaluate()` on its own uses
+the system's cash price (the sticker price under a lease); `priceGrid()` then calls
+`rebase()` on every cell with one pool for the whole sweep, the dearest system's price, and
+reports it as `cashPool`. Without that, a bigger system would carry a bigger pool into both
+arms and read "more wealth" for that reason alone. With it, a bigger system shows more
+wealth only when it earns more NPV — which can happen at a lower IRR: more money at work,
+still beating the market. The market arm leaves the pool invested; the system arm spends
+`upfront` of it (everything for cash, the down payment for a loan, nothing for a lease),
+keeps the rest invested at the same return, and reinvests each year's net cash flow, loan or
+lease payments included. Counting only the cash flows would forget the borrower's
 still-invested principal and make a cheap loan look worse than paying cash.
 
 With no year-0 outlay (a lease, or a loan with nothing down) the levered `irr` is `null` —

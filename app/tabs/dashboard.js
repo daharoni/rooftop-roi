@@ -108,8 +108,10 @@ export function mount(pane, state, ctx) {
       id: "cash-card",
       title: "The money over time",
       tag: { id: "cash-mode-tag", text: "cash" },
-      sub: "The system's running cash position against the same cash left in the market, plus what the system "
-        + "is worth if every year's saving is reinvested at the same return.",
+      sub: "The system's running cash position against a pool of starting cash left in the market, plus what "
+        + "the system is worth if every year's saving is reinvested at the same return. The pool is the price "
+        + "of the dearest system in the search, the same for every cell, so the market line stays put as you "
+        + "change hardware and only the system lines move.",
       body: [
         el("div.chart-box", { style: "height:230px" }, [el("canvas", { id: "c-cash" })]),
         el("div.legend", { id: "l-cash" }),
@@ -211,17 +213,24 @@ function renderHeadline(state, ctx, cell) {
         + `buy and rises with your rates; ${fmtMoney(cell.exportRevenue)} is export credit, locked at today's ACC prices.`
       : "");
 
+  // First row: the figures that rank one system against another (the accented two
+  // are scale-free, so they compare across systems directly - though IRR favours
+  // small arrays, which is why NPV above is the verdict).  Second row: what this
+  // particular system is.  "Wealth" starts every system from the same pool of cash,
+  // so a bigger system shows more wealth only when it earns more NPV - which can
+  // happen at a lower IRR: more money at work, still beating the market.
   const list = [
-    { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
-    { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
-    outlayTile(mode, fin, f),
+    Object.assign(irrTile(cell, fin, f), { key: true }),
+    Object.assign(paybackTile(cell, fin, f), { key: true }),
     { k: "Savings, year 1", v: fmtMoney(cell.firstYearSavings ?? cell.savings),
       d: cell.exportRevenue > 0
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
         : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}` },
-    irrTile(cell, fin, f),
-    paybackTile(cell, fin, f),
-    { k: "Wealth at " + fin.horizon + " yr", v: fmtCompact(f.wealthSystem), d: "investing: " + fmtCompact(f.wealthInvest) },
+    outlayTile(mode, fin, f),
+    { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
+    { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
+    { k: "Wealth at " + fin.horizon + " yr", v: fmtCompact(f.wealthSystem),
+      d: `vs ${fmtCompact(f.wealthInvest)} leaving the ${fmtCompact(f.cashRef)} pool invested` },
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
   const host = clear($("tiles"));

@@ -20,35 +20,38 @@ export function renderCashflow({ cell, fin }) {
   const years = Array.from({ length: H + 1 }, (_, y) => y);
 
   // Every line is a change in wealth against the same starting point: holding
-  // the cash price of the system (`cashRef`) and doing nothing with it.
+  // the pool of starting cash (`cashRef`, the same for every system in the sweep -
+  // the dearest one's price) and doing nothing with it.
   //   market      leave it all invested
   //   system      spend `upfront` of it, keep the rest invested, and reinvest each
   //               year's net cash flow (savings less O&M, replacements, payments)
+  //               from the day it arrives (mid-year, per `flowTimes`)
   //   cash in hand the running total of the system's own cash flows, undiscounted
   // Under a loan `upfront` is only the down payment, so the system line keeps
-  // the market's growth on the principal that was never spent; a cheap loan
-  // therefore sits above cash, as it should.
+  // the market's growth on the principal that was never spent; a loan cheaper
+  // than the market return therefore sits above cash, and a dearer one below.
   const r = 1 + fin.investReturn;
   const cashRef = f.cashRef !== undefined ? f.cashRef : f.netCost;
   const upfront = f.upfront !== undefined ? f.upfront : f.netCost;
+  const at = (i) => (f.flowTimes ? f.flowTimes[i] : i);
   const system = years.map((y) => f.cumulative[y]);
   const market = years.map((y) => cashRef * (r ** y - 1));
   const reinvested = years.map((y) => {
     let w = (cashRef - upfront) * r ** y;
-    for (let i = 1; i <= y; i++) w += (f.cashflows[i] || 0) * r ** (y - i);
+    for (let i = 1; i <= y; i++) w += (f.cashflows[i] || 0) * r ** (y - at(i));
     return w - cashRef;
   });
 
   lineChart("c-cash", years, [
     { label: "System, cash in hand", data: system, color: T.s1, fill: true },
     { label: "System, savings reinvested", data: reinvested, color: T.s3 },
-    { label: "Cash left in the market", data: market, color: T.s2 },
+    { label: "Starting cash left in the market", data: market, color: T.s2 },
   ], { yFmt: fmtCompact, xTitle: "years from install" });
 
   legendHTML("l-cash", [
     { label: "System, cash in hand", color: T.s1, line: true },
     { label: `System, savings reinvested at ${fmtPct(fin.investReturn, 1)}`, color: T.s3, line: true },
-    { label: "Same cash left in the market", color: T.s2, line: true },
+    { label: `${fmtCompact(cashRef)} starting cash left in the market`, color: T.s2, line: true },
   ]);
 
   const table = $("t-cash");

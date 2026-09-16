@@ -22,6 +22,22 @@ const ESC = { escalation: TARIFF.meta.escalation.recommended_default };
 // A small sweep is enough for every structural assertion.
 const SMALL = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 20, maxBatteries: 2, step: 2 });
 
+test("every cell is measured from the same pool of starting cash", () => {
+  const priced = Optimizer.priceGrid(SMALL, {}, "npv", "sameFlex");
+  const dearest = Math.max(...priced.cells.map((c) => c.netCost));
+  near(priced.cashPool, dearest, 1e-9, "the pool is the dearest system's cash price");
+  for (const c of priced.cells) {
+    near(c.finance.cashRef, dearest, 1e-9, `${c.panels}p/${c.batteries}b starts from the pool`);
+    near(c.wealthInvest, priced.cells[0].wealthInvest, 1e-6, "so the market arm is the same everywhere");
+    near(c.wealthSystem - c.wealthInvest, c.npv * Math.pow(1 + c.finance.inputs.investReturn, c.finance.horizon),
+         1e-6, "and wealth differences between cells are NPV differences, compounded");
+  }
+  const byWealth = [...priced.cells].sort((a, b) => b.wealthSystem - a.wealthSystem);
+  const byNpv = [...priced.cells].sort((a, b) => b.npv - a.npv);
+  assert.deepEqual(byWealth.map((c) => [c.panels, c.batteries]), byNpv.map((c) => [c.panels, c.batteries]),
+                   "ranking by wealth is ranking by NPV, not by how much money was put to work");
+});
+
 test("each objective selects its own extremum", () => {
   const priced = Optimizer.priceGrid(SMALL, {}, "npv", "sameFlex");
   const real = priced.cells.filter((c) => !(c.panels === 0 && c.batteries === 0));
@@ -182,7 +198,8 @@ test("the reference optimum survives the new API", async () => {
   const R = REFERENCE.optimum;
   const src = Engine.flexReshapeSource();
   const grid = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 60, maxBatteries: 6 });
-  const best = Optimizer.priceGrid(grid, { escalation: R.escalation }, "npv", "sameFlex").best;
+  // The prototype dated every flow at year end; the reference numbers are its.
+  const best = Optimizer.priceGrid(grid, { escalation: R.escalation, midYear: false }, "npv", "sameFlex").best;
   assert.equal(best.panels, R.panels, "27 panels");
   assert.equal(best.batteries, R.batteries, "1 battery");
   assert.deepEqual(best.panelsByPlane, [R.panels], "all of them on the single roof plane");
@@ -195,7 +212,7 @@ test("the reference optimum survives the new API", async () => {
   try {
     Engine.setFlexReshape(null);
     const g2 = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 60, maxBatteries: 6 });
-    const b2 = Optimizer.priceGrid(g2, { escalation: R.escalation }, "npv", "sameFlex").best;
+    const b2 = Optimizer.priceGrid(g2, { escalation: R.escalation, midYear: false }, "npv", "sameFlex").best;
     assert.equal(b2.panels, R.panels, "same 27 panels");
     assert.equal(b2.batteries, R.batteries, "same 1 battery");
     near(b2.npv, R.npv, 0.6, "and the prototype's NPV to the dollar");

@@ -1975,6 +1975,15 @@ const DEFAULTS = {
   inverterYear: 12,
   inverterPerW: 0.15,
   resaleValue: 0,            // home value credited at the horizon
+  // Bills, savings and loan payments arrive through the year, not on 31 December,
+  // so every year's flows are dated mid-year (the upfront price is day one).  Booking
+  // them at year end would credit a borrower with a year of market return on money
+  // already paid out and make a dear short loan look cheaper than cash.
+  midYear: true,
+  // Starting cash both wealth arms begin from.  0 means this system's own cash
+  // price; the optimiser sets one pool for the whole grid (see priceGrid) so wealth
+  // at the horizon is comparable across systems.
+  cashPool: 0,
   financing: {
     mode: "cash",                                                    // "cash"|"loan"|"lease"
     loan: { sharePct: 1.0, apr: 0.0699, termYears: 15, dealerFeePct: 0.0 },
@@ -2034,19 +2043,30 @@ function effectiveDiscount(f) {
   return 0;
 }
 
-function npvOf(cf, rate) {
+/**
+ * When each year's cash flow is dated, in years from install: [0, 0.5, 1.5, ...]
+ * under the mid-year convention, [0, 1, 2, ...] at year end.
+ */
+function flowTimes(H, midYear = true) {
+  const t = [0];
+  for (let y = 1; y <= H; y++) t.push(midYear ? y - 0.5 : y);
+  return t;
+}
+
+/** Present value of `cf` at `rate`; `times` dates each entry (default: year end). */
+function npvOf(cf, rate, times) {
   let v = 0;
-  for (let y = 0; y < cf.length; y++) v += cf[y] / Math.pow(1 + rate, y);
+  for (let y = 0; y < cf.length; y++) v += cf[y] / Math.pow(1 + rate, times ? times[y] : y);
   return v;
 }
 
 /** Bisection IRR on a cash-flow array starting at year 0. Null if it never crosses. */
-function irrOf(cf) {
+function irrOf(cf, times) {
   let lo = -0.9, hi = 3.0;
-  let flo = npvOf(cf, lo), fhi = npvOf(cf, hi);
+  let flo = npvOf(cf, lo, times), fhi = npvOf(cf, hi, times);
   if (!isFinite(flo) || !isFinite(fhi) || flo * fhi > 0) return null;
   for (let i = 0; i < 200; i++) {
-    const mid = (lo + hi) / 2, fm = npvOf(cf, mid);
+    const mid = (lo + hi) / 2, fm = npvOf(cf, mid, times);
     if (flo * fm <= 0) { hi = mid; fhi = fm; } else { lo = mid; flo = fm; }
   }
   return (lo + hi) / 2;
@@ -2133,6 +2153,7 @@ function evaluate(sim, f) {
   const netCost = isLease ? gross : Math.max(0, discounted - itc - sgip - rebates);
 
   const H = Math.max(1, Math.round(f.horizon));
+  const times = flowTimes(H, f.midYear !== false);
 
   // ----------------------------------------------------------------- financing
   const pay = new Array(H + 1).fill(0);
@@ -2210,17 +2231,17 @@ function evaluate(sim, f) {
   let run = 0, drun = 0;
   for (let y = 0; y <= H; y++) {
     run += cf[y]; cum.push(run);
-    drun += cf[y] / Math.pow(1 + f.investReturn, y); dcum.push(drun);
+    drun += cf[y] / Math.pow(1 + f.investReturn, times[y]); dcum.push(drun);
   }
 
-  const npv = npvOf(cf, f.investReturn);
+  const npv = npvOf(cf, f.investReturn, times);
   // IRR is the return on an investment, so it needs one: the first money to move
   // must be an outlay.  A stream that starts positive (a loan whose payments sit
   // below the savings from year one) and only dips negative at a battery
   // replacement decades later still has a sign change, and bisection would
   // dutifully return a deeply negative "rate" that describes nothing.
   const firstMove = cf.find((v) => Math.abs(v) > 1e-9);
-  const irr = firstMove !== undefined && firstMove < 0 ? irrOf(cf) : null;
+  const irr = firstMove !== undefined && firstMove < 0 ? irrOf(cf, times) : null;
 
   // The asset on its own, before financing.  "Pays for itself" is the year the
   // system's cumulative earnings (netSav) have covered everything it will ever
@@ -2236,36 +2257,39 @@ function evaluate(sim, f) {
   for (let y = 1; y <= H; y++) totalCost += pay[y];
   const pb = [-totalCost], dpb = [-upfront];
   let dTotal = upfront;
-  for (let y = 1; y <= H; y++) dTotal += pay[y] / Math.pow(1 + f.investReturn, y);
+  for (let y = 1; y <= H; y++) dTotal += pay[y] / Math.pow(1 + f.investReturn, times[y]);
   dpb[0] = -dTotal;
   for (let y = 1; y <= H; y++) {
     pb.push(pb[y - 1] + netSav[y]);
-    dpb.push(dpb[y - 1] + netSav[y] / Math.pow(1 + f.investReturn, y));
+    dpb.push(dpb[y - 1] + netSav[y] / Math.pow(1 + f.investReturn, times[y]));
   }
   const payback = totalCost > 0 ? crossing(pb) : 0;
   const discountedPayback = dTotal > 0 ? crossing(dpb) : 0;
-  const projectIrr = netCost > 0 ? irrOf([-netCost].concat(netSav.slice(1))) : null;
+  const projectIrr = netCost > 0 ? irrOf([-netCost].concat(netSav.slice(1)), times) : null;
 
   // "Same cash in the market" comparison, stated as two end-of-horizon numbers.
-  // Both arms start from the same cash: what buying the system outright costs
-  // (`netCost`; the sticker price under a lease, where nothing is bought).  The
-  // market arm leaves all of it invested.  The system arm spends `upfront` of it
-  // - all of it for cash, the down payment for a loan, nothing for a lease -
-  // keeps the rest invested, and reinvests every year's net cash flow (savings
-  // less O&M, replacements and any loan or lease payment) at the same return.
-  // Counting only the cash flows would forget the borrower's still-invested
-  // principal and make a cheap loan look worse than paying cash.  The identity
-  // wealthSystem - wealthInvest = NPV x (1 + r)^H holds in every mode.
-  const cashRef = netCost;
+  // Both arms start from the same pool of cash: `cashPool` when the caller sets one
+  // (the optimiser uses the dearest system's price for the whole grid), otherwise
+  // what buying this system outright costs (`netCost`; the sticker price under a
+  // lease, where nothing is bought).  The market arm leaves all of it invested.
+  // The system arm spends `upfront` of it - all the price for cash, the down
+  // payment for a loan, nothing for a lease - keeps the rest invested, and
+  // reinvests every year's net cash flow (savings less O&M, replacements and any
+  // loan or lease payment) at the same return from the day it arrives.  Counting
+  // only the cash flows would forget the borrower's still-invested principal and
+  // make a cheap loan look worse than paying cash.  The identity
+  // wealthSystem - wealthInvest = NPV x (1 + r)^H holds in every mode and for any
+  // pool, which is what rebase() leans on.
+  const cashRef = f.cashPool > 0 ? f.cashPool : netCost;
   const wealthInvest = cashRef * Math.pow(1 + f.investReturn, H);
   let wealthSystem = (cashRef - upfront) * Math.pow(1 + f.investReturn, H);
-  for (let y = 1; y <= H; y++) wealthSystem += cf[y] * Math.pow(1 + f.investReturn, H - y);
+  for (let y = 1; y <= H; y++) wealthSystem += cf[y] * Math.pow(1 + f.investReturn, H - times[y]);
 
   // LCOE over PV generated (storage cost included - it is part of what you bought).
   let costPV = upfront, kwhPV = 0;
   for (let y = 1; y <= H; y++) {
-    costPV += (om[y] + extras[y] + payments[y]) / Math.pow(1 + f.discountRate, y);
-    kwhPV += prod[y] / Math.pow(1 + f.discountRate, y);
+    costPV += (om[y] + extras[y] + payments[y]) / Math.pow(1 + f.discountRate, times[y]);
+    kwhPV += prod[y] / Math.pow(1 + f.discountRate, times[y]);
   }
   const lcoe = kwhPV > 0 ? costPV / kwhPV : null;
 
@@ -2274,7 +2298,7 @@ function evaluate(sim, f) {
   // same sum with savings = 0, which is how "min lifetime cost" stays comparable.
   let lifetime = upfront, lifetimeNoSystem = 0;
   for (let y = 1; y <= H; y++) {
-    const escY = Math.pow(1 + f.escalation, y - 1), dis = Math.pow(1 + f.discountRate, y);
+    const escY = Math.pow(1 + f.escalation, y - 1), dis = Math.pow(1 + f.discountRate, times[y]);
     // The with-system bill in year y is today's bill escalated, less that year's
     // saving - which already carries the escalation split (import at retail,
     // export locked) and the degradation blend, so lifetime cost and NPV agree
@@ -2302,7 +2326,7 @@ function evaluate(sim, f) {
     effectiveCostPerW: f.costPerW * (1 - disc), effectiveCostPerKwh: f.costPerKwh * (1 - disc),
     cashflows: cf, savingsByYear: savings, omByYear: om, extrasByYear: extras,
     paymentsByYear: payments,
-    cumulative: cum, discountedCumulative: dcum,
+    cumulative: cum, discountedCumulative: dcum, flowTimes: times,
     npv, irr, projectIrr,
     payback, discountedPayback, totalCost,
     // When the household's own running cash turns positive (0 = from day one).
@@ -2322,6 +2346,23 @@ function evaluate(sim, f) {
     firstYearPayment, firstYearMonthlyOutlay, currentMonthlyBill,
     monthlyOutlayDelta: firstYearMonthlyOutlay - currentMonthlyBill,
   };
+}
+
+/**
+ * Restate an evaluate() result's wealth arms from a different pool of starting cash,
+ * in place.  Only the two absolute numbers move; their gap is NPV compounded to the
+ * horizon whatever the pool, so nothing else needs recomputing.  priceGrid() uses it
+ * to give every cell in a sweep the same pool - the dearest system's cash price - so
+ * "wealth at the horizon" is comparable across cells instead of quietly handing a
+ * bigger system a bigger pool and reading "more wealth" for that alone.
+ */
+function rebase(result, pool) {
+  const K = Math.pow(1 + result.inputs.investReturn, result.horizon);
+  result.cashRef = pool;
+  result.wealthInvest = pool * K;
+  result.wealthDelta = result.npv * K;
+  result.wealthSystem = result.wealthInvest + result.wealthDelta;
+  return result;
 }
 
 /**
@@ -2354,8 +2395,8 @@ function breakEven(sim, f, key) {
   return Math.abs(y1) <= Math.abs(slope) * 1e-6 ? x1 : null;
 }
 
-const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount,
-                       npvOf, irrOf, crossing, loanPayment, amortize, DEFAULTS };
+const SolarFinance = { evaluate, breakEven, rebase, withDefaults, effectiveDiscount,
+                       npvOf, irrOf, flowTimes, crossing, loanPayment, amortize, DEFAULTS };
 var __default = SolarFinance;
 
 return __default;
@@ -2572,6 +2613,14 @@ function priceGrid(grid, finance, objective, basis) {
       finance: fin,
     };
   });
+  // One pool of starting cash for the whole grid - the dearest system's cash price -
+  // so wealth at the horizon compares like with like.  A bigger system then shows
+  // more wealth only when it earns more NPV, not because it put more money to work.
+  const cashPool = cells.reduce((m, c) => Math.max(m, c.netCost || 0), 0);
+  for (const c of cells) {
+    Finance.rebase(c.finance, cashPool);
+    c.wealthSystem = c.finance.wealthSystem; c.wealthInvest = c.finance.wealthInvest;
+  }
   let best = null;
   const better = OBJECTIVES[obj].better;
   cells.forEach(function (c) {
@@ -2581,7 +2630,7 @@ function priceGrid(grid, finance, objective, basis) {
   // Doing nothing still wins if every real option destroys value.
   const doNothing = cells.find((c) => c.panels === 0 && c.batteries === 0);
   if (best && best.npv <= 0 && obj === "npv") best.beatenByDoingNothing = true;
-  return { cells, best, doNothing,
+  return { cells, best, doNothing, cashPool,
            panelList: grid.panelList, battList: grid.battList, planes: grid.planes,
            baseline, objective: obj, basis: asRec ? "asRecorded" : "sameFlex" };
 }

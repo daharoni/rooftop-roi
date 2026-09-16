@@ -380,6 +380,9 @@ input[type="number"], input[type="date"] { font-family: var(--mono); font-varian
 .tile .k { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
 .tile .v { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
 .tile .d { font-size: 11px; color: var(--ink-2); }
+/* the figures that rank systems against each other, as opposed to describing this one */
+.tile.key { box-shadow: inset 3px 0 0 var(--accent); }
+.tile.key .k { color: var(--accent); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
 .chip-action {

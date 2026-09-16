@@ -26,10 +26,31 @@ export function destroyAll() {
   charts.clear();
 }
 
-/** Draw into the canvas with this id, replacing whatever was there. */
+/**
+ * Draw into the canvas with this id.  A chart already on that canvas is updated
+ * in place, so Chart.js animates each line from where it was to where it now
+ * belongs and a knob sweep reads as the lines sliding, not re-rising from the
+ * axis on every render.  A fresh canvas (first paint, or a tab rebuilt) gets a
+ * new chart and the one-time rise.
+ */
 export function draw(id, config) {
   const node = $(id);
   if (!node || typeof Chart === "undefined") return null;
+  const prev = charts.get(id);
+  if (prev && prev.canvas === node && prev.config.type === config.type) {
+    prev.data.labels = config.data.labels;
+    const ds = prev.data.datasets, next = config.data.datasets;
+    ds.length = Math.min(ds.length, next.length);
+    next.forEach((d, i) => {
+      if (!ds[i]) { ds.push(d); return; }
+      // Keep the dataset object so the transition starts from its current values.
+      for (const k of Object.keys(ds[i])) if (!(k in d)) delete ds[i][k];
+      Object.assign(ds[i], d);
+    });
+    prev.options = config.options;
+    prev.update();
+    return prev;
+  }
   destroyChart(id);
   const chart = new Chart(node.getContext("2d"), config);
   charts.set(id, chart);

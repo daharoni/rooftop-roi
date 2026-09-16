@@ -69,7 +69,8 @@ export function summaryText(state, ctx) {
     + (mode === "loan" ? ` vs ${fmtPct(state.fin.financing.loan.apr, 2)} loan APR` : ""));
   L.push(`         pays for itself    ${fmtYears(cell.payback)} (discounted ${fmtYears(cell.discountedPayback)})`
     + (mode !== "cash" ? `, cash-positive ${cell.cashFlowPayback === 0 ? "from day one" : "after " + fmtYears(cell.cashFlowPayback)}` : ""));
-  L.push(`         wealth at ${state.fin.horizon} yr   system ${fmtMoney(f.wealthSystem)}  vs  invested ${fmtMoney(f.wealthInvest)}`);
+  L.push(`         wealth at ${state.fin.horizon} yr   system ${fmtMoney(f.wealthSystem)}  vs  ${fmtMoney(f.wealthInvest)} `
+    + `leaving the ${fmtMoney(f.cashRef)} pool invested (same pool for every system compared)`);
   L.push(`         monthly outlay     ${fmtMoney(f.firstYearMonthlyOutlay)}/mo in year 1 `
     + `vs ${fmtMoney(f.currentMonthlyBill)}/mo today`);
   L.push(`         LCOE               ${fmtMoney(cell.lcoe, 3)}/kWh`);

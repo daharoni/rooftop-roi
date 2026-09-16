@@ -283,7 +283,13 @@ function renderMethod(state, ctx) {
       "Lease or PPA. No upfront cost, escalating annual payments, an optional buyout at the end, and no "
         + "ownership incentives — the third party keeps those. The savings still accrue to the household.",
       "NPV discounts the cash flows at the return you could have earned on the same money. Above zero means the "
-        + "roof beat the market.",
+        + "roof beat the market. The upfront price is paid on day one; bills, savings and loan or lease payments "
+        + "arrive through the year, so each year's flows are dated mid-year. Booking them at year end would credit "
+        + "a borrower with a year of market return on money already paid out.",
+      "Wealth at the horizon starts every system from the same pool of cash - the price of the dearest system in "
+        + "the search - so the number compares across systems. Its gap to leaving the pool invested is NPV "
+        + "compounded to the horizon. A bigger system can show more wealth at a lower IRR: more money at work, "
+        + "still beating the market.",
       "IRR is the project IRR: the return the system earns on its cash price, whoever pays it, so it means "
         + "the same thing under cash, a loan and a lease. Under a loan the number to beat is the APR. If savings "
         + "never repay the price there is no IRR and none is shown.",
