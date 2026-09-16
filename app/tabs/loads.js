@@ -11,21 +11,15 @@ import { el, clear, $ } from "../ui/dom.js";
 import { card, kv } from "../ui/blocks.js";
 import { fmtKwh, fmtNum, fmtPct, fmtHour } from "../ui/format.js";
 import { renderWeek } from "../charts/day.js";
+import * as K from "../ui/knobs.js";
 
 export const id = "loads";
 export const label = "Loads";
 
-export const PRESETS = {
-  ev2:  { kind: "ev", name: "Second EV", annualKwh: 3000, maxKW: 7.7, mode: "spread", window: [9, 16] },
-  pool: { kind: "pool", name: "Pool pump", annualKwh: 2400, maxKW: 1.5, mode: "spread", window: [10, 16] },
-  hpwh: { kind: "custom", name: "Heat-pump water heater", annualKwh: 1400, maxKW: 4.5, mode: "spread", window: [10, 16] },
-  laundry: { kind: "custom", name: "Laundry", annualKwh: 600, maxKW: 3, mode: "spread", window: [10, 17] },
-};
-
 export function rail(state) {
   return [
     { group: "The rest of the house", open: true, items: [
-      { path: "baseLoadScale", kind: "range", label: "Everything else, vs. today", min: 0.5, max: 2, step: 0.05, pct: 0,
+      { ...K.item.baseLoadScale(),
         note: "Scales the household load left after the flexible loads below are taken out — a bigger family, "
           + "a heat pump swap, a lighter year." },
     ] },
@@ -39,11 +33,7 @@ export function rail(state) {
         { v: "custom", t: "Something else" },
       ] },
     ] },
-    { group: "Comparison", open: true, items: [
-      { path: "ui.basis", kind: "select", label: "Compare the bill against", reason: "finance", opts: [
-        { v: "sameFlex", t: "No system, same load schedule" },
-        { v: "asRecorded", t: "Today's actual bill" }] },
-    ] },
+    { group: "Comparison", open: true, items: [K.item.basis()] },
   ];
 }
 
@@ -176,20 +166,22 @@ function loadCard(load, state, ctx) {
   ]);
 }
 
-function row(labelText, control) {
-  return el("div.ctl", {}, [el("div.ctl-head", {}, [el("label", { text: labelText })]), control]);
+/** One labelled control, with the figure it currently reads beside the label. */
+function row(labelText, control, valueNode) {
+  return el("div.ctl", {}, [
+    el("div.ctl-head", {}, [el("label", { text: labelText }), valueNode || null]),
+    control,
+  ]);
 }
 
 function slider(labelText, value, min, max, step, onInput, fmt) {
   const val = el("span.ctl-val", { text: fmt(value) });
-  return el("div.ctl", {}, [
-    el("div.ctl-head", {}, [el("label", { text: labelText }), val]),
-    el("input", {
-      type: "range", min, max, step, value,
-      "aria-label": labelText,
-      on: { input: (e) => { val.textContent = fmt(Number(e.target.value)); onInput(Number(e.target.value)); } },
-    }),
-  ]);
+  const input = el("input", {
+    type: "range", min, max, step, value,
+    "aria-label": labelText,
+    on: { input: (e) => { val.textContent = fmt(Number(e.target.value)); onInput(Number(e.target.value)); } },
+  });
+  return row(labelText, input, val);
 }
 
 function median(xs) {
@@ -197,4 +189,4 @@ function median(xs) {
   return s.length ? s[Math.floor(s.length / 2)] : 0;
 }
 
-export default { id, label, rail, mount, render, PRESETS };
+export default { id, label, rail, mount, render };

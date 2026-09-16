@@ -197,10 +197,9 @@ function renderHeadline(state, ctx, cell) {
   npvNode.textContent = fmtCompact(cell.npv);
   npvNode.style.color = cell.npv >= 0 ? T["good-text"] : T.critical;
 
-  const pill = $("hero-pill");
-  pill.className = "verdict-pill " + (cell.npv > 0 ? "pill-good" : cell.npv < 0 ? "pill-bad" : "pill-mid");
-  $("hero-pill-text").textContent = cell.npv > 0 ? "Beats investing the cash"
-    : cell.npv < 0 ? "Investing the cash wins" : "A wash";
+  const verdict = verdictFor(cell.npv);
+  $("hero-pill").className = "verdict-pill " + verdict.pill;
+  $("hero-pill-text").textContent = verdict.text;
 
   const mode = fin.financing && fin.financing.mode;
   $("hero-note").textContent =
@@ -212,30 +211,16 @@ function renderHeadline(state, ctx, cell) {
         + `buy and rises with your rates; ${fmtMoney(cell.exportRevenue)} is export credit, locked at today's ACC prices.`
       : "");
 
-  const upfront = mode === "cash"
-    ? { k: "Cash up front", v: fmtCompact(f.netCost), d: f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtCompact(f.gross)}` : "no incentive applied" }
-    : { k: mode === "lease" ? "Lease payment" : "Loan payment",
-        v: fmtMoney(f.monthlyPayment || (mode === "lease" ? fin.financing.lease.monthly : 0)) + "/mo",
-        d: mode === "lease"
-          ? `${fin.financing.lease.termYears} yr, ${fmtPct(fin.financing.lease.escalatorPct, 1)} escalator`
-          : `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr` };
-
   const list = [
     { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
     { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
-    upfront,
+    outlayTile(mode, fin, f),
     { k: "Savings, year 1", v: fmtMoney(cell.firstYearSavings ?? cell.savings),
       d: cell.exportRevenue > 0
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
         : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}` },
-    { k: "IRR", v: cell.irr === null || cell.irr === undefined ? "—" : fmtPct(cell.irr, 1),
-      d: cell.irr === null || cell.irr === undefined
-        ? (f.upfront === 0 ? "nothing paid up front" : "savings never repay the outlay")
-        : "vs " + fmtPct(fin.investReturn, 1) + " invested" },
-    { k: "Payback", v: f.upfront === 0 && cell.payback === 0 ? "day one" : fmtYears(cell.payback),
-      d: f.upfront === 0 && cell.payback === 0 ? "nothing paid up front"
-        : f.upfront === 0 ? "payments exceed savings until then"
-        : "discounted " + fmtYears(cell.discountedPayback) },
+    irrTile(cell, fin, f),
+    paybackTile(cell, f),
     { k: "Wealth at " + fin.horizon + " yr", v: fmtCompact(f.wealthSystem), d: "investing: " + fmtCompact(f.wealthInvest) },
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
@@ -259,6 +244,40 @@ function renderHeadline(state, ctx, cell) {
     note.appendChild(el("button.chip-action", { type: "button", text: "Back to the optimiser's pick",
       style: "font-size:11px;padding:2px 9px", on: { click: () => ctx.actions.clearOverride() } }));
   }
+}
+
+/** Above zero the roof won, below it the market did; zero is a real midpoint. */
+function verdictFor(npv) {
+  if (npv > 0) return { pill: "pill-good", text: "Beats investing the cash" };
+  if (npv < 0) return { pill: "pill-bad", text: "Investing the cash wins" };
+  return { pill: "pill-mid", text: "A wash" };
+}
+
+/** What the household actually hands over: a cheque, or a payment every month. */
+function outlayTile(mode, fin, f) {
+  if (mode === "cash") {
+    return { k: "Cash up front", v: fmtCompact(f.netCost),
+      d: f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtCompact(f.gross)}` : "no incentive applied" };
+  }
+  if (mode === "lease") {
+    return { k: "Lease payment", v: fmtMoney(f.monthlyPayment || fin.financing.lease.monthly) + "/mo",
+      d: `${fin.financing.lease.termYears} yr, ${fmtPct(fin.financing.lease.escalatorPct, 1)} escalator` };
+  }
+  return { k: "Loan payment", v: fmtMoney(f.monthlyPayment || 0) + "/mo",
+    d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr` };
+}
+
+/** With nothing paid up front the cash flow never changes sign, so there is no IRR. */
+function irrTile(cell, fin, f) {
+  const hasIrr = cell.irr !== null && cell.irr !== undefined;
+  if (hasIrr) return { k: "IRR", v: fmtPct(cell.irr, 1), d: "vs " + fmtPct(fin.investReturn, 1) + " invested" };
+  return { k: "IRR", v: "—", d: f.upfront === 0 ? "nothing paid up front" : "savings never repay the outlay" };
+}
+
+function paybackTile(cell, f) {
+  if (f.upfront === 0 && cell.payback === 0) return { k: "Payback", v: "day one", d: "nothing paid up front" };
+  if (f.upfront === 0) return { k: "Payback", v: fmtYears(cell.payback), d: "payments exceed savings until then" };
+  return { k: "Payback", v: fmtYears(cell.payback), d: "discounted " + fmtYears(cell.discountedPayback) };
 }
 
 // ------------------------------------------------------------ flexible loads

@@ -358,6 +358,27 @@ test("generic CSV: separate Date and Start Time columns also work", () => {
   assert.ok(ls.exportKwh && Math.abs(sum(ls.exportKwh) - 12) < 1e-9);
 });
 
+test("generic CSV: a preamble of identifying fields is dropped except the ZIP", () => {
+  const rows = [
+    "Customer Name,JANE Q CUSTOMER",
+    'Service Address,"1 Example Way, PASADENA, CA 91101"',
+    "Service Account,8009999999",
+    "Meter Number,55512345678",
+    "",
+    "Timestamp,kWh",
+  ];
+  for (let h = 0; h < 24; h++) rows.push(`2025-06-01T${pad2(h)}:00,1.000`);
+  const ls = GB.parse(rows.join("\n"));
+
+  assert.equal(ls.meta.source, "generic-csv");
+  assert.equal(ls.meta.nHours, 24);
+  assert.equal(ls.meta.zip, "91101", "the ZIP is the one header field worth keeping");
+  const blob = JSON.stringify(ls.meta).toUpperCase();
+  for (const secret of ["JANE Q CUSTOMER", "EXAMPLE WAY", "PASADENA", "8009999999", "55512345678"]) {
+    assert.ok(!blob.includes(secret), `meta leaked ${secret}`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 6. Gaps
 // ---------------------------------------------------------------------------

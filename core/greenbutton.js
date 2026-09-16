@@ -131,6 +131,36 @@ export function parseCsvRows(text, delim) {
   return rows;
 }
 
+/**
+ * Find a vendor CSV's header row: the first row within the first `limit` rows whose
+ * cleaned, lower-cased cells satisfy `matches`.  The utilities all bury their column
+ * header under a preamble of identifying fields, and every one of them is found this
+ * way, so the scan lives here rather than once per parser.
+ *
+ * Returns `{ hdr, cells }`, or null when no row matches.
+ */
+function findHeaderRow(rows, limit, matches) {
+  for (let i = 0; i < rows.length && i < limit; i++) {
+    const cells = rows[i].map((c) => clean(c).toLowerCase());
+    if (matches(cells)) return { hdr: i, cells };
+  }
+  return null;
+}
+
+/** Index of the first column whose name starts with `prefix`, or -1. */
+function colStarting(cells, prefix) {
+  return cells.findIndex((c) => c.startsWith(prefix));
+}
+
+/**
+ * The preamble above the column header, as one string for `findZip` to scan.
+ * This is the ONLY thing a parser does with those rows - they hold the customer
+ * name, service address and account number, and nothing but a ZIP is carried out.
+ */
+function headerBlock(rows, hdr) {
+  return rows.slice(0, hdr).map((r) => r.join(",")).join("\n");
+}
+
 const DELIMS = [",", ";", "\t", "|"];
 
 /** Pick the delimiter that yields the most consistent field count over the sample. */
@@ -141,9 +171,9 @@ export function sniffDelimiter(text) {
     const counts = sample.map((l) => l.split(d).length - 1).filter((c) => c > 0);
     if (counts.length < 2) continue;
     counts.sort((a, b) => a - b);
-    const mode = median(counts);
-    const agree = counts.filter((c) => c === mode).length;
-    const score = agree * mode;
+    const typical = median(counts);
+    const agree = counts.filter((c) => c === typical).length;
+    const score = agree * typical;
     if (score > bestScore) { bestScore = score; best = d; }
   }
   return best;
@@ -547,24 +577,19 @@ export function parseSceCsv(text, opts = {}) {
 export function parsePgeCsv(text, opts = {}) {
   const raw = stripBom(String(text));
   const rows = parseCsvRows(raw, ",");
-  let hdr = -1, col = null;
-  for (let i = 0; i < rows.length && i < 60; i++) {
-    const cells = rows[i].map((c) => clean(c).toLowerCase());
-    if (cells.includes("date") && cells.some((c) => c.startsWith("start time"))) {
-      hdr = i;
-      col = {
-        type: cells.indexOf("type"),
-        date: cells.indexOf("date"),
-        start: cells.findIndex((c) => c.startsWith("start time")),
-        end: cells.findIndex((c) => c.startsWith("end time")),
-        usage: cells.findIndex((c) => c.startsWith("usage")),
-      };
-      break;
-    }
-  }
-  if (hdr < 0 || col.usage < 0) throw new Error("PG&E CSV: no TYPE,DATE,START TIME,... header row found");
+  const found = findHeaderRow(rows, 60, (cells) =>
+    cells.includes("date") && cells.some((c) => c.startsWith("start time")));
+  const col = found && {
+    type: found.cells.indexOf("type"),
+    date: found.cells.indexOf("date"),
+    start: colStarting(found.cells, "start time"),
+    end: colStarting(found.cells, "end time"),
+    usage: colStarting(found.cells, "usage"),
+  };
+  if (!col || col.usage < 0) throw new Error("PG&E CSV: no TYPE,DATE,START TIME,... header row found");
+  const hdr = found.hdr;
 
-  const headerText = rows.slice(0, hdr).map((r) => r.join(",")).join("\n");
+  const headerText = headerBlock(rows, hdr);
   const intervals = [];
   let bad = 0, skippedGas = 0;
   for (let i = hdr + 1; i < rows.length; i++) {
@@ -622,25 +647,20 @@ export function parsePgeCsv(text, opts = {}) {
 export function parseSdgeCsv(text, opts = {}) {
   const raw = stripBom(String(text));
   const rows = parseCsvRows(raw, ",");
-  let hdr = -1, col = null;
-  for (let i = 0; i < rows.length && i < 80; i++) {
-    const cells = rows[i].map((c) => clean(c).toLowerCase());
-    if (cells.includes("date") && cells.some((c) => c.startsWith("start time")) &&
-        cells.some((c) => c.startsWith("consumption"))) {
-      hdr = i;
-      col = {
-        date: cells.indexOf("date"),
-        start: cells.findIndex((c) => c.startsWith("start time")),
-        dur: cells.findIndex((c) => c.startsWith("duration")),
-        cons: cells.findIndex((c) => c.startsWith("consumption")),
-        gen: cells.findIndex((c) => c.startsWith("generation")),
-      };
-      break;
-    }
-  }
-  if (hdr < 0) throw new Error("SDG&E CSV: no Meter Number,Date,Start Time,... header row found");
+  const found = findHeaderRow(rows, 80, (cells) =>
+    cells.includes("date") && cells.some((c) => c.startsWith("start time")) &&
+    cells.some((c) => c.startsWith("consumption")));
+  if (!found) throw new Error("SDG&E CSV: no Meter Number,Date,Start Time,... header row found");
+  const { hdr, cells } = found;
+  const col = {
+    date: cells.indexOf("date"),
+    start: colStarting(cells, "start time"),
+    dur: colStarting(cells, "duration"),
+    cons: colStarting(cells, "consumption"),
+    gen: colStarting(cells, "generation"),
+  };
 
-  const headerText = rows.slice(0, hdr).map((r) => r.join(",")).join("\n");
+  const headerText = headerBlock(rows, hdr);
   const intervals = [];
   let bad = 0;
   for (let i = hdr + 1; i < rows.length; i++) {
@@ -654,8 +674,7 @@ export function parseSdgeCsv(text, opts = {}) {
     if (col.dur >= 0) {
       const s = clean(r[col.dur]);
       const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
-      if (m) dur = +m[1] * 60 + +m[2];
-      else if (num(s)) dur = num(s);
+      dur = m ? +m[1] * 60 + +m[2] : num(s);
       if (!(dur > 0)) dur = 60;
     }
     const gen = col.gen >= 0 ? (num(r[col.gen]) || 0) : 0;
@@ -819,11 +838,12 @@ export function parseEspiXml(text, opts = {}) {
   const soleRt = rts.length === 1 ? rtInfo(rts[0].node) : null;
 
   const intervals = [];
-  let cur = soleRt || { flow: 1, pot: 0, uom: 72 };
+  // A sole ReadingType governs the whole feed, including blocks that precede it, so it is
+  // pinned here and never replaced; otherwise each one governs the blocks that follow it.
+  let rt = soleRt || { flow: 1, pot: 0, uom: 72 };
   let sawExport = false;
   for (const o of ordered) {
-    if (o.kind === "rt") { if (!soleRt) cur = rtInfo(o.node); continue; }
-    const rt = soleRt || cur;
+    if (o.kind === "rt") { if (!soleRt) rt = rtInfo(o.node); continue; }
     for (const rd of findAll(o.node, "intervalreading")) {
       const tp = findAll(rd, "timeperiod")[0] || rd;
       const start = +(firstText(tp, "start") || NaN);
@@ -999,9 +1019,11 @@ export function parseGenericCsv(text, opts = {}) {
     }
     prev = p;
     const exp = expCol >= 0 ? (num(r[expCol]) || 0) : 0;
+    // With no export column a negative value IS the export (a NEM meter writes received
+    // energy as negative delivered); with one, a stray negative is simply floored at zero.
     intervals.push({
       start: p, durationMinutes: dur || 60,
-      kwh: v > 0 || expCol >= 0 ? Math.max(0, v) : 0,
+      kwh: Math.max(0, v),
       exportKwh: exp || (expCol < 0 && v < 0 ? -v : 0),
     });
   }
@@ -1079,11 +1101,9 @@ export function mergeLoadSets(sets) {
       const p = parseStamp(ls.ts[i]);
       const k = stampKeyHour(p);
       if (slots.has(k)) overlap++;
-      const e = ls.exportKwh ? ls.exportKwh[i] : 0;
-      if (e) anyExport = true;
-      slots.set(k, { kwh: ls.kwh[i], exp: e || 0, n: 1 });
+      slots.set(k, { kwh: ls.kwh[i], exp: (ls.exportKwh ? ls.exportKwh[i] : 0) || 0, n: 1 });
     }
-    if (ls.exportKwh) anyExport = true;
+    if (ls.exportKwh) anyExport = true;      // subsumes every per-hour value in this set
   }
 
   const intervalMinutes = Math.min(...ordered.map((s) => s.meta.intervalMinutes || 60));

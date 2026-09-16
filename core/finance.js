@@ -150,9 +150,9 @@ export function loanPayment(principal, apr, months) {
 }
 
 /**
- * Monthly amortization summed into annual rows.
- * Returns { payment /*monthly*​/, rows: [{ year, payment, interest, principal, balance }],
- *           totalInterest, termYears }.
+ * Monthly amortization summed into annual rows.  Returns the level monthly `payment`,
+ * one `rows` entry per year { year, payment, interest, principal, balance }, plus
+ * `totalInterest`, `termYears` and the `principal` borrowed.
  * The final month absorbs rounding so the balance lands exactly on zero.
  */
 export function amortize(principal, apr, termYears) {
@@ -224,9 +224,10 @@ export function evaluate(sim, f) {
     schedule = amort.rows;
     for (const r of schedule) if (r.year <= H) pay[r.year] = r.payment;
     // A term longer than the analysis horizon leaves a debt: pay it off at the horizon
-    // so the comparison is like-for-like with cash.
+    // so the comparison is like-for-like with cash.  A term that ends on or before the
+    // horizon has already amortised to zero by then, so this adds nothing there.
     const atH = schedule.find((r) => r.year === H);
-    if (schedule.length > H && atH) pay[H] += atH.balance;
+    if (atH) pay[H] += atH.balance;
   } else if (isLease) {
     const L = f.financing.lease;
     const term = Math.min(L.termYears, H);
@@ -244,9 +245,14 @@ export function evaluate(sim, f) {
   }
 
   // How much of the saving is attributable to panels vs. pack, used to blend the
-  // two degradation rates.  Cost share is a crude but stable proxy.
-  let wS = gross > 0 ? solarCost / Math.max(1e-9, solarCost + storageCost) : 1;
-  if (!isFinite(wS)) wS = 1;
+  // two degradation rates.  Cost share is a crude but stable proxy.  With no hardware
+  // cost to divide - a price knob driven to zero, which is exactly what breakEven()
+  // does - fall back to what is physically installed, so a zero-priced array still
+  // degrades at the panel rate and never picks up the pack's replacement reset.
+  const hardwareCost = solarCost + storageCost;
+  let wS = 1;
+  if (hardwareCost > 0) wS = solarCost / hardwareCost;
+  else if (watts <= 0 && sim.battKWhTotal > 0) wS = 0;      // a pack and no panels
   const wB = 1 - wS;
 
   const cf = [-upfront], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
@@ -324,6 +330,13 @@ export function evaluate(sim, f) {
     lifetimeNoSystem += (sim.baselineBill * escY) / dis;
   }
 
+  // What the customer writes a cheque for each month: the loan's level payment, or a
+  // lease's first-year payment spread over twelve (which is the quoted monthly unless
+  // a buyout lands in year 1).  Cash buys nothing on instalment.
+  let monthlyPayment = 0;
+  if (mode === "loan") monthlyPayment = amort ? amort.payment : 0;
+  else if (isLease) monthlyPayment = (pay[1] || 0) / 12;
+
   const firstYearPayment = pay[1] || 0;
   const firstYearMonthlyOutlay = firstYearPayment / 12 + (sim.bill || 0) / 12;
   const currentMonthlyBill = (sim.baselineBill || 0) / 12;
@@ -344,10 +357,8 @@ export function evaluate(sim, f) {
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,
     // financing
-    financingMode: mode, upfront, downPayment: mode === "loan" ? upfront : (mode === "cash" ? netCost : 0),
-    loanPrincipal: principal, dealerFee,
-    monthlyPayment: mode === "loan" ? (amort ? amort.payment : 0)
-                  : isLease ? (pay[1] || 0) / 12 : 0,
+    financingMode: mode, upfront, downPayment: isLease ? 0 : upfront,
+    loanPrincipal: principal, dealerFee, monthlyPayment,
     totalInterest: amort ? amort.totalInterest : 0,
     financingSchedule: schedule,
     firstYearPayment, firstYearMonthlyOutlay, currentMonthlyBill,
@@ -356,16 +367,33 @@ export function evaluate(sim, f) {
 }
 
 /**
- * Price at which NPV crosses zero, holding everything else fixed.  NPV is exactly
- * linear in $/W and $/kWh (both scale the year-0 outlay and nothing else), so two
- * evaluations pin the line - no search needed.
+ * Price at which NPV crosses zero, holding everything else fixed.
+ *
+ * NPV is very nearly linear in $/W and $/kWh - both scale the year-0 outlay and
+ * nothing else - but not exactly: the degradation blend weights panels against pack
+ * by their COST share, so moving one price also tilts the savings stream a little.
+ * On a system carrying both, the straight two-point line misses by thousands of
+ * dollars, so it is used only as the first guess and secant steps land on the root.
+ * Returns null when there is no root to find: a price NPV does not respond to has no
+ * break-even, and under a lease the sticker price is not what the customer pays.
  */
 export function breakEven(sim, f, key) {
-  const a = evaluate(sim, Object.assign({}, f, { [key]: 0 })).npv;
-  const b = evaluate(sim, Object.assign({}, f, { [key]: 1 })).npv;
-  const slope = b - a;
+  const npvAt = (price) => evaluate(sim, Object.assign({}, f, { [key]: price })).npv;
+  const at0 = npvAt(0), at1 = npvAt(1);
+  const slope = at1 - at0;
   if (Math.abs(slope) < 1e-9) return null;
-  return -a / slope;
+  let x0 = 0, y0 = at0;
+  let x1 = -at0 / slope, y1 = npvAt(x1);
+  for (let i = 0; i < 40 && Math.abs(y1) > 1e-6; i++) {
+    const step = y1 * (x1 - x0) / (y1 - y0);
+    if (!isFinite(step) || step === 0) break;
+    x0 = x1; y0 = y1;
+    x1 -= step; y1 = npvAt(x1);
+  }
+  // Only report a price that really does zero the NPV.  `slope` is dollars of NPV per
+  // dollar of price, so this asks that the answer be right to a millionth of a $/W -
+  // and refuses the huge number the secant wanders to when NPV is all but flat.
+  return Math.abs(y1) <= Math.abs(slope) * 1e-6 ? x1 : null;
 }
 
 const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount,

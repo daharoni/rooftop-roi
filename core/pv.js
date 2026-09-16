@@ -62,6 +62,8 @@ export const BIAS_CORRECTIONS = {
   },
 };
 
+/** The "bias correction is off" factors. Copied out on every return so no caller can
+ *  mutate the disabled state out from under every other caller. */
 const NO_BIAS = new Float64Array(12).fill(1);
 
 /**
@@ -70,7 +72,7 @@ const NO_BIAS = new Float64Array(12).fill(1);
  */
 export function resolveBias(biasCorrection, site = {}) {
   if (biasCorrection == null || biasCorrection === false || biasCorrection === "none")
-    return { factors: NO_BIAS, id: "none" };
+    return { factors: Float64Array.from(NO_BIAS), id: "none" };
   if (Array.isArray(biasCorrection) || ArrayBuffer.isView(biasCorrection)) {
     if (biasCorrection.length !== 12) throw new RangeError("biasCorrection array must have 12 entries");
     return { factors: Float64Array.from(biasCorrection), id: "custom" };
@@ -89,7 +91,7 @@ export function resolveBias(biasCorrection, site = {}) {
       )
         return { factors: Float64Array.from(entry.factors), id: entry.id };
     }
-    return { factors: NO_BIAS, id: "none" };
+    return { factors: Float64Array.from(NO_BIAS), id: "none" };
   }
   const entry = BIAS_CORRECTIONS[biasCorrection];
   if (!entry) throw new RangeError(`Unknown biasCorrection "${biasCorrection}"`);
@@ -99,6 +101,9 @@ export function resolveBias(biasCorrection, site = {}) {
 // ---------------------------------------------------------------------------
 // Solar position (NOAA algorithm, as in the reference script)
 // ---------------------------------------------------------------------------
+
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const mod360 = (v) => ((v % 360) + 360) % 360;
 
 /** Julian day for a UTC instant given as epoch milliseconds. */
 export function julianDay(utcMs) {
@@ -184,8 +189,6 @@ export function solarPosition(utcMs, lat, lon) {
   return { elevation: elevApp, azimuth: az, e0n, declination: decl, zenith: zen, hourAngle: ha };
 }
 
-const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-const mod360 = (v) => ((v % 360) + 360) % 360;
 
 // ---------------------------------------------------------------------------
 // Transposition + module
@@ -216,7 +219,7 @@ export function poaHdkr(ghi, dni, dhi, elevation, solarAz, e0n, tilt, azimuth, o
   let beam = Math.max(0, dni * cosAoi);
   const ai = e0n > 0 ? Math.min(1, dni / e0n) : 0;
   const bh = dni * Math.cos(zenR);
-  const f = ghi > 0 ? Math.sqrt(Math.max(0, bh) / ghi) : 0;
+  const f = Math.sqrt(Math.max(0, bh) / ghi);   // ghi > 0: the early return guarantees it
   const iso = dhi * (1 - ai) * ((1 + Math.cos(tR)) / 2) * (1 + f * Math.sin(tR / 2) ** 3);
   let circ = dhi * ai * rb;
   const grnd = ghi * albedo * ((1 - Math.cos(tR)) / 2);

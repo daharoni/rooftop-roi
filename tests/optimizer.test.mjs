@@ -41,6 +41,23 @@ test("each objective selects its own extremum", () => {
        "lowest-lifetime-cost objective selects the minimum cost cell");
 });
 
+test("highest IRR does not prefer a money-loser when nothing is paid up front", () => {
+  // A null IRR means opposite things at the two ends.  With no year-0 outlay a cell
+  // that is cash positive from year one has no rate of return to report (nothing was
+  // invested); a cell whose lease payment outruns the saving has one, and it is
+  // negative.  Ranking every null as "worst" handed the objective the loser.
+  const lease = { financing: { mode: "lease",
+    lease: { monthly: 150, escalatorPct: 0.029, termYears: 25, buyout: 0 } } };
+  const byIrr = Optimizer.priceGrid(SMALL, lease, "irr", "sameFlex");
+  const byNpv = Optimizer.priceGrid(SMALL, lease, "npv", "sameFlex");
+  assert.ok(byIrr.cells.some((c) => typeof c.irr === "number" && c.irr < 0),
+            "the grid really does contain cells with a negative IRR");
+  assert.ok(byIrr.best.npv > 0,
+            `the winner makes money (NPV ${Math.round(byIrr.best.npv)})`);
+  assert.equal(byIrr.best.panels, byNpv.best.panels,
+               "with no rate of return to rank by, NPV decides");
+});
+
 test("the do-nothing cell, and when it wins", () => {
   const priced = Optimizer.priceGrid(SMALL, {}, "npv", "sameFlex");
   assert.equal(Optimizer.findCell(priced, 0, 0).netCost, 0, "the do-nothing cell costs nothing");

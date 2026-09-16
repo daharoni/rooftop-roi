@@ -57,6 +57,42 @@ test("cash: escalation, degradation, incentives and break-even", () => {
             "zero savings -> no IRR, no payback (not a fake number)");
 });
 
+test("break-even prices really are break-even, panels and pack together", () => {
+  // The degradation blend weights panels against pack by COST share, so NPV is not
+  // quite linear in either price: the straight line through $0/W and $1/W lands
+  // thousands of dollars from the root on a system that carries both.
+  const sim = { savings: 3500, importSavings: 2800, exportRevenue: 700, bill: 700,
+                baselineBill: 4200, pvKwh: 14000, kwdc: 9.2, battKWhTotal: 10 };
+  const f = { costPerW: 3, costPerKwh: 1000, incentiveMode: "none", horizon: 25 };
+  for (const key of ["costPerW", "costPerKwh"]) {
+    const be = Finance.breakEven(sim, f, key);
+    assert.ok(be > 0, `the ${key} break-even is a real price (${be.toFixed(2)})`);
+    near(Finance.evaluate(sim, { ...f, [key]: be }).npv, 0, 1e-6,
+         `NPV really is zero at the ${key} break-even`);
+  }
+  assert.equal(Finance.breakEven({ ...sim, kwdc: 0, battKWhTotal: 0 }, f, "costPerW"), null,
+               "a price NPV does not respond to has no break-even");
+  const leased = { ...f, financing: { mode: "lease",
+    lease: { monthly: 150, escalatorPct: 0.029, termYears: 25, buyout: 0 } } };
+  assert.equal(Finance.breakEven(sim, leased, "costPerW"), null,
+               "and neither does a lease: the sticker price is not what the customer pays");
+});
+
+test("a zero-priced array degrades like panels, not like a battery", () => {
+  // Reachable from breakEven(), which evaluates at $0/W: with an install adder the
+  // hardware cost is zero while `gross` is not, and the cost-share blend used to hand
+  // the whole weight to the pack - degrading a battery-less system at the battery
+  // rate, complete with the reset at the replacement year.
+  const sim = { savings: 1000, bill: 0, baselineBill: 1000, pvKwh: 1000, kwdc: 5, battKWhTotal: 0 };
+  const f = { adder: 5000, incentiveMode: "none", horizon: 25, escalation: 0, investReturn: 0.07,
+              panelDeg: 0.005, battDeg: 0.02, battReplYear: 20, omPerYear: 0, inverterYear: 99 };
+  const free = Finance.evaluate(sim, { ...f, costPerW: 0 });
+  near(free.savingsByYear[25], 1000 * Math.pow(1 - 0.005, 24), 1e-9,
+       "year-25 savings follow the panel degradation rate");
+  near(free.savingsByYear[25], Finance.evaluate(sim, { ...f, costPerW: 1e-9 }).savingsByYear[25],
+       1e-6, "and a price falling to zero is not a discontinuity");
+});
+
 test("incentive modes", () => {
   const sim = { ...SIM, kwdc: 10 };
   const base = { costPerW: 3, adder: 0, taxCreditPct: 0, sgipPerKwh: 0, rebates: 0 };

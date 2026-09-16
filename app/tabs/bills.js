@@ -172,7 +172,7 @@ export function render(state, ctx) {
   if (ctx.tornado) renderTornado({ tornado: ctx.tornado });
   if (cell) renderBreakEven(state, ctx, cell);
 
-  renderReplay(ctx);
+  renderReplay(state, ctx);
 
   const climate = $("climate-note");
   if (climate) {
@@ -190,8 +190,11 @@ function renderBreakEven(state, ctx, cell) {
   clear(node);
 
   const disc = ctx.effectiveDiscount || 0;
+  // null: the price does not decide the answer (under a lease the sticker price
+  // barely moves NPV); negative: no positive price gets NPV to zero.
   const pair = (v, dp, unit) => {
-    if (v === null || v === undefined || v < 0) return "any price loses";
+    if (v === null || v === undefined) return "price does not decide it";
+    if (v < 0) return "any price loses";
     return `$${v.toFixed(dp)}${unit} sticker` + (disc > 0 ? ` · $${(v * (1 - disc)).toFixed(dp)}${unit} net` : "");
   };
   const rows = [
@@ -209,7 +212,7 @@ function renderBreakEven(state, ctx, cell) {
   }
 }
 
-function renderReplay(ctx) {
+function renderReplay(state, ctx) {
   const table = $("t-validate");
   const note = $("validate-note");
   if (!table) return;
@@ -223,7 +226,9 @@ function renderReplay(ctx) {
     return;
   }
 
-  const actual = v.actual || {};
+  // The bill total is read live, so typing it after the replay updates the gap
+  // without a second round-trip; the kWh splits stay as snapshotted.
+  const actual = Object.assign({}, v.actual || {}, { total: Number(state.ui.replayActual) || null });
   const row = (name, model, act, fmt) => {
     const diff = act === null || act === undefined ? null : model - act;
     return el("tr", {}, [
@@ -248,23 +253,32 @@ function renderReplay(ctx) {
     row("Total charges", v.total, actual.total, (x) => fmtMoney(x, 2)),
   ].filter(Boolean)));
 
-  if (note) {
-    const on = `Replayed on ${ctx.planLabel || v.planId}. `;
-    const gap = actual.total ? Math.abs(v.total - actual.total) / actual.total : null;
-    const dollars = actual.total ? Math.abs(v.total - actual.total) : 0;
-    note.textContent = gap === null
-      ? on + "Enter the total from the bill to see the gap. The kWh split alone is worth checking: it is the "
-        + "model reading your own meter through this tariff's hour definitions, so it should match to a few kWh."
-      : gap < 0.01
-        ? on + `Within ${fmtMoney(dollars, 2)} of your bill — the rate file is right for this address, and the `
-          + "residual is kWh rounding."
-        : gap < 0.03
-          ? on + `${fmtMoney(dollars, 2)} apart (${fmtPct(gap, 1)}). Close enough that the difference is the taxes `
-            + "and franchise fees the published rates leave out."
-          : on + `${fmtPct(gap, 1)} off your bill. First check that the plan and generation provider above are the `
-            + "ones on the bill — switching either moves the total by hundreds. If they match, the rate file is "
-            + "stale or wrong for your address; the Assumptions tab has its effective date.";
+  if (note) note.textContent = `Replayed on ${ctx.planLabel || v.planId}. ` + replayVerdict(v, actual);
+}
+
+/**
+ * How close the model came, and what the remaining gap is made of.  Under a
+ * percent is rounding; a few percent is the taxes and fees the published rates
+ * leave out; beyond that the rate file or the plan is the wrong one.
+ */
+function replayVerdict(v, actual) {
+  if (!actual.total) {
+    return "Enter the total from the bill to see the gap. The kWh split alone is worth checking: it is the "
+      + "model reading your own meter through this tariff's hour definitions, so it should match to a few kWh.";
   }
+  const dollars = Math.abs(v.total - actual.total);
+  const gap = dollars / actual.total;
+  if (gap < 0.01) {
+    return `Within ${fmtMoney(dollars, 2)} of your bill — the rate file is right for this address, and the `
+      + "residual is kWh rounding.";
+  }
+  if (gap < 0.03) {
+    return `${fmtMoney(dollars, 2)} apart (${fmtPct(gap, 1)}). Close enough that the difference is the taxes `
+      + "and franchise fees the published rates leave out.";
+  }
+  return `${fmtPct(gap, 1)} off your bill. First check that the plan and generation provider above are the `
+    + "ones on the bill — switching either moves the total by hundreds. If they match, the rate file is "
+    + "stale or wrong for your address; the Assumptions tab has its effective date.";
 }
 
 export default { id, label, rail, mount, render };

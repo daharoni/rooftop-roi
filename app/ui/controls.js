@@ -9,13 +9,18 @@
  * `reason` is what keeps the page responsive: "finance" re-prices cached
  * simulation results in about 15 ms and renders immediately; "sim" queues a
  * debounced worker round-trip and dims the stale render until it returns.
+ *
+ * Every widget built here is kept in `this.widgets` with references to the
+ * nodes that change, because `refresh` runs on every render and walking the
+ * DOM for sixty controls each time is work the page does not need to do.
  * ========================================================================== */
 
-import { el, $, clear } from "./dom.js";
+import { el, clear } from "./dom.js";
 import { fmtNum } from "./format.js";
 import { getPath } from "../state.js";
 
-function defaultReason(path) {
+/** The cost class a control's path implies, unless its spec names another. */
+export function defaultReason(path) {
   if (path.startsWith("fin.")) return "finance";
   if (path.startsWith("ui.")) return "ui";
   return "sim";
@@ -31,6 +36,13 @@ export function formatValue(spec, v) {
   return fmtNum(Number(v), dp) + (spec.unit || "");
 }
 
+/** Two option lists are the same list if they name the same values in order. */
+function sameOptions(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((o, i) => String(o.v) === String(b[i].v) && o.t === b[i].t);
+}
+
 export class ControlRail {
   /**
    * @param root   the element to build into
@@ -40,13 +52,13 @@ export class ControlRail {
     this.root = root;
     this.onSet = onSet;
     this.groups = [];
-    this.specs = [];
+    this.widgets = [];
   }
 
   /** Rebuild the rail from a new group list (called on every tab change). */
   build(groups, state) {
     this.groups = groups || [];
-    this.specs = this.groups.flatMap((g) => g.items);
+    this.widgets = [];
     clear(this.root);
     const wide = typeof window === "undefined" || window.innerWidth > 1000;
     // The rail is an accordion: one group open at a time, so a long list of
@@ -74,44 +86,51 @@ export class ControlRail {
 
   _id(spec) { return "ctl-" + spec.path.replace(/\./g, "-"); }
 
+  /**
+   * Build one widget and record what `refresh` will need to touch: the wrapper
+   * (shown or hidden), the control itself, its printed value, and its warning
+   * and footnote lines.
+   */
   _widget(spec, state) {
     const id = this._id(spec);
     const value = getPath(state, spec.path);
     const wrap = el("div.ctl", { "data-path": spec.path });
     const emit = (v) => this.onSet(spec.path, v, spec);
+    const w = { spec, wrap, control: null, value: null, warn: null, foot: null };
 
     if (spec.kind === "check") {
-      const box = el("input", { type: "checkbox", id, checked: !!value, on: { change: (e) => emit(e.target.checked) } });
-      wrap.appendChild(el("label.switch", { htmlFor: id }, [box, el("span", { text: spec.label })]));
+      w.control = el("input", { type: "checkbox", id, checked: !!value, on: { change: (e) => emit(e.target.checked) } });
+      wrap.appendChild(el("label.switch", { htmlFor: id }, [w.control, el("span", { text: spec.label })]));
     } else if (spec.kind === "seg") {
       wrap.appendChild(this._head(spec, id, "").row);
-      const seg = el("div.seg", { id, role: "group", "aria-label": spec.label });
+      w.control = el("div.seg", { id, role: "group", "aria-label": spec.label });
       for (const o of spec.opts) {
-        seg.appendChild(el("button", {
+        w.control.appendChild(el("button", {
           type: "button", text: o.t, "aria-pressed": String(o.v === value),
           on: { click: () => emit(o.v) },
         }));
       }
-      wrap.appendChild(seg);
+      wrap.appendChild(w.control);
     } else if (spec.kind === "select") {
       wrap.appendChild(this._head(spec, id, "").row);
-      const sel = el("select", { id, on: { change: (e) => emit(e.target.value) } });
-      for (const o of spec.opts || []) sel.appendChild(el("option", { value: String(o.v), text: o.t }));
-      sel.value = String(value);
-      wrap.appendChild(sel);
+      w.control = el("select", { id, on: { change: (e) => emit(e.target.value) } });
+      this._fillSelect(w.control, spec, value);
+      wrap.appendChild(w.control);
     } else if (spec.kind === "number" || spec.kind === "text" || spec.kind === "date") {
       wrap.appendChild(this._head(spec, id, "").row);
-      wrap.appendChild(el("input", {
+      w.control = el("input", {
         type: spec.kind, id, min: spec.min, max: spec.max, step: spec.step,
         placeholder: spec.placeholder, value: value ?? "",
         on: { change: (e) => emit(spec.kind === "number" ? Number(e.target.value) : e.target.value) },
-      }));
+      });
+      wrap.appendChild(w.control);
     } else if (spec.kind === "button") {
       wrap.appendChild(el("button.btn", { type: "button", id, text: spec.label, on: { click: () => emit(true) } }));
     } else {
       const head = this._head(spec, id, formatValue(spec, value));
+      w.value = head.val;
       wrap.appendChild(head.row);
-      wrap.appendChild(el("input", {
+      w.control = el("input", {
         type: "range", id, min: spec.min, max: spec.max, step: spec.step, value,
         on: {
           input: (e) => {
@@ -120,12 +139,20 @@ export class ControlRail {
             emit(Number(e.target.value));
           },
         },
-      }));
+      });
+      wrap.appendChild(w.control);
     }
 
     if (spec.note) wrap.appendChild(el("div.ctl-note", { text: spec.note }));
-    if (spec.warn) wrap.appendChild(el("div.ctl-warn", { id: "warn-" + id, hidden: true }));
-    if (spec.footnote) wrap.appendChild(el("div.ctl-note", { id: "foot-" + id }));
+    if (spec.warn) {
+      w.warn = el("div.ctl-warn", { id: "warn-" + id, hidden: true });
+      wrap.appendChild(w.warn);
+    }
+    if (spec.footnote) {
+      w.foot = el("div.ctl-note", { id: "foot-" + id });
+      wrap.appendChild(w.foot);
+    }
+    this.widgets.push(w);
     return wrap;
   }
 
@@ -137,56 +164,49 @@ export class ControlRail {
 
   /** Re-sync every widget's value, visibility, warning and footnote. */
   refresh(state) {
-    for (const spec of this.specs) {
-      const wrap = this.root.querySelector(`[data-path="${CSS.escape(spec.path)}"]`);
-      if (!wrap) continue;
-      wrap.hidden = !!(spec.show && !spec.show(state));
-      const id = this._id(spec);
-
-      if (spec.warn) {
-        const node = $("warn-" + id), msg = spec.warn(state);
-        if (node) { node.textContent = msg || ""; node.hidden = !msg; }
+    for (const w of this.widgets) {
+      const spec = w.spec;
+      w.wrap.hidden = !!(spec.show && !spec.show(state));
+      if (w.warn) {
+        const msg = spec.warn(state);
+        w.warn.textContent = msg || "";
+        w.warn.hidden = !msg;
       }
-      if (spec.footnote) {
-        const node = $("foot-" + id);
-        if (node) node.textContent = spec.footnote(state) || "";
-      }
+      if (w.foot) w.foot.textContent = spec.footnote(state) || "";
+      if (!w.control) continue;               // a button has nothing to sync
 
-      const node = $(id);
-      if (!node) continue;
       const v = getPath(state, spec.path);
-      if (spec.kind === "check") node.checked = !!v;
-      else if (spec.kind === "seg") {
-        Array.from(node.children).forEach((b, i) => b.setAttribute("aria-pressed", String(spec.opts[i].v === v)));
+      if (spec.kind === "check") {
+        w.control.checked = !!v;
+      } else if (spec.kind === "seg") {
+        Array.from(w.control.children).forEach((b, i) => b.setAttribute("aria-pressed", String(spec.opts[i].v === v)));
       } else if (spec.kind === "select") {
-        if (spec.opts && !spec.opts.some((o) => String(o.v) === String(node.value))) this._refillSelect(node, spec, v);
-        node.value = String(v);
-      } else if (spec.kind === "button") {
-        /* nothing to sync */
-      } else {
-        if (document.activeElement !== node) node.value = v ?? "";
-        const label = wrap.querySelector(".ctl-val");
-        if (label && spec.kind !== "number" && spec.kind !== "text" && spec.kind !== "date") {
-          label.textContent = formatValue(spec, v);
+        if (spec.opts && !spec.opts.some((o) => String(o.v) === String(w.control.value))) {
+          this._fillSelect(w.control, spec, v);
         }
+        w.control.value = String(v);
+      } else {
+        if (document.activeElement !== w.control) w.control.value = v ?? "";
+        if (w.value) w.value.textContent = formatValue(spec, v);
       }
     }
   }
 
   /** Options can arrive after the rail is built (the tariff library loads async). */
   setOptions(path, opts, state) {
-    const spec = this.specs.find((s) => s.path === path);
-    if (!spec) return;
-    spec.opts = opts;
-    const node = $(this._id(spec));
-    if (node) this._refillSelect(node, spec, getPath(state, path));
+    const w = this.widgets.find((x) => x.spec.path === path);
+    // Rebuilding a select on every render throws away the one the user is
+    // looking at, so the list is only refilled when it has actually changed.
+    if (!w || !w.control || sameOptions(w.spec.opts, opts)) return;
+    w.spec.opts = opts;
+    this._fillSelect(w.control, w.spec, getPath(state, path));
   }
 
-  _refillSelect(node, spec, value) {
+  _fillSelect(node, spec, value) {
     clear(node);
     for (const o of spec.opts || []) node.appendChild(el("option", { value: String(o.v), text: o.t }));
     node.value = String(value);
   }
 }
 
-export default { ControlRail, formatValue };
+export default { ControlRail, formatValue, defaultReason };

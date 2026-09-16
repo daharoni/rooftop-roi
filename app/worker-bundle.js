@@ -36,6 +36,10 @@ const EPS = 1e-9;
 const HOURS_PER_YEAR = 8766;          // 365.25 * 24, as in the reference detector
 const DAYS_PER_YEAR = 365.25;
 const WEEKS_PER_YEAR = 52.18;         // as specified for manual loads
+// The detectors report sessions/week against the reference detector's own divisor, which
+// is a hair different from the one above.  It is kept exactly because the fixture numbers
+// (2.41 sessions/week) were produced with it; do not "tidy" the two into one.
+const DETECTOR_WEEKS_PER_YEAR = 52.1775;
 const DOW_PRIORITY = [1, 2, 3, 4, 5, 6, 0];   // Mon, Tue, Wed, Thu, Fri, Sat, Sun
 const CUM_NONLEAP = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 
@@ -217,7 +221,7 @@ function detectEV(loadSet, opts = {}) {
   const sessions = sessionsFrom(N, sHour, sNaive, ts, ev1);
   const spanYears = N / HOURS_PER_YEAR;
   const sessKwh = sessions.map((s) => s.kwh).sort((a, b) => a - b);
-  const sessionsPerWeek = sessions.length / (spanYears * 52.1775);
+  const sessionsPerWeek = sessions.length / (spanYears * DETECTOR_WEEKS_PER_YEAR);
   const medianSessionKwh = round3(medianOf(sessKwh));
   const annualKwh = evTotal / spanYears;
 
@@ -551,7 +555,7 @@ function detectPool(loadSet, opts = {}) {
         `starting at ${pad2(domHour)}:00, averaging ${kw} kW for ${hoursPerDay} h.`,
       chargerKW: kw,
       sessions,
-      sessionsPerWeek: round2(runs.length / (spanYears * 52.1775)),
+      sessionsPerWeek: round2(runs.length / (spanYears * DETECTOR_WEEKS_PER_YEAR)),
       medianSessionKwh: round3(medianOf(sessions.map((s) => s.kwh).sort((a, b) => a - b))),
       startHour: domHour,
       hoursPerDay,
@@ -567,8 +571,6 @@ function detectPool(loadSet, opts = {}) {
     scale: 1.0,
   };
 }
-
-function sumRange(arr, a, b) { let s = 0; for (let k = a; k <= b; k++) s += arr[k]; return s; }
 
 // ------------------------------------------------------------------- reshape
 const DEFAULT_SCHEDULE = {
@@ -765,9 +767,10 @@ function poolBlock(out, flex, cal, sch, scale, bounds) {
   if (!(perDay > EPS)) return out;
   const level = Math.min(maxKW, perDay / hoursPerDay);
 
+  const byHour = new Int32Array(24);
   for (let d = 0; d < cal.nDays; d++) {
     const s0 = bounds.starts[d], s1 = s0 + bounds.lens[d];
-    const byHour = new Int32Array(24).fill(-1);
+    byHour.fill(-1);
     for (let k = s0; k < s1; k++) byHour[cal.hourA[k]] = k;
     let remaining = perDay;
     for (let q = 0; q < 24 && remaining > EPS; q++) {
@@ -1825,15 +1828,34 @@ function billPeriod(ctx, params, startDate, endDate) {
            total: fixed + energy - baseCredit - climate };
 }
 
+/** One scenario run with no panels and no battery: the no-system arm of a baseline. */
+function noSystem(scn, p, detail) {
+  const zero = Object.assign({}, p, { batteries: 0, panelsByPlane: scn.planes.map(() => 0) });
+  return runHours(scn, zero, detail);
+}
+
+/**
+ * The four savings numbers every result carries, given the two no-system bills.
+ * A no-system baseline exports nothing, so the whole of exportRevenue is the system's;
+ * the remainder of the saving is avoided retail import cost.  Shared with the
+ * optimizer's sweep so the split is defined in exactly one place.
+ */
+function attachSavings(res, sameFlexBill, asRecordedBill) {
+  res.savingsVsSameFlex = sameFlexBill - res.bill;
+  res.savingsVsAsRecorded = asRecordedBill - res.bill;
+  res.importSavingsVsSameFlex = res.savingsVsSameFlex - res.exportRevenue;
+  res.importSavingsVsAsRecorded = res.savingsVsAsRecorded - res.exportRevenue;
+  return res;
+}
+
 /** The two no-system arms every result is measured against. */
 function baselines(ctx, p, detail) {
   const scnSame = buildScenario(ctx, p);
   const scnRec = buildScenario(ctx, p, { flexMode: "asRecorded" });
-  const zero = Object.assign({}, p, { batteries: 0, panelsByPlane: scnSame.planes.map(() => 0) });
   return {
     scnSame, scnRec,
-    sameFlex: runHours(scnSame, zero, detail),
-    asRecorded: runHours(scnRec, Object.assign({}, zero, { panelsByPlane: scnRec.planes.map(() => 0) }), detail),
+    sameFlex: noSystem(scnSame, p, detail),
+    asRecorded: noSystem(scnRec, p, detail),
   };
 }
 
@@ -1845,12 +1867,7 @@ function simulate(ctx, params, opts) {
 
   res.baselineSameFlex = b.sameFlex;
   res.baselineAsRecorded = b.asRecorded;
-  res.savingsVsSameFlex = b.sameFlex.bill - res.bill;
-  res.savingsVsAsRecorded = b.asRecorded.bill - res.bill;
-  // A no-system baseline exports nothing, so the whole of exportRevenue is the
-  // system's; the remainder of the saving is avoided retail import cost.
-  res.importSavingsVsSameFlex = res.savingsVsSameFlex - res.exportRevenue;
-  res.importSavingsVsAsRecorded = res.savingsVsAsRecorded - res.exportRevenue;
+  attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
   res.flexShiftOnlySavings = b.asRecorded.bill - b.sameFlex.bill;
   res.years = ctx.nDays / 365;
   return res;
@@ -1876,11 +1893,13 @@ function billOnAllProviders(ctx, params) {
   const providers = Object.keys(ctx.tariffs.providers || {});
   return providers.map(function (id) {
     const q = Object.assign({}, p, { providerId: id });
-    const b = baselines(ctx, q, false);
-    const withSys = runHours(b.scnSame, q, false);
+    // Only the same-flex arm is reported, so the as-recorded scenario is never built.
+    const scn = buildScenario(ctx, q);
+    const base = noSystem(scn, q, false);
+    const withSys = runHours(scn, q, false);
     return { id, name: (ctx.tariffs.providers[id] || {}).name || id,
-             bill: withSys.bill, baselineSameFlex: b.sameFlex.bill,
-             savings: b.sameFlex.bill - withSys.bill };
+             bill: withSys.bill, baselineSameFlex: base.bill,
+             savings: base.bill - withSys.bill };
   });
 }
 
@@ -1889,7 +1908,7 @@ const _internal = { holidaySet, isDST, spread, fallbackReshape, dayBounds,
 
 const SolarEngine = {
   prepare, buildScenario, runHours, simulate, billPeriod, billOnAllPlans, billOnAllProviders,
-  baselines, buildRates, settle, planById, profileFor, pvFor, climateCredit,
+  baselines, attachSavings, buildRates, settle, planById, profileFor, pvFor, climateCredit,
   reshapeFlex, setFlexReshape, flexReshapeSource,
   withDefaults, DEFAULTS, _internal,
 };
@@ -2053,9 +2072,9 @@ function loanPayment(principal, apr, months) {
 }
 
 /**
- * Monthly amortization summed into annual rows.
- * Returns { payment /*monthly*​/, rows: [{ year, payment, interest, principal, balance }],
- *           totalInterest, termYears }.
+ * Monthly amortization summed into annual rows.  Returns the level monthly `payment`,
+ * one `rows` entry per year { year, payment, interest, principal, balance }, plus
+ * `totalInterest`, `termYears` and the `principal` borrowed.
  * The final month absorbs rounding so the balance lands exactly on zero.
  */
 function amortize(principal, apr, termYears) {
@@ -2127,9 +2146,10 @@ function evaluate(sim, f) {
     schedule = amort.rows;
     for (const r of schedule) if (r.year <= H) pay[r.year] = r.payment;
     // A term longer than the analysis horizon leaves a debt: pay it off at the horizon
-    // so the comparison is like-for-like with cash.
+    // so the comparison is like-for-like with cash.  A term that ends on or before the
+    // horizon has already amortised to zero by then, so this adds nothing there.
     const atH = schedule.find((r) => r.year === H);
-    if (schedule.length > H && atH) pay[H] += atH.balance;
+    if (atH) pay[H] += atH.balance;
   } else if (isLease) {
     const L = f.financing.lease;
     const term = Math.min(L.termYears, H);
@@ -2147,9 +2167,14 @@ function evaluate(sim, f) {
   }
 
   // How much of the saving is attributable to panels vs. pack, used to blend the
-  // two degradation rates.  Cost share is a crude but stable proxy.
-  let wS = gross > 0 ? solarCost / Math.max(1e-9, solarCost + storageCost) : 1;
-  if (!isFinite(wS)) wS = 1;
+  // two degradation rates.  Cost share is a crude but stable proxy.  With no hardware
+  // cost to divide - a price knob driven to zero, which is exactly what breakEven()
+  // does - fall back to what is physically installed, so a zero-priced array still
+  // degrades at the panel rate and never picks up the pack's replacement reset.
+  const hardwareCost = solarCost + storageCost;
+  let wS = 1;
+  if (hardwareCost > 0) wS = solarCost / hardwareCost;
+  else if (watts <= 0 && sim.battKWhTotal > 0) wS = 0;      // a pack and no panels
   const wB = 1 - wS;
 
   const cf = [-upfront], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
@@ -2227,6 +2252,13 @@ function evaluate(sim, f) {
     lifetimeNoSystem += (sim.baselineBill * escY) / dis;
   }
 
+  // What the customer writes a cheque for each month: the loan's level payment, or a
+  // lease's first-year payment spread over twelve (which is the quoted monthly unless
+  // a buyout lands in year 1).  Cash buys nothing on instalment.
+  let monthlyPayment = 0;
+  if (mode === "loan") monthlyPayment = amort ? amort.payment : 0;
+  else if (isLease) monthlyPayment = (pay[1] || 0) / 12;
+
   const firstYearPayment = pay[1] || 0;
   const firstYearMonthlyOutlay = firstYearPayment / 12 + (sim.bill || 0) / 12;
   const currentMonthlyBill = (sim.baselineBill || 0) / 12;
@@ -2247,10 +2279,8 @@ function evaluate(sim, f) {
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,
     // financing
-    financingMode: mode, upfront, downPayment: mode === "loan" ? upfront : (mode === "cash" ? netCost : 0),
-    loanPrincipal: principal, dealerFee,
-    monthlyPayment: mode === "loan" ? (amort ? amort.payment : 0)
-                  : isLease ? (pay[1] || 0) / 12 : 0,
+    financingMode: mode, upfront, downPayment: isLease ? 0 : upfront,
+    loanPrincipal: principal, dealerFee, monthlyPayment,
     totalInterest: amort ? amort.totalInterest : 0,
     financingSchedule: schedule,
     firstYearPayment, firstYearMonthlyOutlay, currentMonthlyBill,
@@ -2259,16 +2289,33 @@ function evaluate(sim, f) {
 }
 
 /**
- * Price at which NPV crosses zero, holding everything else fixed.  NPV is exactly
- * linear in $/W and $/kWh (both scale the year-0 outlay and nothing else), so two
- * evaluations pin the line - no search needed.
+ * Price at which NPV crosses zero, holding everything else fixed.
+ *
+ * NPV is very nearly linear in $/W and $/kWh - both scale the year-0 outlay and
+ * nothing else - but not exactly: the degradation blend weights panels against pack
+ * by their COST share, so moving one price also tilts the savings stream a little.
+ * On a system carrying both, the straight two-point line misses by thousands of
+ * dollars, so it is used only as the first guess and secant steps land on the root.
+ * Returns null when there is no root to find: a price NPV does not respond to has no
+ * break-even, and under a lease the sticker price is not what the customer pays.
  */
 function breakEven(sim, f, key) {
-  const a = evaluate(sim, Object.assign({}, f, { [key]: 0 })).npv;
-  const b = evaluate(sim, Object.assign({}, f, { [key]: 1 })).npv;
-  const slope = b - a;
+  const npvAt = (price) => evaluate(sim, Object.assign({}, f, { [key]: price })).npv;
+  const at0 = npvAt(0), at1 = npvAt(1);
+  const slope = at1 - at0;
   if (Math.abs(slope) < 1e-9) return null;
-  return -a / slope;
+  let x0 = 0, y0 = at0;
+  let x1 = -at0 / slope, y1 = npvAt(x1);
+  for (let i = 0; i < 40 && Math.abs(y1) > 1e-6; i++) {
+    const step = y1 * (x1 - x0) / (y1 - y0);
+    if (!isFinite(step) || step === 0) break;
+    x0 = x1; y0 = y1;
+    x1 -= step; y1 = npvAt(x1);
+  }
+  // Only report a price that really does zero the NPV.  `slope` is dollars of NPV per
+  // dollar of price, so this asks that the answer be right to a millionth of a $/W -
+  // and refuses the huge number the secant wanders to when NPV is all but flat.
+  return Math.abs(y1) <= Math.abs(slope) * 1e-6 ? x1 : null;
 }
 
 const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount,
@@ -2300,11 +2347,44 @@ var __ns_SolarOptimizer = (function () {
 const Engine = __ns_SolarEngine;
 const Finance = __ns_SolarFinance;
 
+/**
+ * A null IRR means one of two OPPOSITE things, so it cannot be ranked with a single
+ * sentinel.  With money down (cash, a loan with a deposit) it means the cash flow
+ * never turns positive - the worst case.  With nothing down (a lease, a fully
+ * financed loan) a stream that is cash positive from year one has no rate of return
+ * to solve for because nothing was invested - the best case.  The sign of NPV
+ * separates them; without this the sweep hands "highest IRR" a cell that loses money
+ * every year in preference to one that makes money from day one.
+ */
+function irrRank(c) {
+  if (typeof c.irr === "number") return c.irr;
+  return c.npv > 0 ? Infinity : -Infinity;
+}
+
+/** A cell that never pays back ranks last. */
+function paybackRank(c) {
+  return typeof c.payback === "number" ? c.payback : Infinity;
+}
+
 const OBJECTIVES = {
   npv: { label: "Maximum NPV", better: (a, b) => a.npv > b.npv },
   lifetime: { label: "Lowest lifetime cost", better: (a, b) => a.lifetimeCost < b.lifetimeCost },
-  irr: { label: "Highest IRR", better: (a, b) => (a.irr === null ? -9 : a.irr) > (b.irr === null ? -9 : b.irr) },
-  payback: { label: "Fastest payback", better: (a, b) => (a.payback === null ? 999 : a.payback) < (b.payback === null ? 999 : b.payback) },
+  irr: {
+    label: "Highest IRR",
+    better: function (a, b) {
+      const ra = irrRank(a), rb = irrRank(b);
+      // Ties are the undefined ends of the scale (and, with no outlay, every cell
+      // that pays for itself from year one sits there): money decides.
+      return ra === rb ? a.npv > b.npv : ra > rb;
+    },
+  },
+  payback: {
+    label: "Fastest payback",
+    better: function (a, b) {
+      const ra = paybackRank(a), rb = paybackRank(b);
+      return ra === rb ? a.npv > b.npv : ra < rb;
+    },
+  },
 };
 
 /** Per-plane panel caps: explicit opts.planeCaps (array or {id: cap}), else plane.maxPanels. */
@@ -2359,8 +2439,9 @@ function allocationOrder(scn, p, maxPanelsTotal, caps, batteries, cells) {
 function searchGrid(ctx, params, opts) {
   opts = opts || {};
   const p = Engine.withDefaults(params);
-  const maxPanelsTotal = opts.maxPanelsTotal === undefined
-    ? (opts.maxPanels === undefined ? 60 : opts.maxPanels) : opts.maxPanelsTotal;
+  let maxPanelsTotal = opts.maxPanelsTotal;
+  if (maxPanelsTotal === undefined) maxPanelsTotal = opts.maxPanels;   // older spelling
+  if (maxPanelsTotal === undefined) maxPanelsTotal = 60;
   const maxBatteries = opts.maxBatteries === undefined ? 6 : opts.maxBatteries;
   const step = opts.step || 1;
   const gb = Math.max(0, Math.min(maxBatteries, opts.greedyBatteries === undefined ? 0 : opts.greedyBatteries));
@@ -2392,10 +2473,7 @@ function searchGrid(ctx, params, opts) {
       const nb = battList[bi];
       const res = (nb === gb && cache.has(n)) ? cache.get(n)
         : Engine.runHours(scn, Object.assign({}, p, { panelsByPlane: alloc, batteries: nb }), false);
-      res.savingsVsSameFlex = b.sameFlex.bill - res.bill;
-      res.savingsVsAsRecorded = b.asRecorded.bill - res.bill;
-      res.importSavingsVsSameFlex = res.savingsVsSameFlex - res.exportRevenue;
-      res.importSavingsVsAsRecorded = res.savingsVsAsRecorded - res.exportRevenue;
+      Engine.attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
       cells.push(res);
       if (opts.onProgress && (++done % 40 === 0)) opts.onProgress(done, total);
     }
@@ -2482,7 +2560,8 @@ function tornado(cell, finance, baselineBill, flexVariants) {
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
     pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal,
   });
-  const base = Finance.evaluate(simOf(cell), finance).npv;
+  const sim = simOf(cell);
+  const base = Finance.evaluate(sim, finance).npv;
   const f = Finance.withDefaults(finance);
   const rows = [
     ["Solar $/W", "costPerW"], ["Storage $/kWh", "costPerKwh"],
@@ -2490,7 +2569,6 @@ function tornado(cell, finance, baselineBill, flexVariants) {
   ].map(function (r) {
     const lo = Object.assign({}, f); lo[r[1]] = f[r[1]] * 0.8;
     const hi = Object.assign({}, f); hi[r[1]] = f[r[1]] * 1.2;
-    const sim = simOf(cell);
     return { label: r[0], low: Finance.evaluate(sim, lo).npv - base,
              high: Finance.evaluate(sim, hi).npv - base };
   });

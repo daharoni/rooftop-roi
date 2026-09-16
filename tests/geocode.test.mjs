@@ -6,6 +6,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { cacheKey } from "../core/weather.js";
 
 import {
   AMBIGUOUS_ZIP_PREFIXES,
@@ -207,6 +208,23 @@ test("elevationFor degrades to null instead of throwing", async () => {
     }),
     281.5,
   );
+});
+
+test("elevationFor puts no finer coordinate on the wire than the weather request", async () => {
+  let url = null;
+  await elevationFor(34.1456789, -118.7612345, {
+    fetchImpl: async (u) => {
+      url = u;
+      return { ok: true, status: 200, json: async () => ({ elevation: [280] }) };
+    },
+  });
+  const q = new URL(url).searchParams;
+  assert.equal(new URL(url).origin, "https://api.open-meteo.com");
+  assert.equal(q.get("latitude"), "34.15", "rounded to the 0.05 deg privacy grid");
+  assert.equal(q.get("longitude"), "-118.75");
+  assert.deepEqual([...q.keys()].sort(), ["latitude", "longitude"]);
+  // The rounded pair must be exactly what core/weather.js would have cached under.
+  assert.equal(cacheKey(34.1456789, -118.7612345, 2020), "34.15,-118.75,2020");
 });
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@
  * ========================================================================== */
 
 import { $, el, clear, T, alpha } from "../ui/dom.js";
-import { fmtCompact, fmtMoney, fmtPct } from "../ui/format.js";
+import { fmtCompact, fmtMoney, fmtNum, fmtPct } from "../ui/format.js";
 import { draw, baseOpts, lineChart, legendHTML } from "./base.js";
 
 export function renderCashflow({ cell, fin }) {
@@ -161,8 +161,8 @@ export function renderWeatherBars({ rows, selectedKey }) {
   ])]));
   table.appendChild(el("tbody", {}, rows.map((r) => el("tr" + (r.key === selectedKey ? ".is-best" : ""), {}, [
     el("td", { text: r.label }),
-    el("td.n", { text: Math.round(r.perKw || 0).toLocaleString("en-US") }),
-    el("td.n", { text: Math.round(r.pv || 0).toLocaleString("en-US") + " kWh" }),
+    el("td.n", { text: fmtNum(r.perKw || 0, 0) }),
+    el("td.n", { text: fmtNum(r.pv || 0, 0) + " kWh" }),
     el("td.n", { text: fmtMoney(r.savings) }),
     el("td.n", { text: fmtMoney(r.npv) }),
   ]))));

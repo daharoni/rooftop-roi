@@ -37,8 +37,6 @@
  *     correct simulation never reads the filler because the schedule never names it.
  * ========================================================================== */
 
-"use strict";
-
 /** Utilities the library ships, in the order the UI should offer them. */
 export const UTILITY_IDS = ["sce", "pge", "sdge"];
 
@@ -116,6 +114,16 @@ function holidaySet(year) {
   return s;
 }
 
+/** True when this date is one of the eight observed holidays. */
+function isHoliday(p) {
+  return holidaySet(p.y).has(p.y + "-" + p.m + "-" + p.d);
+}
+
+/** True when the WEEKEND schedule applies: Saturday, Sunday, or a holiday. */
+function billsAsWeekend(p) {
+  return p.dow === 0 || p.dow === 6 || isHoliday(p);
+}
+
 /**
  * Normalise anything date-like to { y, m (1-12), d, dow, hour }.
  * Accepts a Date, "YYYY-MM-DD", "YYYY-MM-DDTHH:MM" or { y, m, d }.
@@ -145,8 +153,7 @@ export function partsOf(date, hour) {
 
 /** True on Saturday, Sunday, or one of the eight holidays (observed). */
 export function isWeekendOrHoliday(date) {
-  const p = partsOf(date, 0);
-  return p.dow === 0 || p.dow === 6 || holidaySet(p.y).has(p.y + "-" + p.m + "-" + p.d);
+  return billsAsWeekend(partsOf(date, 0));
 }
 
 /* -------------------------------------------------------------------- loading */
@@ -265,6 +272,15 @@ export function plan(t, id) {
       || null;
 }
 
+/**
+ * Accept either a plan object or a plan id wherever a "plan" is taken.  A plan object is
+ * recognised by its `rates` table; anything else is looked up with `plan()`, which falls
+ * back to the utility's default plan when the id is empty.
+ */
+function asPlan(t, p) {
+  return p && p.rates ? p : plan(t, p);
+}
+
 /** The utility's default residential plan: `plans[].default === true`, else the first. */
 export function defaultPlan(t) {
   if (!t || !t.plans || !t.plans.length) return null;
@@ -273,7 +289,7 @@ export function defaultPlan(t) {
 
 /** Every provider id a plan actually prices, in file order. */
 export function providersOf(t, p) {
-  const pl = p && p.rates ? p : plan(t, p);
+  const pl = asPlan(t, p);
   const ids = Object.keys((t && t.providers) || {});
   if (!pl) return ids;
   const seasons = Object.keys(pl.rates || {});
@@ -309,8 +325,8 @@ export function seasonOf(p, month) {
 export function periodAt(p, date, hour) {
   if (!p || !p.schedule) throw new Error("tariff: periodAt needs a plan with a schedule");
   const t = partsOf(date, hour);
-  const holiday = holidaySet(t.y).has(t.y + "-" + t.m + "-" + t.d);
-  const weekend = holiday || t.dow === 0 || t.dow === 6;
+  const holiday = isHoliday(t);
+  const weekend = billsAsWeekend(t);
   const season = seasonOf(p, t.m);
   const dayType = weekend ? "weekend" : "weekday";
   const bySeason = p.schedule[season];
@@ -340,7 +356,7 @@ export function periodAt(p, date, hour) {
  * `p` may be a plan object or a plan id.
  */
 export function rateAt(t, p, providerId, date, hour) {
-  const pl = p && p.rates ? p : plan(t, p);
+  const pl = asPlan(t, p);
   if (!pl) throw new Error("tariff: no such plan " + p);
   const at = periodAt(pl, date, hour);
   const cell = pl.rates[at.season] && pl.rates[at.season][at.period];
@@ -355,7 +371,7 @@ export function rateAt(t, p, providerId, date, hour) {
 
 /** The same lookup, but returning the period context alongside the price. */
 export function rateDetailAt(t, p, providerId, date, hour) {
-  const pl = p && p.rates ? p : plan(t, p);
+  const pl = asPlan(t, p);
   const at = periodAt(pl, date, hour);
   return Object.assign({}, at, {
     planId: pl.id,
@@ -384,8 +400,7 @@ export function exportRateAt(t, date, hour, opts) {
   const m = n.export_rates;
   if (!m) throw new Error("tariff: " + (t && t.utility && t.utility.id) + " has no nbt.export_rates");
   const p = partsOf(date, hour);
-  const weekend = p.dow === 0 || p.dow === 6 || holidaySet(p.y).has(p.y + "-" + p.m + "-" + p.d);
-  const table = weekend ? (m.weekend || m.weekday) : m.weekday;
+  const table = billsAsWeekend(p) ? (m.weekend || m.weekday) : m.weekday;
   const row = table[p.m - 1];
   if (!row) throw new Error("tariff: export matrix has no month " + p.m);
   const v = row[p.hour];
@@ -405,7 +420,7 @@ export function exportMatrix(t, dayType) {
  * it floors the bill.
  */
 export function fixedChargePerDay(t, p) {
-  const pl = p && p.rates ? p : plan(t, p);
+  const pl = asPlan(t, p);
   if (pl && typeof pl.fixed_charge_per_day === "number") return pl.fixed_charge_per_day;
   const d = defaultPlan(t);
   return (d && d.fixed_charge_per_day) || 0;
@@ -413,7 +428,7 @@ export function fixedChargePerDay(t, p) {
 
 /** Minimum charge $/day, or 0 where the fixed charge replaced it. */
 export function minimumChargePerDay(t, p) {
-  const pl = p && p.rates ? p : plan(t, p);
+  const pl = asPlan(t, p);
   return (pl && pl.minimum_charge_per_day) || 0;
 }
 
@@ -783,7 +798,7 @@ function windowText(row, pid) {
  * joined, `lines`/`table` let the UI lay it out itself.
  */
 export function describe(t, p, providerId) {
-  const pl = (p && p.rates) ? p : plan(t, p);
+  const pl = asPlan(t, p);
   if (!pl) throw new Error("tariff: describe needs a plan");
   const prov = providerId || defaultProvider(t);
   const provName = (t.providers && t.providers[prov] && t.providers[prov].name) || prov;

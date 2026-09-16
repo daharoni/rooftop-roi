@@ -935,15 +935,34 @@ export function billPeriod(ctx, params, startDate, endDate) {
            total: fixed + energy - baseCredit - climate };
 }
 
+/** One scenario run with no panels and no battery: the no-system arm of a baseline. */
+function noSystem(scn, p, detail) {
+  const zero = Object.assign({}, p, { batteries: 0, panelsByPlane: scn.planes.map(() => 0) });
+  return runHours(scn, zero, detail);
+}
+
+/**
+ * The four savings numbers every result carries, given the two no-system bills.
+ * A no-system baseline exports nothing, so the whole of exportRevenue is the system's;
+ * the remainder of the saving is avoided retail import cost.  Shared with the
+ * optimizer's sweep so the split is defined in exactly one place.
+ */
+export function attachSavings(res, sameFlexBill, asRecordedBill) {
+  res.savingsVsSameFlex = sameFlexBill - res.bill;
+  res.savingsVsAsRecorded = asRecordedBill - res.bill;
+  res.importSavingsVsSameFlex = res.savingsVsSameFlex - res.exportRevenue;
+  res.importSavingsVsAsRecorded = res.savingsVsAsRecorded - res.exportRevenue;
+  return res;
+}
+
 /** The two no-system arms every result is measured against. */
 export function baselines(ctx, p, detail) {
   const scnSame = buildScenario(ctx, p);
   const scnRec = buildScenario(ctx, p, { flexMode: "asRecorded" });
-  const zero = Object.assign({}, p, { batteries: 0, panelsByPlane: scnSame.planes.map(() => 0) });
   return {
     scnSame, scnRec,
-    sameFlex: runHours(scnSame, zero, detail),
-    asRecorded: runHours(scnRec, Object.assign({}, zero, { panelsByPlane: scnRec.planes.map(() => 0) }), detail),
+    sameFlex: noSystem(scnSame, p, detail),
+    asRecorded: noSystem(scnRec, p, detail),
   };
 }
 
@@ -955,12 +974,7 @@ export function simulate(ctx, params, opts) {
 
   res.baselineSameFlex = b.sameFlex;
   res.baselineAsRecorded = b.asRecorded;
-  res.savingsVsSameFlex = b.sameFlex.bill - res.bill;
-  res.savingsVsAsRecorded = b.asRecorded.bill - res.bill;
-  // A no-system baseline exports nothing, so the whole of exportRevenue is the
-  // system's; the remainder of the saving is avoided retail import cost.
-  res.importSavingsVsSameFlex = res.savingsVsSameFlex - res.exportRevenue;
-  res.importSavingsVsAsRecorded = res.savingsVsAsRecorded - res.exportRevenue;
+  attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
   res.flexShiftOnlySavings = b.asRecorded.bill - b.sameFlex.bill;
   res.years = ctx.nDays / 365;
   return res;
@@ -986,11 +1000,13 @@ export function billOnAllProviders(ctx, params) {
   const providers = Object.keys(ctx.tariffs.providers || {});
   return providers.map(function (id) {
     const q = Object.assign({}, p, { providerId: id });
-    const b = baselines(ctx, q, false);
-    const withSys = runHours(b.scnSame, q, false);
+    // Only the same-flex arm is reported, so the as-recorded scenario is never built.
+    const scn = buildScenario(ctx, q);
+    const base = noSystem(scn, q, false);
+    const withSys = runHours(scn, q, false);
     return { id, name: (ctx.tariffs.providers[id] || {}).name || id,
-             bill: withSys.bill, baselineSameFlex: b.sameFlex.bill,
-             savings: b.sameFlex.bill - withSys.bill };
+             bill: withSys.bill, baselineSameFlex: base.bill,
+             savings: base.bill - withSys.bill };
   });
 }
 
@@ -999,7 +1015,7 @@ export const _internal = { holidaySet, isDST, spread, fallbackReshape, dayBounds
 
 const SolarEngine = {
   prepare, buildScenario, runHours, simulate, billPeriod, billOnAllPlans, billOnAllProviders,
-  baselines, buildRates, settle, planById, profileFor, pvFor, climateCredit,
+  baselines, attachSavings, buildRates, settle, planById, profileFor, pvFor, climateCredit,
   reshapeFlex, setFlexReshape, flexReshapeSource,
   withDefaults, DEFAULTS, _internal,
 };

@@ -118,10 +118,6 @@ a  { color: var(--accent); }
 }
 .num { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--mono); }
-.vh {
-  position: absolute; width: 1px; height: 1px; overflow: hidden;
-  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
-}
 
 /* =========================================================================
  * Landing — one centred column.  The reader arrives with a question and a
@@ -459,7 +455,6 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
 .method code { font-family: var(--mono); font-size: 11.5px; background: var(--sunken); padding: 1px 4px; border-radius: 2px; }
 
 .stale { opacity: .45; transition: opacity .15s; }
-.empty { font-size: 12.5px; color: var(--ink-3); padding: 20px; text-align: center; border: 1px dashed var(--grid); border-radius: var(--r-md); }
 
 .banner {
   font-size: 12px; padding: 8px 11px; border-radius: var(--r-sm);

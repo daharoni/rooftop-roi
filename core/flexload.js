@@ -30,6 +30,10 @@ const EPS = 1e-9;
 const HOURS_PER_YEAR = 8766;          // 365.25 * 24, as in the reference detector
 const DAYS_PER_YEAR = 365.25;
 const WEEKS_PER_YEAR = 52.18;         // as specified for manual loads
+// The detectors report sessions/week against the reference detector's own divisor, which
+// is a hair different from the one above.  It is kept exactly because the fixture numbers
+// (2.41 sessions/week) were produced with it; do not "tidy" the two into one.
+const DETECTOR_WEEKS_PER_YEAR = 52.1775;
 const DOW_PRIORITY = [1, 2, 3, 4, 5, 6, 0];   // Mon, Tue, Wed, Thu, Fri, Sat, Sun
 const CUM_NONLEAP = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 
@@ -211,7 +215,7 @@ export function detectEV(loadSet, opts = {}) {
   const sessions = sessionsFrom(N, sHour, sNaive, ts, ev1);
   const spanYears = N / HOURS_PER_YEAR;
   const sessKwh = sessions.map((s) => s.kwh).sort((a, b) => a - b);
-  const sessionsPerWeek = sessions.length / (spanYears * 52.1775);
+  const sessionsPerWeek = sessions.length / (spanYears * DETECTOR_WEEKS_PER_YEAR);
   const medianSessionKwh = round3(medianOf(sessKwh));
   const annualKwh = evTotal / spanYears;
 
@@ -545,7 +549,7 @@ export function detectPool(loadSet, opts = {}) {
         `starting at ${pad2(domHour)}:00, averaging ${kw} kW for ${hoursPerDay} h.`,
       chargerKW: kw,
       sessions,
-      sessionsPerWeek: round2(runs.length / (spanYears * 52.1775)),
+      sessionsPerWeek: round2(runs.length / (spanYears * DETECTOR_WEEKS_PER_YEAR)),
       medianSessionKwh: round3(medianOf(sessions.map((s) => s.kwh).sort((a, b) => a - b))),
       startHour: domHour,
       hoursPerDay,
@@ -561,8 +565,6 @@ export function detectPool(loadSet, opts = {}) {
     scale: 1.0,
   };
 }
-
-function sumRange(arr, a, b) { let s = 0; for (let k = a; k <= b; k++) s += arr[k]; return s; }
 
 // ------------------------------------------------------------------- reshape
 export const DEFAULT_SCHEDULE = {
@@ -759,9 +761,10 @@ function poolBlock(out, flex, cal, sch, scale, bounds) {
   if (!(perDay > EPS)) return out;
   const level = Math.min(maxKW, perDay / hoursPerDay);
 
+  const byHour = new Int32Array(24);
   for (let d = 0; d < cal.nDays; d++) {
     const s0 = bounds.starts[d], s1 = s0 + bounds.lens[d];
-    const byHour = new Int32Array(24).fill(-1);
+    byHour.fill(-1);
     for (let k = s0; k < s1; k++) byHour[cal.hourA[k]] = k;
     let remaining = perDay;
     for (let q = 0; q < 24 && remaining > EPS; q++) {

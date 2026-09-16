@@ -38,7 +38,15 @@ export function sliceFmt(v, objective) {
   return fmtCompact(v);
 }
 
-const findCell = (priced, p, b) => priced.cells.find((c) => c.panels === p && c.batteries === b);
+/**
+ * The surface is read cell by cell three times over (the grid, the two slices
+ * and the table twin), so it is indexed once instead of scanned each time.
+ */
+function cellLookup(priced) {
+  const byKey = new Map();
+  for (const c of priced.cells) byKey.set(c.panels + "|" + c.batteries, c);
+  return (p, b) => byKey.get(p + "|" + b);
+}
 
 export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick }) {
   const host = $(hostId);
@@ -51,6 +59,7 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
   const norm = (v) => (v >= 0 ? v / hi : v / -lo);
   const colorFor = (v) => mix(T["neutral-mid"], v >= 0 ? T.s1 : T.s8, 0.1 + 0.9 * Math.min(1, Math.abs(norm(v))));
 
+  const at = cellLookup(priced);
   const panels = priced.panelList, batteries = priced.battList;
   clear(host);
   host.style.gridTemplateColumns = `34px repeat(${panels.length}, minmax(8px, 1fr))`;
@@ -60,7 +69,7 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
   for (const b of [...batteries].reverse()) {
     host.appendChild(el("div.heat-axis.v", { text: b + "b" }));
     for (const p of panels) {
-      const cell = findCell(priced, p, b);
+      const cell = at(p, b);
       if (!cell) { host.appendChild(el("div")); continue; }
       const v = g(cell);
       const isBest = cell.panels === priced.best.panels && cell.batteries === priced.best.batteries;
@@ -91,15 +100,15 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
   if ($("heat-hi")) $("heat-hi").textContent = "best " + sliceFmt(hi, objective);
   if ($("heat-obj")) $("heat-obj").textContent = OBJ_LABEL[objective] || objective;
 
-  renderSlices(priced, selected, objective, fin);
-  renderHeatTable(priced, selected);
+  renderSlices(priced, selected, objective, fin, at);
+  renderHeatTable(priced, selected, at);
 }
 
-function renderSlices(priced, sel, objective, fin) {
+function renderSlices(priced, sel, objective, fin, at) {
   if (!sel) return;
   const g = (c) => goodness(c, objective, fin);
-  const alongP = priced.panelList.map((p) => { const c = findCell(priced, p, sel.batteries); return c ? g(c) : null; });
-  const alongB = priced.battList.map((b) => { const c = findCell(priced, sel.panels, b); return c ? g(c) : null; });
+  const alongP = priced.panelList.map((p) => { const c = at(p, sel.batteries); return c ? g(c) : null; });
+  const alongB = priced.battList.map((b) => { const c = at(sel.panels, b); return c ? g(c) : null; });
   const fmt = (v) => sliceFmt(v, objective);
 
   lineChart("c-slice-p", priced.panelList, [{ label: "panels", data: alongP, color: T.s1 }], {
@@ -112,7 +121,7 @@ function renderSlices(priced, sel, objective, fin) {
   });
 }
 
-function renderHeatTable(priced, sel) {
+function renderHeatTable(priced, sel, at) {
   const table = $("t-heat");
   if (!table) return;
   clear(table);
@@ -121,7 +130,7 @@ function renderHeatTable(priced, sel) {
   const body = el("tbody", {}, priced.panelList.map((p) => el("tr", {}, [
     el("td.n", { text: String(p) }),
     ...priced.battList.map((b) => {
-      const c = findCell(priced, p, b);
+      const c = at(p, b);
       const on = c && sel && c.panels === sel.panels && c.batteries === sel.batteries;
       return el("td.n", { text: c ? fmtCompact(c.npv) : "—", style: on ? "font-weight:600" : null });
     }),

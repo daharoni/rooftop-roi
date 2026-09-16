@@ -13,6 +13,8 @@
 //     under the address field (ATTRIBUTION below).
 //   * no bulk/systematic querying, no heavy use. One lookup per user session is fine.
 
+import { CACHE_GRID_DEG } from "./weather.js";
+
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const OPEN_METEO_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const OPEN_METEO_ELEVATION_URL = "https://api.open-meteo.com/v1/elevation";
@@ -110,6 +112,16 @@ export function extractZip(text) {
 }
 
 const looksLikeBareZip = (q) => /^\s*\d{5}(?:-\d{4})?\s*$/.test(String(q ?? ""));
+
+/**
+ * A coordinate as it is allowed to go on the wire: rounded to the same CACHE_GRID_DEG
+ * (~5.5 km) grid core/weather.js uses.  README and app/privacy.js both promise that no
+ * finer coordinate than this ever leaves the browser, so every outbound coordinate in
+ * this module goes through here.
+ */
+function onPrivacyGrid(v) {
+  return String(Math.round(v / CACHE_GRID_DEG) * CACHE_GRID_DEG + 0); // `+ 0` folds -0 to 0
+}
 
 // --- geocoding -------------------------------------------------------------
 
@@ -210,12 +222,17 @@ export async function zipCentroid(zip, opts = {}) {
  * Ground elevation in metres for a coordinate (Open-Meteo elevation API, 90 m DEM).
  * Returns null rather than throwing if the service is unreachable — elevation only tunes
  * the temperature downscaling, so the model is fine without it.
+ *
+ * The coordinate is rounded to the privacy grid before it is sent, exactly like the
+ * weather request, so a map click on a specific roof never puts that roof on the wire.
+ * The answer is then the elevation of the same grid cell the weather comes from, which
+ * is the cell the model is actually run for.
  */
 export async function elevationFor(lat, lon, opts = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const url =
     `${OPEN_METEO_ELEVATION_URL}?` +
-    new URLSearchParams({ latitude: String(lat), longitude: String(lon) });
+    new URLSearchParams({ latitude: onPrivacyGrid(lat), longitude: onPrivacyGrid(lon) });
   try {
     const json = await getJson(url, opts);
     const v = json?.elevation?.[0];

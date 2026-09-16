@@ -25,13 +25,6 @@ export function card({ id, title, tag, sub, body, dataView }) {
   return node;
 }
 
-export function chartBox(canvasId, height, legendId) {
-  return [
-    el("div.chart-box", { style: `height:${height}px` }, [el("canvas", { id: canvasId })]),
-    legendId ? el("div.legend", { id: legendId }) : null,
-  ].filter(Boolean);
-}
-
 export function tiles(id) { return el("div.tiles", { id }); }
 
 export function tile({ k, v, d }) {
@@ -51,6 +44,4 @@ export function kv(pairs) {
   return node;
 }
 
-export function empty(message) { return el("div.empty", { text: message }); }
-
-export default { card, chartBox, tiles, tile, kv, empty };
+export default { card, tiles, tile, kv };

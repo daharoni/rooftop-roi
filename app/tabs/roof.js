@@ -18,6 +18,7 @@
 import { el, clear, $ } from "../ui/dom.js";
 import { card } from "../ui/blocks.js";
 import { fmtNum, fmtPct } from "../ui/format.js";
+import * as K from "../ui/knobs.js";
 
 export const id = "roof";
 export const label = "Roof";
@@ -27,14 +28,10 @@ let builderHandle = null;
 export function rail(state, ctx) {
   return [
     { group: "Sunlight", open: true, items: [
-      { path: "ui.weatherKey", kind: "select", label: "Weather scenario", reason: "sim",
-        opts: ctx.weatherOptions || [{ v: "tmy", t: "TMY (typical year)" }],
+      { ...K.item.weatherKey(ctx),
         note: "P90 is the conservative low-sun year, P10 the optimistic one — the solar industry's exceedance convention." },
     ] },
-    { group: "Array", open: true, items: [
-      { path: "system.panelW", kind: "range", label: "Panel wattage", min: 350, max: 560, step: 5, unit: " W" },
-      { path: "system.maxPanels", kind: "range", label: "Most panels to consider", min: 4, max: 80, step: 1 },
-    ] },
+    { group: "Array", open: true, items: [K.item.panelW(), K.item.maxPanels()] },
   ];
 }
 

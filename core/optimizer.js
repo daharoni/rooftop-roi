@@ -17,11 +17,44 @@
 import Engine from "./engine.js";
 import Finance from "./finance.js";
 
+/**
+ * A null IRR means one of two OPPOSITE things, so it cannot be ranked with a single
+ * sentinel.  With money down (cash, a loan with a deposit) it means the cash flow
+ * never turns positive - the worst case.  With nothing down (a lease, a fully
+ * financed loan) a stream that is cash positive from year one has no rate of return
+ * to solve for because nothing was invested - the best case.  The sign of NPV
+ * separates them; without this the sweep hands "highest IRR" a cell that loses money
+ * every year in preference to one that makes money from day one.
+ */
+function irrRank(c) {
+  if (typeof c.irr === "number") return c.irr;
+  return c.npv > 0 ? Infinity : -Infinity;
+}
+
+/** A cell that never pays back ranks last. */
+function paybackRank(c) {
+  return typeof c.payback === "number" ? c.payback : Infinity;
+}
+
 export const OBJECTIVES = {
   npv: { label: "Maximum NPV", better: (a, b) => a.npv > b.npv },
   lifetime: { label: "Lowest lifetime cost", better: (a, b) => a.lifetimeCost < b.lifetimeCost },
-  irr: { label: "Highest IRR", better: (a, b) => (a.irr === null ? -9 : a.irr) > (b.irr === null ? -9 : b.irr) },
-  payback: { label: "Fastest payback", better: (a, b) => (a.payback === null ? 999 : a.payback) < (b.payback === null ? 999 : b.payback) },
+  irr: {
+    label: "Highest IRR",
+    better: function (a, b) {
+      const ra = irrRank(a), rb = irrRank(b);
+      // Ties are the undefined ends of the scale (and, with no outlay, every cell
+      // that pays for itself from year one sits there): money decides.
+      return ra === rb ? a.npv > b.npv : ra > rb;
+    },
+  },
+  payback: {
+    label: "Fastest payback",
+    better: function (a, b) {
+      const ra = paybackRank(a), rb = paybackRank(b);
+      return ra === rb ? a.npv > b.npv : ra < rb;
+    },
+  },
 };
 
 /** Per-plane panel caps: explicit opts.planeCaps (array or {id: cap}), else plane.maxPanels. */
@@ -76,8 +109,9 @@ export function allocationOrder(scn, p, maxPanelsTotal, caps, batteries, cells) 
 export function searchGrid(ctx, params, opts) {
   opts = opts || {};
   const p = Engine.withDefaults(params);
-  const maxPanelsTotal = opts.maxPanelsTotal === undefined
-    ? (opts.maxPanels === undefined ? 60 : opts.maxPanels) : opts.maxPanelsTotal;
+  let maxPanelsTotal = opts.maxPanelsTotal;
+  if (maxPanelsTotal === undefined) maxPanelsTotal = opts.maxPanels;   // older spelling
+  if (maxPanelsTotal === undefined) maxPanelsTotal = 60;
   const maxBatteries = opts.maxBatteries === undefined ? 6 : opts.maxBatteries;
   const step = opts.step || 1;
   const gb = Math.max(0, Math.min(maxBatteries, opts.greedyBatteries === undefined ? 0 : opts.greedyBatteries));
@@ -109,10 +143,7 @@ export function searchGrid(ctx, params, opts) {
       const nb = battList[bi];
       const res = (nb === gb && cache.has(n)) ? cache.get(n)
         : Engine.runHours(scn, Object.assign({}, p, { panelsByPlane: alloc, batteries: nb }), false);
-      res.savingsVsSameFlex = b.sameFlex.bill - res.bill;
-      res.savingsVsAsRecorded = b.asRecorded.bill - res.bill;
-      res.importSavingsVsSameFlex = res.savingsVsSameFlex - res.exportRevenue;
-      res.importSavingsVsAsRecorded = res.savingsVsAsRecorded - res.exportRevenue;
+      Engine.attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
       cells.push(res);
       if (opts.onProgress && (++done % 40 === 0)) opts.onProgress(done, total);
     }
@@ -199,7 +230,8 @@ export function tornado(cell, finance, baselineBill, flexVariants) {
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
     pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal,
   });
-  const base = Finance.evaluate(simOf(cell), finance).npv;
+  const sim = simOf(cell);
+  const base = Finance.evaluate(sim, finance).npv;
   const f = Finance.withDefaults(finance);
   const rows = [
     ["Solar $/W", "costPerW"], ["Storage $/kWh", "costPerKwh"],
@@ -207,7 +239,6 @@ export function tornado(cell, finance, baselineBill, flexVariants) {
   ].map(function (r) {
     const lo = Object.assign({}, f); lo[r[1]] = f[r[1]] * 0.8;
     const hi = Object.assign({}, f); hi[r[1]] = f[r[1]] * 1.2;
-    const sim = simOf(cell);
     return { label: r[0], low: Finance.evaluate(sim, lo).npv - base,
              high: Finance.evaluate(sim, hi).npv - base };
   });

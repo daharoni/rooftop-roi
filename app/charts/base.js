@@ -126,18 +126,4 @@ export function legendHTML(targetId, items) {
   }
 }
 
-/** Every chart gets a table twin; this builds it from rows of strings. */
-export function tableHTML(targetId, headers, rows, opts = {}) {
-  const node = $(targetId);
-  if (!node) return;
-  clear(node);
-  const thead = el("thead", {}, [el("tr", {}, headers.map((h, i) =>
-    el(i === 0 ? "th" : "th.n", { text: h })))]);
-  const tbody = el("tbody", {}, rows.map((r) => el("tr" + (r.best ? ".is-best" : ""), {},
-    (r.cells || r).map((c, i) => el(i === 0 ? "td" : "td.n", { text: String(c) })))));
-  node.appendChild(thead);
-  node.appendChild(tbody);
-  if (opts.caption) node.appendChild(el("caption", { text: opts.caption }));
-}
-
-export default { draw, baseOpts, lineChart, legendHTML, tableHTML, destroyChart, destroyAll };
+export default { draw, baseOpts, lineChart, legendHTML, destroyChart, destroyAll };

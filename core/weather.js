@@ -77,8 +77,9 @@ export class WeatherUnavailableError extends Error {
 export function latestCompleteYear(today = new Date()) {
   const cutoff = today.getTime() - ARCHIVE_LAG_DAYS * DAY_MS;
   const y = new Date(cutoff).getUTCFullYear();
-  // Dec 31 of year y is covered only if the cutoff has passed into year y+1.
-  return Date.UTC(y, 0, 1) <= cutoff && cutoff >= Date.UTC(y, 11, 31) ? y : y - 1;
+  // `y` is by construction the year `cutoff` falls in, so the only question left is
+  // whether the archive has reached that year's Dec 31.
+  return cutoff >= Date.UTC(y, 11, 31) ? y : y - 1;
 }
 
 /**
@@ -96,6 +97,8 @@ export function defaultYears(today = new Date(), count = DEFAULT_YEAR_COUNT) {
 // Cache
 // ---------------------------------------------------------------------------
 
+// `toFixed(2)` kills the binary-float dust that 0.05 multiplication leaves behind, and
+// `+ 0` folds a -0 result to 0 so a longitude just west of Greenwich is not sent as "-0.00".
 const roundGrid = (v) =>
   Number((Math.round(v / CACHE_GRID_DEG) * CACHE_GRID_DEG).toFixed(2)) + 0;
 
@@ -186,8 +189,9 @@ export function indexedDbCache({ dbName = DB_NAME, storeName = DB_STORE } = {}) 
 export function fileCache({ dir } = {}) {
   const mem = new Map();
   let fsPromise = null;
+  let pathPromise = null;
   const nodeFs = () => (fsPromise ||= import("node:fs/promises"));
-  const nodePath = () => import("node:path");
+  const nodePath = () => (pathPromise ||= import("node:path"));
   const baseDir = async () => {
     const path = await nodePath();
     return (

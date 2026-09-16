@@ -24,12 +24,12 @@
  * ========================================================================== */
 
 import * as State from "./state.js";
-import { $, el, clear, readTokens, toast, T } from "./ui/dom.js";
-import { ControlRail } from "./ui/controls.js";
+import { $, el, clear, readTokens, toast } from "./ui/dom.js";
+import { ControlRail, defaultReason } from "./ui/controls.js";
 import { renderLanding, landingError } from "./ui/landing.js";
 import { summaryText, copyToClipboard } from "./ui/summary.js";
 import { destroyAll } from "./charts/base.js";
-import { fmtKwh, fmtMoney, fmtNum, fmtPct } from "./ui/format.js";
+import { fmtKwh } from "./ui/format.js";
 import { adoptGeocodeNote } from "./privacy.js";
 
 import * as dashboardTab from "./tabs/dashboard.js";
@@ -83,11 +83,12 @@ const ctx = {
   grid: null, priced: null, selected: null, detail: null, replay: null,
   weatherRows: null, tornado: null, week: null,
   baselineBill: 0, baselineMonthly: null,
-  planLabel: "", tariffNote: "", solarNote: "",
-  solarStatusText: "", solarProgress: 0,
+  planLabel: "", solarStatusText: "", solarProgress: 0,
   statusText: "", effectiveDiscount: 0,
   breakEvenPerW: null, breakEvenPerKwh: null,
   flexShiftOnlySavings: 0, annualPerKw: null, weeks: 52,
+  objective: null, installerAnnualKwh: null,
+  bestPlan: null, bestPlanGain: 0, bestProvider: null, bestProviderGain: 0,
   weatherOptions: [{ v: "tmy", t: "TMY (typical year)" }],
   planOptions: [], providerOptions: [], utilityOptions: [],
   dataWarnings: [],
@@ -168,7 +169,6 @@ function onWorkerMessage(m) {
     workerReady = true;
     ctx.planOptions = (m.plans || []).map((p) => ({ v: p.id, t: p.name || p.id }));
     ctx.providerOptions = (m.providers || []).map((p) => ({ v: p.id, t: p.name || p.id }));
-    ctx.quality = m.quality;
     ctx.weeks = Math.max(1, Math.round((m.days || 365) / 7));
     status("", 1);
     runGrid();
@@ -251,23 +251,43 @@ function runDetail(cell) {
   worker.postMessage({
     type: "detail", id: pendingDetail, params: simParams(),
     panelsByPlane: cell.panelsByPlane, batteries: cell.batteries,
-    weatherKeys: weatherKeysForDetail(),
+    weatherKeys: weatherKeysForDetail(State.get()),
   });
 }
 
-function weatherKeysForDetail() {
-  const s = State.get();
+/**
+ * Which weather scenarios the fetched profiles support, in the order they are
+ * offered: the typical year, then whichever exceedance percentiles the
+ * percentile pass found, then every individual year.  The two callers below
+ * label the same list differently — a rail option and a worker request.
+ */
+function weatherScenarios(s) {
+  const out = [{ key: "tmy", year: null }];
   const first = Object.values(s.solar.byPlane)[0];
-  if (!first) return [{ key: "tmy", label: "TMY", group: "ref" }];
-  const keys = [{ key: "tmy", label: "TMY", group: "ref" }];
+  if (!first) return out;
   const pc = first.percentiles || {};
-  if (pc.p90Year) keys.push({ key: "p90", label: `P90 low (${pc.p90Year})`, group: "ref" });
-  if (pc.p50Year) keys.push({ key: "p50", label: `P50 med (${pc.p50Year})`, group: "ref" });
-  if (pc.p10Year) keys.push({ key: "p10", label: `P10 high (${pc.p10Year})`, group: "ref" });
-  for (const k of Object.keys(first.profiles || {}).filter((k) => k !== "tmy").sort()) {
-    keys.push({ key: k, label: k, group: "year" });
+  for (const p of ["p90", "p50", "p10"]) {
+    if (pc[p + "Year"]) out.push({ key: p, year: pc[p + "Year"] });
   }
-  return keys;
+  for (const k of Object.keys(first.profiles || {}).filter((k) => k !== "tmy").sort()) {
+    out.push({ key: k, year: k });
+  }
+  return out;
+}
+
+const PERCENTILES = {
+  p90: { option: "P90 — conservative, low sun", detail: "P90 low" },
+  p50: { option: "P50 — median year", detail: "P50 med" },
+  p10: { option: "P10 — optimistic, high sun", detail: "P10 high" },
+};
+
+function weatherKeysForDetail(s) {
+  return weatherScenarios(s).map(({ key, year }) => {
+    if (key === "tmy") return { key, label: "TMY", group: "ref" };
+    const pc = PERCENTILES[key];
+    if (pc) return { key, label: `${pc.detail} (${year})`, group: "ref" };
+    return { key, label: key, group: "year" };
+  });
 }
 
 function runReplay() {
@@ -576,8 +596,9 @@ function onControlSet(path, value, spec) {
   if (path === "ui.addPreset") { if (value) addPreset(value); return; }
   if (path === "ui.assumptionsJump") { const n = $(value); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (path === "ui.customEnabled") { toast("Custom rates from a bill are not wired up yet — pick the closest published plan."); return; }
+  if (path === "site.utilityId") { switchUtility(value); return; }
 
-  const reason = spec.reason || (path.startsWith("fin.") ? "finance" : path.startsWith("ui.") ? "ui" : "sim");
+  const reason = spec.reason || defaultReason(path);
   State.update((s) => {
     State.setPath(s, path, value);
     // Choosing export arbitrage without the meter that makes it billable is a
@@ -591,6 +612,24 @@ function onControlSet(path, value, spec) {
       }
     }
   }, reason);
+}
+
+/**
+ * A different utility is a different rate book: the worker was initialised
+ * with the old one, so it has to be re-booted with the new tariffs, and the
+ * plan and provider fall back to that utility's defaults.
+ */
+async function switchUtility(utilityId) {
+  if (!ctx.tariffLib || !ctx.tariffLib.utilities[utilityId]) return;
+  State.update((s) => {
+    s.site.utilityId = utilityId;
+    s.tariff.planId = null;
+    s.tariff.providerId = null;
+  }, "silent");
+  await chooseTariff(null);
+  markStale();
+  await bootWorker();
+  render();
 }
 
 function pickCell(panels, batteries) {
@@ -710,7 +749,7 @@ async function ensureSolar() {
   if (!s.roof.planes.length) { ctx.solarStatusText = "Add a roof face."; return; }
   if (s.site.lat === null || s.site.lon === null) {
     ctx.solarStatusText = "Set a location on the Roof tab before the sunlight can be fetched.";
-    State.get().solar.status = "idle";
+    s.solar.status = "idle";
     return;
   }
   if (!Core.weather || !Core.pv) {
@@ -766,7 +805,6 @@ async function ensureSolar() {
   ctx.solarStatusText = `Ready — ${s.solar.weatherYears.length} weather years, ${s.roof.planes.length} `
     + `${s.roof.planes.length === 1 ? "face" : "faces"} modelled.`;
   ctx.weatherOptions = buildWeatherOptions(s);
-  ctx.solarNote = solarNote(s);
 
   if (workerReady) await bootWorker();     // the worker caches the profiles at init
 }
@@ -776,25 +814,12 @@ function renderRoofOnly() {
 }
 
 function buildWeatherOptions(s) {
-  const first = Object.values(s.solar.byPlane)[0];
-  const out = [{ v: "tmy", t: "TMY (typical year)" }];
-  if (!first) return out;
-  const pc = first.percentiles || {};
-  if (pc.p90Year) out.push({ v: "p90", t: `P90 — conservative, low sun (${pc.p90Year})` });
-  if (pc.p50Year) out.push({ v: "p50", t: `P50 — median year (${pc.p50Year})` });
-  if (pc.p10Year) out.push({ v: "p10", t: `P10 — optimistic, high sun (${pc.p10Year})` });
-  for (const k of Object.keys(first.profiles || {}).filter((k) => k !== "tmy").sort()) {
-    out.push({ v: k, t: "Weather year " + k });
-  }
-  return out;
-}
-
-function solarNote(s) {
-  const first = Object.values(s.solar.byPlane)[0];
-  if (!first) return "not computed";
-  const perKw = first.annualPerKw ? first.annualPerKw[s.ui.weatherKey] ?? Object.values(first.annualPerKw)[0] : null;
-  return perKw ? `${fmtNum(perKw, 0)} kWh/kW-yr on the first face, ${(s.solar.weatherYears || []).length} weather years`
-    : "computed";
+  return weatherScenarios(s).map(({ key, year }) => {
+    if (key === "tmy") return { v: key, t: "TMY (typical year)" };
+    const pc = PERCENTILES[key];
+    if (pc) return { v: key, t: `${pc.option} (${year})` };
+    return { v: key, t: "Weather year " + key };
+  });
 }
 
 // ------------------------------------------------------------------- intake
@@ -920,7 +945,6 @@ async function chooseTariff(zip) {
   ctx.climateCredit = Core.tariff.climateCredit(t);
   ctx.escalationNote = (t.meta && t.meta.escalation && t.meta.escalation.note)
     ? shorten(t.meta.escalation.note, 2) : "";
-  ctx.tariffNote = `${(t.utility && t.utility.name) || utilityId.toUpperCase()} · rates effective ${(t.meta || {}).rates_effective || "?"}`;
 
   State.update((s2) => {
     s2.site.utilityId = utilityId;
@@ -1011,7 +1035,6 @@ async function enterApp() {
 
   await ensureSolar();
   ctx.weatherOptions = buildWeatherOptions(State.get());
-  ctx.solarNote = solarNote(State.get());
   await bootWorker();
   render();
 }
@@ -1116,18 +1139,20 @@ async function boot() {
   if (saved && saved.ts && saved.ts.length) {
     ctx.loadSet = saved;
     State.update((s) => { s.load = { meta: saved.meta || {} }; }, "silent");
-    if (Core.flexload && !State.get().flex.length) {
-      try {
-        const ev = Core.flexload.detectEV(saved);
-        if (ev) State.update((s) => { s.flex = [ev]; }, "silent");
-      } catch { /* detection is optional */ }
-    } else if (Core.flexload) {
-      // Schedules round-tripped through storage, but the detected hourly slice did not.
+    if (Core.flexload) {
       try {
         const ev = Core.flexload.detectEV(saved);
         State.update((s) => {
+          // A first session keeps what the detector found. A returning one has
+          // the schedules back out of storage, but not the detected hourly
+          // slice — that is a piece of the meter data, so it is re-attached.
+          if (!s.flex.length) {
+            if (ev) s.flex = [ev];
+            return;
+          }
+          if (!ev) return;
           for (const f of s.flex) {
-            if (f.source === "detected" && ev && f.kind === ev.kind) {
+            if (f.source === "detected" && f.kind === ev.kind) {
               f.kwhByHour = ev.kwhByHour;
               f.detection = ev.detection;
             }
