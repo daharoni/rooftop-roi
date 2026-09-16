@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rooftop ROI</title>
+<meta name="description" content="Does rooftop solar plus a battery beat leaving the same cash in the market? Simulated hour by hour against your own utility interval data, under California Net Billing rules. Your data never leaves this browser.">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🏠</text></svg>">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
+        integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+
+<noscript>
+  <div style="max-width:60ch;margin:60px auto;padding:0 24px">
+    <h1>Rooftop ROI needs JavaScript</h1>
+    <p>Every calculation on this page runs in your browser — there is no server to do it instead.
+       That is the same reason your meter data never leaves this device.</p>
+  </div>
+</noscript>
+
+<!-- ============================================================== landing -->
+<main class="landing" id="landing"></main>
+
+<!-- ============================================================ app shell -->
+<div class="shell" id="shell" hidden>
+
+  <header class="topbar">
+    <div class="wordmark"><b>Rooftop ROI</b></div>
+    <span class="chip" id="household-chip"></span>
+    <div class="status" id="status" role="status" aria-live="polite">
+      <span id="status-text"></span>
+      <span class="bar" id="status-bar"><i></i></span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn" id="btn-copy" type="button">Copy summary</button>
+      <button class="btn" id="btn-reset" type="button">Reset settings</button>
+      <button class="btn btn-danger" id="btn-forget" type="button">Forget my data</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Sections"></nav>
+
+  <div class="workbench">
+    <aside class="rail" aria-label="Controls">
+      <div id="rail-controls"></div>
+    </aside>
+    <main class="pane" id="pane" role="tabpanel" tabindex="-1"></main>
+  </div>
+
+</div>
+
+<script type="module" src="app/main.js"></script>
+</body>
+</html>

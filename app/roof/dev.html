@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roof builder — dev harness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../docs/reference-styles.css">
+<link rel="stylesheet" href="./roof.css">
+<style>
+  /* Harness chrome only — none of this ships with the component. */
+  body { padding: 0; }
+  .dev-shell { max-width: 1180px; margin: 0 auto; padding: 20px 20px 64px; display: flex; flex-direction: column; gap: 16px; }
+  .dev-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  .dev-bar h1 { font-size: 16px; }
+  .dev-bar .sub { font-size: 12px; color: var(--ink-2); flex: 1 1 240px; }
+  .dev-out { background: var(--sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; }
+  .dev-out summary { cursor: pointer; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); list-style: none; }
+  .dev-out summary::-webkit-details-marker { display: none; }
+  .dev-out pre { font-family: var(--mono); font-size: 11px; color: var(--ink-2); margin: 10px 0 0; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+  .dev-count { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<div class="dev-shell">
+  <div class="dev-bar">
+    <h1>Roof builder</h1>
+    <span class="sub">Mounted at the demo site, Agoura Hills (34.145, &minus;118.76). Serve this folder over <code class="mono">python3 -m http.server</code>.</span>
+    <span class="dev-count" id="emitted">0 emits</span>
+    <button class="btn" id="theme" type="button">Toggle theme</button>
+    <button class="btn" id="clear" type="button">Clear planes</button>
+  </div>
+
+  <div id="mount"></div>
+
+  <details class="dev-out" open>
+    <summary>Last onChange payload</summary>
+    <pre id="json">[]</pre>
+  </details>
+</div>
+
+<script type="module">
+  import { mountRoofBuilder } from './roofBuilder.js';
+
+  const out = document.getElementById('json');
+  const counter = document.getElementById('emitted');
+  let emits = 0;
+
+  const rb = mountRoofBuilder(document.getElementById('mount'), {
+    site: { lat: 34.145, lon: -118.76 },
+    planes: [],
+    panel: { w: 460, widthM: 1.134, heightM: 1.762 },
+    onChange(planes) {
+      emits++;
+      counter.textContent = `${emits} emit${emits === 1 ? '' : 's'} · ${planes.length} plane${planes.length === 1 ? '' : 's'}`;
+      out.textContent = JSON.stringify(planes, (k, v) =>
+        (k === 'polygon' && Array.isArray(v) ? v.map((p) => [+p[0].toFixed(6), +p[1].toFixed(6)]) : v), 2);
+      window.__lastPlanes = planes;
+    },
+    onSiteChange(site) { console.log('site ->', site); },
+    onCalibration(c) { console.log('calibration ->', c); },
+  });
+  window.__rb = rb;
+
+  document.getElementById('theme').onclick = () => {
+    const root = document.documentElement;
+    const now = root.getAttribute('data-theme');
+    const dark = now ? now === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  };
+  document.getElementById('clear').onclick = () => rb.setPlanes([]);
+</script>
+</body>
+</html>
