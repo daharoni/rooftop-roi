@@ -49,12 +49,24 @@ export class ControlRail {
     this.specs = this.groups.flatMap((g) => g.items);
     clear(this.root);
     const wide = typeof window === "undefined" || window.innerWidth > 1000;
+    // The rail is an accordion: one group open at a time, so a long list of
+    // knobs never pushes the one being dragged off the bottom of the screen.
+    // The first group marked open starts open; opening another closes it.
+    let opened = false;
     for (const g of this.groups) {
       const body = el("div.group-body");
       for (const spec of g.items) body.appendChild(this._widget(spec, state));
-      const details = el("details.group", { open: g.open !== false && wide }, [
+      const startOpen = g.open !== false && wide && !opened;
+      if (startOpen) opened = true;
+      const details = el("details.group", { open: startOpen }, [
         el("summary", { text: g.group }), body,
       ]);
+      details.addEventListener("toggle", () => {
+        if (!details.open) return;
+        for (const other of this.root.querySelectorAll("details.group[open]")) {
+          if (other !== details) other.open = false;
+        }
+      });
       this.root.appendChild(details);
     }
     this.refresh(state);
