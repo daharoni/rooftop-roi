@@ -734,6 +734,10 @@ export function runHours(scn, params, detail) {
   for (let bb = 0; bb < EXP_BANDS.length; bb++) { mBandKwh.push(new Float64Array(M)); mBandCred.push(new Float64Array(M)); }
   const mPeriod = detail ? [new Float64Array(M), new Float64Array(M), new Float64Array(M), new Float64Array(M)] : null;
   let tImp = 0, tExp = 0, tPv = 0, tSelf = 0, tChg = 0, tDis = 0, tClip = 0, tLoad = 0;
+  // Everything except the flexible loads: what the house draws when the cars and
+  // the pool pump are not running, which is the draw a battery backs up in an outage.
+  let tBase = 0;
+  const baseLoad = scn.baseLoad || load;
 
   // typical-day accumulators: [season][hour][channel]
   const CH = 8; // load, flex, pv, chg, dis, imp, exp, soc
@@ -750,7 +754,7 @@ export function runHours(scn, params, detail) {
   for (let i = 0; i < N; i++) {
     const L = load[i], P = pv[i];
     const m = ctx.monthIdx[i], day = ctx.dayIdx[i], hr = ctx.hour[i], pc = r.period[i];
-    tPv += P; tLoad += L;
+    tPv += P; tLoad += L; tBase += baseLoad[i];
 
     const pvToLoad = P < L ? P : L;
     let surplus = P - pvToLoad, deficit = L - pvToLoad;
@@ -834,6 +838,7 @@ export function runHours(scn, params, detail) {
     pvKwhByPlane: Array.prototype.map.call(pvInfo.byPlane, (v) => v / years),
     planeIds: scn.planes.map((pl) => pl.id),
     selfConsumedKwh: tSelf / years, clippedKwh: tClip / years, loadKwh: tLoad / years,
+    baseLoadKwh: tBase / years,
     chargeKwh: tChg / years, dischargeKwh: tDis / years,
     cycles: cap > 0 ? (tDis / years) / cap : 0,
     bill: billing.total / years, forfeitedCredit: billing.forfeited / years,

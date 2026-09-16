@@ -229,8 +229,7 @@ function renderHeadline(state, ctx, cell) {
     outlayTile(mode, fin, f),
     { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
     { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
-    { k: "Lifetime energy cost", v: fmtCompact(cell.lifetimeCost),
-      d: `vs ${fmtCompact(f.lifetimeCostNoSystem)} doing nothing · ${fin.horizon} yr, present value` },
+    backupTile(cell),
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
   const host = clear($("tiles"));
@@ -253,6 +252,27 @@ function renderHeadline(state, ctx, cell) {
     note.appendChild(el("button.chip-action", { type: "button", text: "Back to the optimiser's pick",
       style: "font-size:11px;padding:2px 9px", on: { click: () => ctx.actions.clearOverride() } }));
   }
+}
+
+/**
+ * How long a full pack carries the house in an outage, at the house's average
+ * draw with the flexible loads off - nobody charges two cars from a battery in a
+ * blackout.  A rough figure by design: a real outage has the panels recharging
+ * the pack by day and the household trimming load, so the truth is longer; but
+ * a pack against the averaged base load is the honest starting point, and
+ * without a pack a grid-tied array gives nothing.
+ */
+function backupTile(cell) {
+  const kwh = cell.battKWhTotal || 0;
+  const annual = cell.baseLoadKwh || cell.loadKwh || 0;
+  const perDay = annual / 365;
+  if (kwh <= 0) return { k: "Backup power", v: "none", d: "no battery · a grid-tied array shuts off in an outage" };
+  if (!perDay) return { k: "Backup power", v: fmtNum(kwh, 0) + " kWh", d: "usable storage" };
+  const hours = kwh / perDay * 24;
+  const v = hours < 48 ? fmtNum(hours, hours < 10 ? 1 : 0) + " h" : fmtNum(hours / 24, 1) + " days";
+  const flexOff = cell.baseLoadKwh && cell.loadKwh > cell.baseLoadKwh + 1 ? ", cars and pool off" : "";
+  return { k: "Backup power", v,
+    d: `${fmtNum(kwh, 0)} kWh pack · house draws ${fmtNum(perDay, 0)} kWh/day${flexOff} · longer with daytime sun` };
 }
 
 /** Above zero the roof won, below it the market did; zero is a real midpoint. */

@@ -298,6 +298,9 @@ function renderMethod(state, ctx) {
         + "and buyout included - interpolated within the year. For cash that is the classic simple payback. "
         + "Whether the household is cash-positive from day one is reported separately.",
       "LCOE divides present-value lifetime cost by present-value lifetime generation.",
+      "Backup power is the usable storage divided by the house's average daily draw with the flexible loads "
+        + "off - nobody charges the cars from a battery in a blackout. A real outage runs longer, since the panels "
+        + "recharge the pack by day and people trim load; without a battery a grid-tied array gives no backup at all.",
       "Break-even price is the $/W or $/kWh at which NPV is exactly zero, solved directly — NPV is linear in both.",
     ]),
 

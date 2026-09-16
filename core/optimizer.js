@@ -191,7 +191,7 @@ export function priceGrid(grid, finance, objective, basis) {
       batteries: c.batteries, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
       savings, importSavings: importSav, exportRevenue: exportRev,
       bill: c.bill, importKwh: c.importKwh, exportKwh: c.exportKwh,
-      pvKwh: c.pvKwh, pvKwhByPlane: c.pvKwhByPlane,
+      pvKwh: c.pvKwh, pvKwhByPlane: c.pvKwhByPlane, loadKwh: c.loadKwh, baseLoadKwh: c.baseLoadKwh,
       cycles: c.cycles, selfSufficiency: c.selfSufficiency,
       solarFraction: c.solarFraction, clippedKwh: c.clippedKwh,
       npv: fin.npv, irr: fin.irr, projectIrr: fin.projectIrr,
