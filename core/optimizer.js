@@ -18,22 +18,25 @@ import Engine from "./engine.js";
 import Finance from "./finance.js";
 
 /**
- * A null IRR means one of two OPPOSITE things, so it cannot be ranked with a single
- * sentinel.  With money down (cash, a loan with a deposit) it means the cash flow
- * never turns positive - the worst case.  With nothing down (a lease, a fully
- * financed loan) a stream that is cash positive from year one has no rate of return
- * to solve for because nothing was invested - the best case.  The sign of NPV
- * separates them; without this the sweep hands "highest IRR" a cell that loses money
- * every year in preference to one that makes money from day one.
+ * "Highest IRR" and "fastest payback" both rank among systems that actually make
+ * money (NPV > 0).  IRR is the project IRR - the return the system earns on its
+ * cash price, whoever pays it - so the objective means the same thing under cash,
+ * a loan and a lease; the levered `irr` is undefined with nothing down and
+ * inflated with a little down.  Without the NPV gate a lease would hand "highest
+ * IRR" to the smallest array, whose fine project return the lessor keeps while the
+ * lessee's payments outrun the savings.  Money-losers rank below every earner,
+ * ordered by NPV so the least bad wins if nothing else does.
  */
 function irrRank(c) {
-  if (typeof c.irr === "number") return c.irr;
-  return c.npv > 0 ? Infinity : -Infinity;
+  const v = c.projectIrr !== undefined ? c.projectIrr : c.irr;
+  if (!(c.npv > 0) || typeof v !== "number") return -Infinity;
+  return v;
 }
 
-/** A cell that never pays back ranks last. */
+/** Fewest years to pay for itself, among systems that make money; never = last. */
 function paybackRank(c) {
-  return typeof c.payback === "number" ? c.payback : Infinity;
+  if (!(c.npv > 0) || typeof c.payback !== "number") return Infinity;
+  return c.payback;
 }
 
 export const OBJECTIVES = {
@@ -191,7 +194,9 @@ export function priceGrid(grid, finance, objective, basis) {
       pvKwh: c.pvKwh, pvKwhByPlane: c.pvKwhByPlane,
       cycles: c.cycles, selfSufficiency: c.selfSufficiency,
       solarFraction: c.solarFraction, clippedKwh: c.clippedKwh,
-      npv: fin.npv, irr: fin.irr, payback: fin.payback, discountedPayback: fin.discountedPayback,
+      npv: fin.npv, irr: fin.irr, projectIrr: fin.projectIrr,
+      payback: fin.payback, discountedPayback: fin.discountedPayback,
+      cashFlowPayback: fin.cashFlowPayback, totalCost: fin.totalCost,
       netCost: fin.netCost, lifetimeCost: fin.lifetimeCost, lcoe: fin.lcoe,
       wealthSystem: fin.wealthSystem, wealthInvest: fin.wealthInvest,
       firstYearSavings: fin.firstYearSavings,

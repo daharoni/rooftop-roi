@@ -220,7 +220,7 @@ function renderHeadline(state, ctx, cell) {
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
         : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}` },
     irrTile(cell, fin, f),
-    paybackTile(cell, f),
+    paybackTile(cell, fin, f),
     { k: "Wealth at " + fin.horizon + " yr", v: fmtCompact(f.wealthSystem), d: "investing: " + fmtCompact(f.wealthInvest) },
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
@@ -268,16 +268,41 @@ function outlayTile(mode, fin, f) {
 }
 
 /** With nothing paid up front the cash flow never changes sign, so there is no IRR. */
+/**
+ * The IRR shown is the project IRR: what the system earns on its cash price,
+ * whoever pays it.  Under a loan the useful comparison is the APR - if the
+ * system earns more than the loan costs, borrowing was the right call.  The
+ * levered IRR on the household's own cash flows is undefined with nothing down
+ * and inflated with a little down, so it is not shown as a tile.
+ */
 function irrTile(cell, fin, f) {
-  const hasIrr = cell.irr !== null && cell.irr !== undefined;
-  if (hasIrr) return { k: "IRR", v: fmtPct(cell.irr, 1), d: "vs " + fmtPct(fin.investReturn, 1) + " invested" };
-  return { k: "IRR", v: "—", d: f.upfront === 0 ? "nothing paid up front" : "savings never repay the outlay" };
+  const v = cell.projectIrr;
+  const mode = fin.financing.mode;
+  if (v === null || v === undefined) return { k: "IRR", v: "—", d: "savings never repay the price" };
+  if (mode === "loan") {
+    const apr = fin.financing.loan.apr;
+    return { k: "IRR, system itself", v: fmtPct(v, 1),
+      d: `loan costs ${fmtPct(apr, 2)} · borrowing ${v > apr ? "wins" : "loses"}` };
+  }
+  return { k: mode === "lease" ? "IRR, system itself" : "IRR", v: fmtPct(v, 1), d: "vs " + fmtPct(fin.investReturn, 1) + " invested" };
 }
 
-function paybackTile(cell, f) {
-  if (f.upfront === 0 && cell.payback === 0) return { k: "Payback", v: "day one", d: "nothing paid up front" };
-  if (f.upfront === 0) return { k: "Payback", v: fmtYears(cell.payback), d: "payments exceed savings until then" };
-  return { k: "Payback", v: fmtYears(cell.payback), d: "discounted " + fmtYears(cell.discountedPayback) };
+/**
+ * "Pays for itself": the year the system's earnings have covered everything it
+ * will ever cost, financing included.  The small print carries the financing
+ * fact that used to masquerade as the payback: when the loan is gone, or that
+ * the household is cash-positive from day one.
+ */
+function paybackTile(cell, fin, f) {
+  const mode = fin.financing.mode;
+  const v = cell.payback === null || cell.payback === undefined ? "never" : fmtYears(cell.payback);
+  if (mode === "cash") return { k: "Pays for itself", v, d: "discounted " + fmtYears(cell.discountedPayback) };
+  const cashPos = cell.cashFlowPayback === 0 ? "cash-positive from day one" : `cash-positive after ${fmtYears(cell.cashFlowPayback)}`;
+  if (mode === "loan") {
+    return { k: "Pays for itself", v,
+      d: `incl. ${fmtCompact(f.totalInterest)} interest · loan gone yr ${f.loanPaidOffYear} · ${cashPos}` };
+  }
+  return { k: "Pays for itself", v, d: `${fin.financing.lease.termYears}-yr lease · ${cashPos}` };
 }
 
 // ------------------------------------------------------------ flexible loads

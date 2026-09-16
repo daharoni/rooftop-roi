@@ -216,8 +216,10 @@ test("IRR needs an outlay first: a stream that starts positive has none", () => 
     battReplFraction: 0.5, financing: { mode: "loan", loan: { sharePct: 1, apr: 0.01, termYears: 25, dealerFeePct: 0 } } });
   assert.ok(r.cashflows[1] > 0, "year 1 is already cash positive");
   assert.ok(r.cashflows[20] < 0, "the replacement year is negative");
-  assert.equal(r.irr, null, "so there is no rate of return to report");
-  assert.equal(r.payback, 0, "and payback is immediate");
+  assert.equal(r.irr, null, "so there is no levered rate of return to report");
+  assert.equal(r.cashFlowPayback, 0, "the household is cash positive from day one");
+  assert.ok(r.payback > 5 && r.payback < 25, "but the system takes years to pay for itself, interest included");
+  assert.ok(r.projectIrr > 0, "and the project IRR is the return on the cash price");
   const cash = Finance.evaluate(sim, { ...FLAT, costPerW: 3, costPerKwh: 1000, horizon: 25 });
   assert.ok(cash.irr !== null && cash.irr > 0, "the same system bought for cash has a real IRR");
 });
@@ -260,7 +262,10 @@ test("lease: no upfront, escalating payments, no ownership incentives", () => {
   const good = Finance.evaluate({ ...sim, savings: 2000, baselineBill: 2600, bill: 600 },
                                 { ...FLAT, costPerW: 3, horizon: 2, financing: lease });
   assert.equal(good.cashflows.join(","), "0,800,800", "a lease that beats the bill is cash positive");
-  near(good.payback, 0, 1e-12, "with no outlay it is ahead from day one");
+  near(good.cashFlowPayback, 0, 1e-12, "with no outlay it is cash positive from day one");
+  // savings 2000/yr against 2400 of total lease payments: covered 1.2 years in.
+  near(good.payback, 1.2, 1e-9, "and pays for its whole lease 1.2 years in");
+  near(good.totalCost, 2400, 1e-9, "total cost is every lease payment");
   near(good.firstYearMonthlyOutlay, 100 + 600 / 12, 1e-9, "outlay = lease payment + remaining bill");
   near(good.currentMonthlyBill, 2600 / 12, 1e-9, "against today's bill");
 

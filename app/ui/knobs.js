@@ -49,8 +49,8 @@ export function goal(ctx, open = true) {
     { path: "ui.objective", kind: "select", label: "Optimise for", opts: OBJECTIVE_OPTS, reason: "finance",
       footnote: (s) => (ctx.objective && ctx.objective !== s.ui.objective
         ? (s.ui.objective === "irr"
-          ? "No system here has an IRR: nothing is paid up front and savings beat the payments from day one. Optimising for NPV instead."
-          : "Every system here pays back on day one, so payback cannot rank them. Optimising for NPV instead.")
+          ? "No system here ever repays its price, so IRR cannot rank them. Optimising for NPV instead."
+          : "No system here pays for itself within the horizon, so payback cannot rank them. Optimising for NPV instead.")
         : "") },
     { ...item.basis(),
       note: "The first isolates what the hardware does. The second also credits moving flexible load into daylight, which is free." },

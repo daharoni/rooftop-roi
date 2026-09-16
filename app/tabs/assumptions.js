@@ -284,9 +284,13 @@ function renderMethod(state, ctx) {
         + "ownership incentives — the third party keeps those. The savings still accrue to the household.",
       "NPV discounts the cash flows at the return you could have earned on the same money. Above zero means the "
         + "roof beat the market.",
-      "IRR is the discount rate at which NPV is zero, found by bisection. If savings never repay the outlay "
-        + "there is no IRR and none is shown.",
-      "Payback is the first year the running total turns positive, interpolated within the year.",
+      "IRR is the project IRR: the return the system earns on its cash price, whoever pays it, so it means "
+        + "the same thing under cash, a loan and a lease. Under a loan the number to beat is the APR. If savings "
+        + "never repay the price there is no IRR and none is shown.",
+      "Pays for itself is the first year the system's cumulative earnings (savings less O&M and replacements) "
+        + "have covered everything it will ever cost - the upfront share plus every loan or lease payment, interest "
+        + "and buyout included - interpolated within the year. For cash that is the classic simple payback. "
+        + "Whether the household is cash-positive from day one is reported separately.",
       "LCOE divides present-value lifetime cost by present-value lifetime generation.",
       "Break-even price is the $/W or $/kWh at which NPV is exactly zero, solved directly — NPV is linear in both.",
     ]),
@@ -329,8 +333,8 @@ function renderGlossary() {
   const node = clear($("glossary-kv"));
   const terms = [
     ["NPV", "Net present value. Today's value of every future dollar the system saves, minus what it costs, discounted at the return you could have earned instead. Above zero, the roof won."],
-    ["IRR", "Internal rate of return. The annual return the system earns on the money you put in."],
-    ["Payback", "The year the running total of savings first exceeds what you spent."],
+    ["IRR", "Internal rate of return. The annual return the system earns on its cash price, before financing. Beat the loan's APR and borrowing pays."],
+    ["Pays for itself", "The year cumulative savings first exceed everything the system costs, financing included."],
     ["LCOE", "Levelised cost of energy. Lifetime cost divided by lifetime generation, both discounted — what a kWh off your own roof really costs."],
     ["NBT", "Net Billing Tariff. California's post-2023 rule: exports earn an hourly avoided-cost credit, not a retail-rate offset."],
     ["ACC", "Avoided Cost Calculator. The state's hour-by-hour estimate of what an exported kWh is worth to the grid. Its yearly edition is its vintage."],

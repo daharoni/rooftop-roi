@@ -42,10 +42,10 @@ test("each objective selects its own extremum", () => {
 });
 
 test("highest IRR does not prefer a money-loser when nothing is paid up front", () => {
-  // A null IRR means opposite things at the two ends.  With no year-0 outlay a cell
-  // that is cash positive from year one has no rate of return to report (nothing was
-  // invested); a cell whose lease payment outruns the saving has one, and it is
-  // negative.  Ranking every null as "worst" handed the objective the loser.
+  // The objective ranks by project IRR among cells with NPV > 0.  Under a lease the
+  // smallest array has the finest project return, but that return is the lessor's:
+  // the lessee's payments outrun the savings and NPV is negative.  The NPV gate keeps
+  // such a cell from winning "highest IRR".
   const lease = { financing: { mode: "lease",
     lease: { monthly: 150, escalatorPct: 0.029, termYears: 25, buyout: 0 } } };
   const byIrr = Optimizer.priceGrid(SMALL, lease, "irr", "sameFlex");
@@ -54,8 +54,10 @@ test("highest IRR does not prefer a money-loser when nothing is paid up front", 
             "the grid really does contain cells with a negative IRR");
   assert.ok(byIrr.best.npv > 0,
             `the winner makes money (NPV ${Math.round(byIrr.best.npv)})`);
-  assert.equal(byIrr.best.panels, byNpv.best.panels,
-               "with no rate of return to rank by, NPV decides");
+  const earners = byIrr.cells.filter((c) => c.npv > 0 && typeof c.projectIrr === "number");
+  near(byIrr.best.projectIrr, Math.max(...earners.map((c) => c.projectIrr)), 1e-12,
+       "and it has the highest project IRR among the cells that make money");
+  assert.ok(byNpv.best.npv >= byIrr.best.npv, "the NPV objective never does worse on NPV");
 });
 
 test("the do-nothing cell, and when it wins", () => {

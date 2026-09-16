@@ -65,8 +65,10 @@ export function summaryText(state, ctx) {
   L.push(`         of which           ${fmtMoney(cell.importSavings)} avoided import (escalates) `
     + `+ ${fmtMoney(cell.exportRevenue)} export credit (locked)`);
   L.push(`         NPV vs investing   ${fmtMoney(cell.npv)}`);
-  L.push(`         IRR                ${cell.irr === null || cell.irr === undefined ? "n/a" : fmtPct(cell.irr, 1)}`);
-  L.push(`         payback            ${fmtYears(cell.payback)} (discounted ${fmtYears(cell.discountedPayback)})`);
+  L.push(`         IRR (system)       ${cell.projectIrr === null || cell.projectIrr === undefined ? "n/a" : fmtPct(cell.projectIrr, 1)}`
+    + (mode === "loan" ? ` vs ${fmtPct(state.fin.financing.loan.apr, 2)} loan APR` : ""));
+  L.push(`         pays for itself    ${fmtYears(cell.payback)} (discounted ${fmtYears(cell.discountedPayback)})`
+    + (mode !== "cash" ? `, cash-positive ${cell.cashFlowPayback === 0 ? "from day one" : "after " + fmtYears(cell.cashFlowPayback)}` : ""));
   L.push(`         wealth at ${state.fin.horizon} yr   system ${fmtMoney(f.wealthSystem)}  vs  invested ${fmtMoney(f.wealthInvest)}`);
   L.push(`         monthly outlay     ${fmtMoney(f.firstYearMonthlyOutlay)}/mo in year 1 `
     + `vs ${fmtMoney(f.currentMonthlyBill)}/mo today`);

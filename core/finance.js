@@ -255,7 +255,12 @@ export function evaluate(sim, f) {
   else if (watts <= 0 && sim.battKWhTotal > 0) wS = 0;      // a pack and no panels
   const wB = 1 - wS;
 
-  const cf = [-upfront], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
+  // netSav is what the system earns each year before any financing: savings less
+  // O&M and replacements (plus the resale credit at the horizon).  cf is netSav
+  // less the year's loan or lease payment.  The two are kept apart because the
+  // "pays for itself" and project-IRR figures below are about the asset, while
+  // NPV and wealth are about the household's actual money.
+  const cf = [-upfront], netSav = [0], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
   for (let y = 1; y <= H; y++) {
     const sFac = Math.pow(1 - f.panelDeg, y - 1);
     // capacity resets when the pack is replaced
@@ -273,8 +278,9 @@ export function evaluate(sim, f) {
       if (watts > 0 && y === Math.round(f.inverterYear)) ex += watts * f.inverterPerW;
     }
     const resale = isLease ? 0 : f.resaleValue;
-    const net = sav - o - ex - pay[y] + (y === H ? resale : 0);
-    cf.push(net); savings.push(sav); om.push(o); extras.push(ex); payments.push(pay[y]);
+    const earned = sav - o - ex + (y === H ? resale : 0);
+    const net = earned - pay[y];
+    cf.push(net); netSav.push(earned); savings.push(sav); om.push(o); extras.push(ex); payments.push(pay[y]);
     prod.push(sim.pvKwh * sFac);
   }
 
@@ -293,6 +299,30 @@ export function evaluate(sim, f) {
   // dutifully return a deeply negative "rate" that describes nothing.
   const firstMove = cf.find((v) => Math.abs(v) > 1e-9);
   const irr = firstMove !== undefined && firstMove < 0 ? irrOf(cf) : null;
+
+  // The asset on its own, before financing.  "Pays for itself" is the year the
+  // system's cumulative earnings (netSav) have covered everything it will ever
+  // cost: the upfront share plus every loan or lease payment, interest and buyout
+  // included.  For cash that is the classic simple payback exactly (total cost =
+  // netCost, netSav = cf); for a loan it no longer reads "day one" merely because
+  // the payment sits below the saving, and a dear loan takes longer, as it should.
+  // The discounted twin discounts both sides at the investment return.
+  // projectIrr is the return the system earns on its cash price, whoever pays it -
+  // the number to hold against a loan's APR.  `irr` above stays the levered return
+  // on the household's own cash flows, which is undefined with nothing down.
+  let totalCost = upfront;
+  for (let y = 1; y <= H; y++) totalCost += pay[y];
+  const pb = [-totalCost], dpb = [-upfront];
+  let dTotal = upfront;
+  for (let y = 1; y <= H; y++) dTotal += pay[y] / Math.pow(1 + f.investReturn, y);
+  dpb[0] = -dTotal;
+  for (let y = 1; y <= H; y++) {
+    pb.push(pb[y - 1] + netSav[y]);
+    dpb.push(dpb[y - 1] + netSav[y] / Math.pow(1 + f.investReturn, y));
+  }
+  const payback = totalCost > 0 ? crossing(pb) : 0;
+  const discountedPayback = dTotal > 0 ? crossing(dpb) : 0;
+  const projectIrr = netCost > 0 ? irrOf([-netCost].concat(netSav.slice(1))) : null;
 
   // "Same cash in the market" comparison, stated as two end-of-horizon numbers.
   // Both arms start from the same cash: what buying the system outright costs
@@ -323,9 +353,11 @@ export function evaluate(sim, f) {
   let lifetime = upfront, lifetimeNoSystem = 0;
   for (let y = 1; y <= H; y++) {
     const escY = Math.pow(1 + f.escalation, y - 1), dis = Math.pow(1 + f.discountRate, y);
-    const escXY = Math.pow(1 + f.exportEscalation, y - 1);
-    // The bill is net of export credits; only its charge side follows retail rates.
-    const billY = (sim.bill + exportRev) * escY - exportRev * escXY;
+    // The with-system bill in year y is today's bill escalated, less that year's
+    // saving - which already carries the escalation split (import at retail,
+    // export locked) and the degradation blend, so lifetime cost and NPV agree
+    // on how much a slowly fading array is worth.
+    const billY = sim.baselineBill * escY - savings[y];
     lifetime += (billY + om[y] + extras[y] + payments[y]) / dis;
     lifetimeNoSystem += (sim.baselineBill * escY) / dis;
   }
@@ -349,8 +381,12 @@ export function evaluate(sim, f) {
     cashflows: cf, savingsByYear: savings, omByYear: om, extrasByYear: extras,
     paymentsByYear: payments,
     cumulative: cum, discountedCumulative: dcum,
-    npv, irr,
-    payback: crossing(cum), discountedPayback: crossing(dcum),
+    npv, irr, projectIrr,
+    payback, discountedPayback, totalCost,
+    // When the household's own running cash turns positive (0 = from day one).
+    cashFlowPayback: crossing(cum),
+    loanPaidOffYear: amort ? Math.min(amort.termYears, H) : null,
+    netSavingsByYear: netSav,
     lcoe, lifetimeCost: lifetime, lifetimeCostNoSystem: lifetimeNoSystem,
     wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest, cashRef,
     firstYearSavings: savings[1] || 0,

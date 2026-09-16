@@ -305,8 +305,13 @@ reference. Only the `payment` column of `financingSchedule[]` is meaningful.
 cashflows[0] = −upfront
 cashflows[y] = savings_y − O&M_y − extras_y − payment_y + (y = H ? resaleValue : 0)
 NPV          = Σ cashflows_y / (1 + investReturn)^y
-IRR          = bisection on the same array; null when it never crosses zero
-payback      = first year the running total turns positive, linearly interpolated
+IRR          = bisection on the same array (levered); null unless the first cash flow is an outlay
+projectIrr   = bisection on [−netCost, netSav_y…] where netSav_y = savings_y − O&M_y − extras_y (+ resale)
+               the return the system earns on its cash price, whoever pays it; the objective uses this
+payback      = first year Σ netSav_y ≥ totalCost, totalCost = upfront + Σ payment_y ("pays for itself")
+               for cash this is the classic simple payback; a dear loan lengthens it, as it should
+discountedPayback = the same with both sides discounted at investReturn
+cashFlowPayback   = first year the running total of cashflows turns positive (0 = from day one)
 wealthInvest = netCost × (1 + investReturn)^H          the cash price, left in the market
 wealthSystem = (netCost − upfront) × (1 + investReturn)^H + Σ cashflows_y × (1 + investReturn)^(H−y)
              = wealthInvest + NPV × (1 + investReturn)^H   (in every financing mode)
@@ -321,9 +326,13 @@ lease), keeps the rest invested at the same return, and reinvests each year's ne
 loan or lease payments included. Counting only the cash flows would forget the borrower's
 still-invested principal and make a cheap loan look worse than paying cash.
 
-With no year-0 outlay (a lease, or a loan with nothing down) `IRR` is usually `null` — with
-no sign change there is no rate of return to solve for, and reporting a number there would
-be a fake. If the first year is already cash positive, `payback` is 0.
+With no year-0 outlay (a lease, or a loan with nothing down) the levered `irr` is `null` —
+there is no investment to earn a return on — and `cashFlowPayback` is 0. Neither is a useful
+figure or a usable ranking, which is why the tiles and the optimiser use `projectIrr` and the
+"pays for itself" `payback` instead.
+
+`lifetimeCost` uses `bill_y = baselineBill × escalation^(y−1) − savings_y`, so it carries the
+same degradation blend and import/export escalation split as NPV.
 
 `firstYearMonthlyOutlay` = `payment₁/12 + bill/12`, against `currentMonthlyBill` =
 `baselineBill/12`: the "is my monthly outlay lower than today's bill?" comparison, which is

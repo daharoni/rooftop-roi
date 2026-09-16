@@ -345,7 +345,7 @@ function priceWithFallback(s) {
   let obj = s.ui.objective;
   let priced = Core.optimizer.priceGrid(ctx.grid, fin, obj, s.ui.basis);
   const cells = priced.cells || [];
-  const useless = (obj === "irr" && cells.every((c) => c.irr === null || c.irr === undefined))
+  const useless = (obj === "irr" && cells.every((c) => c.projectIrr === null || c.projectIrr === undefined))
     || (obj === "payback" && cells.every((c) => !c.payback));
   if (useless) { obj = "npv"; priced = Core.optimizer.priceGrid(ctx.grid, fin, obj, s.ui.basis); }
   ctx.objective = obj;
