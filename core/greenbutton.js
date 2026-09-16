@@ -231,7 +231,7 @@ export const DISCARDED_FIELDS = [
  * Pull a ZIP out of a header block and nothing else.  Deliberately narrow: we
  * only accept a 5-digit group that sits after a US state abbreviation, after a
  * "zip"/"postal" label, or at the end of a comma-separated address line - so an
- * account number like 8001754410 can never be mistaken for one.
+ * account number like 8009999999 can never be mistaken for one.
  */
 export function findZip(headerText) {
   const t = String(headerText || "").replace(NBSP, " ");

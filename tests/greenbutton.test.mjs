@@ -91,7 +91,7 @@ test("SCE: only the ZIP survives the header block", () => {
   assert.equal(a.meta.zip, "91301");
   assert.equal(merged.meta.zip, "91301");
   const blob = JSON.stringify(merged.meta).toUpperCase();
-  for (const secret of ["DEMO HOUSEHOLD", "AGOURA HILLS", "8001754410", "SERVICE ACCOUNT"]) {
+  for (const secret of ["DEMO HOUSEHOLD", "AGOURA HILLS", "8009999999", "SERVICE ACCOUNT"]) {
     assert.ok(!blob.includes(secret), `meta leaked ${secret}`);
   }
 });
@@ -432,7 +432,7 @@ test("a UTF-8 BOM and NBSP padding do not break the SCE reader", () => {
 test("findZip accepts a state+ZIP or a labelled field, and ignores account numbers", () => {
   assert.equal(GB.findZip("For location: SOMEONE, AGOURA HILLS CA 91301"), "91301");
   assert.equal(GB.findZip("ZIP Code: 90210"), "90210");
-  assert.equal(GB.findZip("Account Number,8001754410"), null);
+  assert.equal(GB.findZip("Account Number,8009999999"), null);
 });
 
 test("an unparseable file throws rather than returning an empty LoadSet", () => {
