@@ -19,12 +19,24 @@ export function renderCashflow({ cell, fin }) {
   const H = f.horizon || fin.horizon;
   const years = Array.from({ length: H + 1 }, (_, y) => y);
 
+  // Every line is a change in wealth against the same starting point: holding
+  // the cash price of the system (`cashRef`) and doing nothing with it.
+  //   market      leave it all invested
+  //   system      spend `upfront` of it, keep the rest invested, and reinvest each
+  //               year's net cash flow (savings less O&M, replacements, payments)
+  //   cash in hand the running total of the system's own cash flows, undiscounted
+  // Under a loan `upfront` is only the down payment, so the system line keeps
+  // the market's growth on the principal that was never spent; a cheap loan
+  // therefore sits above cash, as it should.
+  const r = 1 + fin.investReturn;
+  const cashRef = f.cashRef !== undefined ? f.cashRef : f.netCost;
+  const upfront = f.upfront !== undefined ? f.upfront : f.netCost;
   const system = years.map((y) => f.cumulative[y]);
-  const market = years.map((y) => f.netCost * ((1 + fin.investReturn) ** y - 1));
+  const market = years.map((y) => cashRef * (r ** y - 1));
   const reinvested = years.map((y) => {
-    let w = 0;
-    for (let i = 1; i <= y; i++) w += (f.cashflows[i] || 0) * (1 + fin.investReturn) ** (y - i);
-    return w - f.netCost;
+    let w = (cashRef - upfront) * r ** y;
+    for (let i = 1; i <= y; i++) w += (f.cashflows[i] || 0) * r ** (y - i);
+    return w - cashRef;
   });
 
   lineChart("c-cash", years, [

@@ -313,10 +313,29 @@ function selectedCell(priced) {
   return priced.best;
 }
 
+/**
+ * IRR and payback can fail to rank systems: with nothing paid up front and
+ * savings above the payments from year one, every cell's cash flow never
+ * changes sign, so IRR is undefined and payback is zero everywhere.  When the
+ * chosen objective cannot separate the cells the optimiser falls back to NPV
+ * and the page says so beside the objective control (ctx.objective).
+ */
+function priceWithFallback(s) {
+  const fin = finEff();
+  let obj = s.ui.objective;
+  let priced = Core.optimizer.priceGrid(ctx.grid, fin, obj, s.ui.basis);
+  const cells = priced.cells || [];
+  const useless = (obj === "irr" && cells.every((c) => c.irr === null || c.irr === undefined))
+    || (obj === "payback" && cells.every((c) => !c.payback));
+  if (useless) { obj = "npv"; priced = Core.optimizer.priceGrid(ctx.grid, fin, obj, s.ui.basis); }
+  ctx.objective = obj;
+  return priced;
+}
+
 function repriceAndRender() {
   if (!ctx.grid || !Core.optimizer) return;
   const s = State.get();
-  ctx.priced = Core.optimizer.priceGrid(ctx.grid, finEff(), s.ui.objective, s.ui.basis);
+  ctx.priced = priceWithFallback(s);
   ctx.selected = selectedCell(ctx.priced);
   ctx.baselineBill = ctx.priced.baseline ? ctx.priced.baseline.bill : 0;
 

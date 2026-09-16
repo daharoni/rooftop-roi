@@ -40,7 +40,7 @@ export function rail(state) {
       ] },
     ] },
     { group: "Comparison", open: true, items: [
-      { path: "ui.basis", kind: "select", label: "Compare the bill against", opts: [
+      { path: "ui.basis", kind: "select", label: "Compare the bill against", reason: "finance", opts: [
         { v: "sameFlex", t: "No system, same load schedule" },
         { v: "asRecorded", t: "Today's actual bill" }] },
     ] },

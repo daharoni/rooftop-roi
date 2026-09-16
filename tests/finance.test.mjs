@@ -136,14 +136,23 @@ test("loan: down payment, dealer fee and cash flows", () => {
   near(r.cashflows[1], sim.savings - 222.0410 * 12, 0.01, "year 1 = savings minus 12 payments");
   near(r.cashflows[11], sim.savings, 1e-6, "after the term the payments stop");
   near(r.financingSchedule[9].balance, 0, 1e-9, "the schedule amortises to zero");
-  near(r.wealthInvest, 0, 1e-12, "no cash was withheld from the market, so nothing to compare");
+  near(r.wealthInvest, 20000 * Math.pow(1.10, 25), 1e-6, "the market arm invests the cash price of the system");
+  {
+    // The borrower keeps the $20,000 invested and pays the loan out of savings.
+    let fv = 20000 * Math.pow(1.10, 25);
+    for (let y = 1; y <= 25; y++) fv += r.cashflows[y] * Math.pow(1.10, 25 - y);
+    near(r.wealthSystem, fv, 1e-6, "system arm = invested principal + reinvested net cash flows");
+  }
+  near(r.wealthDelta, r.npv * Math.pow(1.10, 25), 1e-6, "wealthDelta is NPV compounded to the horizon");
 
   const half = Finance.evaluate(sim, { ...f, financing: { mode: "loan",
     loan: { sharePct: 0.7, apr: 0.06, termYears: 10, dealerFeePct: 0 } } });
   near(half.downPayment, 6000, 1e-9, "a 70% loan leaves a 30% down payment");
   near(half.cashflows[0], -6000, 1e-9, "which is the year-0 outlay");
   near(half.loanPrincipal, 14000, 1e-9, "and borrows the other $14,000");
-  near(half.wealthInvest, 6000 * Math.pow(1.10, 25), 1e-6, "only the down payment could have been invested");
+  near(half.wealthInvest, 20000 * Math.pow(1.10, 25), 1e-6, "the market arm is the same whatever the down payment");
+  near(half.wealthSystem - half.wealthInvest, half.npv * Math.pow(1.10, 25), 1e-6,
+       "and the wealth gap is still NPV compounded");
 
   const dealer = Finance.evaluate(sim, { ...f, financing: { mode: "loan",
     loan: { sharePct: 1, apr: 0.06, termYears: 10, dealerFeePct: 0.20 } } });
@@ -160,6 +169,21 @@ test("loan: down payment, dealer fee and cash flows", () => {
   assert.ok(at5 > 0, "there is still a balance in year 5");
   near(long.cashflows[5], sim.savings - 222.0410 * 12 - at5, 0.02,
        "the outstanding balance is settled in the final year");
+});
+
+test("IRR needs an outlay first: a stream that starts positive has none", () => {
+  // 100% financed over 25 years at 1%: payments are below the savings from year 1,
+  // so the only negative year is the battery replacement. Bisection would find a
+  // sign change and a garbage negative rate; the model must report null instead.
+  const sim = { savings: 5000, bill: 1000, baselineBill: 6000, pvKwh: 15000, kwdc: 10, battKWhTotal: 10 };
+  const r = Finance.evaluate(sim, { ...FLAT, costPerW: 3, costPerKwh: 1000, horizon: 25, battReplYear: 20,
+    battReplFraction: 0.5, financing: { mode: "loan", loan: { sharePct: 1, apr: 0.01, termYears: 25, dealerFeePct: 0 } } });
+  assert.ok(r.cashflows[1] > 0, "year 1 is already cash positive");
+  assert.ok(r.cashflows[20] < 0, "the replacement year is negative");
+  assert.equal(r.irr, null, "so there is no rate of return to report");
+  assert.equal(r.payback, 0, "and payback is immediate");
+  const cash = Finance.evaluate(sim, { ...FLAT, costPerW: 3, costPerKwh: 1000, horizon: 25 });
+  assert.ok(cash.irr !== null && cash.irr > 0, "the same system bought for cash has a real IRR");
 });
 
 test("loan: monthly outlay against today's bill", () => {
@@ -188,8 +212,9 @@ test("lease: no upfront, escalating payments, no ownership incentives", () => {
   near(r.netCost, 30000, 1e-9, "netCost reports the sticker price, for reference only");
   assert.equal(r.cashflows.join(","), "0,-200,-200", "cf = savings 1000 - payments 1200, twice");
   near(r.npv, -200 / 1.1 - 200 / 1.21, 1e-9, "NPV at 10% = -$347.107");
-  near(r.wealthInvest, 0, 1e-12, "there is no withheld cash to invest instead");
-  near(r.wealthSystem, -200 * 1.1 - 200, 1e-9, "wealth at the horizon = -$420");
+  near(r.wealthInvest, 30000 * 1.21, 1e-9, "the reference cash is the sticker price, left invested");
+  near(r.wealthSystem, 30000 * 1.21 - 200 * 1.1 - 200, 1e-9, "the lessee keeps it invested and loses $420 on the lease");
+  near(r.wealthDelta, r.npv * 1.21, 1e-9, "the gap is NPV compounded to the horizon");
   near(r.wealthDelta, r.wealthSystem - r.wealthInvest, 1e-12, "wealthDelta is the difference");
   assert.equal(r.irr, null, "no sign change, so IRR is undefined (null, never a fake number)");
   assert.equal(r.payback, null, "and a lease that never turns positive never pays back");

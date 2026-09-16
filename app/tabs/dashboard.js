@@ -160,7 +160,7 @@ export function render(state, ctx) {
       hostId: "heat",
       priced: ctx.priced,
       selected: ctx.selected,
-      objective: state.ui.objective,
+      objective: ctx.objective || state.ui.objective,
       fin: state.fin,
       onPick: (panels, batteries) => ctx.actions.pickCell(panels, batteries),
     });
@@ -228,8 +228,14 @@ function renderHeadline(state, ctx, cell) {
       d: cell.exportRevenue > 0
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
         : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}` },
-    { k: "IRR", v: cell.irr === null || cell.irr === undefined ? "—" : fmtPct(cell.irr, 1), d: "vs " + fmtPct(fin.investReturn, 1) + " invested" },
-    { k: "Payback", v: fmtYears(cell.payback), d: "discounted " + fmtYears(cell.discountedPayback) },
+    { k: "IRR", v: cell.irr === null || cell.irr === undefined ? "—" : fmtPct(cell.irr, 1),
+      d: cell.irr === null || cell.irr === undefined
+        ? (f.upfront === 0 ? "nothing paid up front" : "savings never repay the outlay")
+        : "vs " + fmtPct(fin.investReturn, 1) + " invested" },
+    { k: "Payback", v: f.upfront === 0 && cell.payback === 0 ? "day one" : fmtYears(cell.payback),
+      d: f.upfront === 0 && cell.payback === 0 ? "nothing paid up front"
+        : f.upfront === 0 ? "payments exceed savings until then"
+        : "discounted " + fmtYears(cell.discountedPayback) },
     { k: "Wealth at " + fin.horizon + " yr", v: fmtCompact(f.wealthSystem), d: "investing: " + fmtCompact(f.wealthInvest) },
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
@@ -240,7 +246,7 @@ function renderHeadline(state, ctx, cell) {
   const manual = (typeof ov.batteries === "number" && ov.batteries >= 0) || !!ov.panelsByPlane;
   const note = $("config-line");
   clear(note);
-  note.appendChild(el("strong", { text: manual ? "Manual selection." : `Optimiser's pick (${OBJ_LABEL[state.ui.objective]}).` }));
+  note.appendChild(el("strong", { text: manual ? "Manual selection." : `Optimiser's pick (${OBJ_LABEL[ctx.objective || state.ui.objective]}).` }));
   note.appendChild(document.createTextNode(
     ` Produces ${fmtNum(cell.pvKwh, 0)} kWh/yr, keeps ${fmtPct(cell.solarFraction, 0)} of it on site, exports `
     + `${fmtNum(cell.exportKwh, 0)} kWh, cycles the pack ${fmtNum(cell.cycles, 0)}×/yr. LCOE ${fmtMoney(cell.lcoe, 3)}/kWh.`

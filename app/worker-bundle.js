@@ -2183,13 +2183,27 @@ function evaluate(sim, f) {
   }
 
   const npv = npvOf(cf, f.investReturn);
-  const irr = irrOf(cf);
+  // IRR is the return on an investment, so it needs one: the first money to move
+  // must be an outlay.  A stream that starts positive (a loan whose payments sit
+  // below the savings from year one) and only dips negative at a battery
+  // replacement decades later still has a sign change, and bisection would
+  // dutifully return a deeply negative "rate" that describes nothing.
+  const firstMove = cf.find((v) => Math.abs(v) > 1e-9);
+  const irr = firstMove !== undefined && firstMove < 0 ? irrOf(cf) : null;
 
   // "Same cash in the market" comparison, stated as two end-of-horizon numbers.
-  // With no upfront outlay (a lease) there is no cash to invest instead, so the
-  // comparison collapses to "is the system cash-flow positive?".
-  const wealthInvest = upfront * Math.pow(1 + f.investReturn, H);
-  let wealthSystem = 0;
+  // Both arms start from the same cash: what buying the system outright costs
+  // (`netCost`; the sticker price under a lease, where nothing is bought).  The
+  // market arm leaves all of it invested.  The system arm spends `upfront` of it
+  // - all of it for cash, the down payment for a loan, nothing for a lease -
+  // keeps the rest invested, and reinvests every year's net cash flow (savings
+  // less O&M, replacements and any loan or lease payment) at the same return.
+  // Counting only the cash flows would forget the borrower's still-invested
+  // principal and make a cheap loan look worse than paying cash.  The identity
+  // wealthSystem - wealthInvest = NPV x (1 + r)^H holds in every mode.
+  const cashRef = netCost;
+  const wealthInvest = cashRef * Math.pow(1 + f.investReturn, H);
+  let wealthSystem = (cashRef - upfront) * Math.pow(1 + f.investReturn, H);
   for (let y = 1; y <= H; y++) wealthSystem += cf[y] * Math.pow(1 + f.investReturn, H - y);
 
   // LCOE over PV generated (storage cost included - it is part of what you bought).
@@ -2228,7 +2242,7 @@ function evaluate(sim, f) {
     npv, irr,
     payback: crossing(cum), discountedPayback: crossing(dcum),
     lcoe, lifetimeCost: lifetime, lifetimeCostNoSystem: lifetimeNoSystem,
-    wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest,
+    wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest, cashRef,
     firstYearSavings: savings[1] || 0,
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,

@@ -25,10 +25,16 @@ export const BASIS_OPTS = [
 
 export function goal(ctx, open = true) {
   return { group: "What counts as a win", open, items: [
-    { path: "ui.objective", kind: "select", label: "Optimise for", opts: OBJECTIVE_OPTS },
-    { path: "ui.basis", kind: "select", label: "Compare the bill against", opts: BASIS_OPTS,
+    // Objective and basis change how the cached grid is priced; weather changes the simulation.
+    { path: "ui.objective", kind: "select", label: "Optimise for", opts: OBJECTIVE_OPTS, reason: "finance",
+      footnote: (s) => (ctx.objective && ctx.objective !== s.ui.objective
+        ? (s.ui.objective === "irr"
+          ? "No system here has an IRR: nothing is paid up front and savings beat the payments from day one. Optimising for NPV instead."
+          : "Every system here pays back on day one, so payback cannot rank them. Optimising for NPV instead.")
+        : "") },
+    { path: "ui.basis", kind: "select", label: "Compare the bill against", opts: BASIS_OPTS, reason: "finance",
       note: "The first isolates what the hardware does. The second also credits moving flexible load into daylight, which is free." },
-    { path: "ui.weatherKey", kind: "select", label: "Weather scenario",
+    { path: "ui.weatherKey", kind: "select", label: "Weather scenario", reason: "sim",
       opts: ctx.weatherOptions || [{ v: "tmy", t: "TMY (typical year)" }] },
   ] };
 }

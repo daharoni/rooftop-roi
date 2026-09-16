@@ -307,16 +307,23 @@ cashflows[y] = savings_y − O&M_y − extras_y − payment_y + (y = H ? resaleV
 NPV          = Σ cashflows_y / (1 + investReturn)^y
 IRR          = bisection on the same array; null when it never crosses zero
 payback      = first year the running total turns positive, linearly interpolated
-wealthInvest = upfront × (1 + investReturn)^H          the same cash left in the market
-wealthSystem = Σ cashflows_y × (1 + investReturn)^(H−y)
+wealthInvest = netCost × (1 + investReturn)^H          the cash price, left in the market
+wealthSystem = (netCost − upfront) × (1 + investReturn)^H + Σ cashflows_y × (1 + investReturn)^(H−y)
+             = wealthInvest + NPV × (1 + investReturn)^H   (in every financing mode)
 lifetimeCost = upfront + Σ (bill_y + O&M_y + extras_y + payment_y) / (1 + discountRate)^y
 LCOE         = (upfront + PV of O&M + extras + payments) / PV of kWh generated
 ```
 
-A lease has no year-0 outlay, so `wealthInvest` is 0 (there is no withheld cash to invest
-instead) and `IRR` is usually `null` — with no sign change there is no rate of return to
-solve for, and reporting a number there would be a fake. If the first year is already cash
-positive, `payback` is 0.
+Both wealth arms start from the same cash — what buying the system outright would cost
+(the sticker price under a lease). The market arm leaves all of it invested; the system arm
+spends `upfront` of it (everything for cash, the down payment for a loan, nothing for a
+lease), keeps the rest invested at the same return, and reinvests each year's net cash flow,
+loan or lease payments included. Counting only the cash flows would forget the borrower's
+still-invested principal and make a cheap loan look worse than paying cash.
+
+With no year-0 outlay (a lease, or a loan with nothing down) `IRR` is usually `null` — with
+no sign change there is no rate of return to solve for, and reporting a number there would
+be a fake. If the first year is already cash positive, `payback` is 0.
 
 `firstYearMonthlyOutlay` = `payment₁/12 + bill/12`, against `currentMonthlyBill` =
 `baselineBill/12`: the "is my monthly outlay lower than today's bill?" comparison, which is

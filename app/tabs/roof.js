@@ -27,7 +27,7 @@ let builderHandle = null;
 export function rail(state, ctx) {
   return [
     { group: "Sunlight", open: true, items: [
-      { path: "ui.weatherKey", kind: "select", label: "Weather scenario",
+      { path: "ui.weatherKey", kind: "select", label: "Weather scenario", reason: "sim",
         opts: ctx.weatherOptions || [{ v: "tmy", t: "TMY (typical year)" }],
         note: "P90 is the conservative low-sun year, P10 the optimistic one — the solar industry's exceedance convention." },
     ] },
