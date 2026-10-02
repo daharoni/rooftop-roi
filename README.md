@@ -57,7 +57,8 @@ their own file, or, if you built the scenario on the demo household, the demo lo
   battery.
 - Money: upfront cost, incentives and vendor pass-through discounts, cash / loan / lease,
   rate escalation, degradation, replacements, NPV against an investment return, IRR, payback,
-  wealth at the horizon, break-even prices, weather sensitivity (P90 / P50 / P10 years), and a
+  wealth at the horizon, break-even prices, weather sensitivity (P90 / P50 / P10 years), SCE's 150%
+  interconnection sizing line drawn on the panel × battery grid, and a
   bill-replay check that shows how closely the tariff model reproduces a real bill.
 
 ## Running locally

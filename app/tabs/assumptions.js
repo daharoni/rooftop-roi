@@ -279,7 +279,9 @@ function renderMethod(state, ctx) {
       "Cash. The whole net price is a year-0 outlay.",
       "Loan. A down payment at year 0 plus level annual payments for the term; the principal is the net price "
         + "times the share financed, inflated by any dealer fee. A low APR bought with a big dealer fee is not a "
-        + "cheap loan, and the model prices the fee.",
+        + "cheap loan, and the model prices the fee. The loan and lease tiles state the financing decision as money: "
+        + "this system's NPV minus the same system bought for cash. Positive means the rate is below your investment "
+        + "return and borrowing wins; negative is what not paying up front costs.",
       "Lease or PPA. No upfront cost, escalating annual payments, an optional buyout at the end, and no "
         + "ownership incentives — the third party keeps those. The savings still accrue to the household.",
       "NPV discounts the cash flows at the return you could have earned on the same money. Above zero means the "
@@ -301,6 +303,10 @@ function renderMethod(state, ctx) {
       "Backup power is the usable storage divided by the house's average daily draw with the flexible loads "
         + "off - nobody charges the cars from a battery in a blackout. A real outage runs longer, since the panels "
         + "recharge the pack by day and people trim load; without a battery a grid-tied array gives no backup at all.",
+      "SCE sizing line. SCE accepts a system up to 150% of your previous 12 months of usage (an affidavit above "
+        + "100%, refused above 150%) and estimates production as CEC-AC kW × 720 × 0.20 × 12, a flat 20% capacity "
+        + "factor. CEC-AC per panel is the PTC rating times inverter efficiency, about 0.90 of nameplate; the "
+        + "Hardware knob sets it. Columns past the line are faded on the grid. Other utilities' rules differ.",
       "Break-even price is the $/W or $/kWh at which NPV is exactly zero, solved directly — NPV is linear in both.",
     ]),
 

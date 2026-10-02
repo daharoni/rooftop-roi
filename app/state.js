@@ -40,6 +40,7 @@ export const DEFAULTS = {
   tariff: { utilityId: null, planId: null, providerId: null, custom: null },
   system: {
     panelW: 460, battKWh: 10, battKW: 5, rte: 0.9, minReserve: 0.2,
+    acFactor: 0.9,            // CEC-AC per panel as a share of nameplate (PTC x inverter), for the SCE sizing line
     strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5, ngom: false,
     maxPanels: 40, maxBatteries: 6,
     override: { panelsByPlane: null, batteries: null },
@@ -74,7 +75,8 @@ const SCALARS = [
 
   ["plan", "tariff.planId", "str"], ["prov", "tariff.providerId", "str"],
 
-  ["pw", "system.panelW", "num"], ["bkwh", "system.battKWh", "num"], ["bkw", "system.battKW", "num"],
+  ["pw", "system.panelW", "num"], ["acf", "system.acFactor", "num"],
+  ["bkwh", "system.battKWh", "num"], ["bkw", "system.battKW", "num"],
   ["rte", "system.rte", "num"], ["res", "system.minReserve", "num"],
   ["strat", "system.strategy", "str"], ["gcharge", "system.gridCharge", "bool"],
   ["xthr", "system.exportThreshold", "num"], ["ngom", "system.ngom", "bool"],

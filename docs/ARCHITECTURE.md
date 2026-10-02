@@ -175,6 +175,14 @@ horizon, and monthly cash-flow-vs-current-bill for the first year ("is my monthl
 lower than today's bill?"). Existing incentive modes (none / discount / vendor pass-through)
 remain and apply to the price before financing.
 
+## core/sizing.js — utility sizing rules
+
+Pure arithmetic for interconnection size limits. `sceCap({ annualKwh, panelW, acFactor })`
+returns the panel counts at SCE's 100% and 150% lines using SCE's own estimate
+(CEC-AC kW × 1,728 kWh/yr against the previous 12 months); `recentAnnualKwh(loadSet)` is
+the metered kWh of the most recent 12 months. The dashboard fades grid columns past the
+150% line and offers to cap the search there; the copied summary prints the line.
+
 ## UI (app/)
 
 Landing (before data): what the tool does in three sentences, a privacy statement that is

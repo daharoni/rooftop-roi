@@ -17,6 +17,7 @@ import { OBJ_LABEL, renderHeatmap } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
 import { renderCashflow } from "../charts/money.js";
 import * as K from "../ui/knobs.js";
+import { sceCap } from "../../core/sizing.js";
 
 export const id = "dashboard";
 export const label = "Dashboard";
@@ -78,6 +79,7 @@ export function mount(pane, state, ctx) {
           el("span", { id: "heat-hi", text: "—" }),
           el("span", { style: "margin-left:auto", id: "heat-hint", text: "solid ring = optimum · dashed = your pick · columns are panels" }),
         ]),
+        el("div.heat-cap", { id: "heat-cap" }),
         el("div.slices", {}, [
           el("div.chart-box", { style: "height:110px" }, [el("canvas", { id: "c-slice-p" })]),
           el("div.chart-box", { style: "height:110px" }, [el("canvas", { id: "c-slice-b" })]),
@@ -157,6 +159,7 @@ export function render(state, ctx) {
 
   renderHeadline(state, ctx, cell);
 
+  const cap = capFor(state, ctx);
   if (ctx.priced) {
     renderHeatmap({
       hostId: "heat",
@@ -165,8 +168,10 @@ export function render(state, ctx) {
       objective: ctx.objective || state.ui.objective,
       fin: state.fin,
       onPick: (panels, batteries) => ctx.actions.pickCell(panels, batteries),
+      cap: cap ? cap.panelsAt150 : null,
     });
   }
+  renderCapLine(state, ctx, cap);
 
   const seg = $("day-season");
   if (seg) Array.from(seg.children).forEach((b, i) => b.setAttribute("aria-pressed", String(i === state.ui.season)));
@@ -226,7 +231,7 @@ function renderHeadline(state, ctx, cell) {
       d: cell.exportRevenue > 0
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
         : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}` },
-    outlayTile(mode, fin, f),
+    outlayTile(mode, fin, f, cell, ctx),
     { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
     { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
     backupTile(cell),
@@ -282,18 +287,52 @@ function verdictFor(npv) {
   return { pill: "pill-mid", text: "A wash" };
 }
 
-/** What the household actually hands over: a cheque, or a payment every month. */
-function outlayTile(mode, fin, f) {
+/**
+ * What the household actually hands over: a cheque, or a payment every month.
+ * Under a loan or lease the small print states the financing decision as money:
+ * this system's NPV minus the same system bought outright.  Positive means the
+ * financing beats cash (its rate is below the investment return); negative is
+ * what the convenience of not paying up front costs.
+ */
+function outlayTile(mode, fin, f, cell, ctx) {
   if (mode === "cash") {
     return { k: "Cash up front", v: fmtCompact(f.netCost),
       d: f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtCompact(f.gross)}` : "no incentive applied" };
   }
+  const gap = typeof ctx.cashNpv === "number" ? cell.npv - ctx.cashNpv : null;
+  const vsCash = gap === null ? "" : ` · vs paying cash ${gap >= 0 ? "+" : "−"}${fmtCompact(Math.abs(gap))}`;
   if (mode === "lease") {
     return { k: "Lease payment", v: fmtMoney(f.monthlyPayment || fin.financing.lease.monthly) + "/mo",
-      d: `${fin.financing.lease.termYears} yr, ${fmtPct(fin.financing.lease.escalatorPct, 1)} escalator` };
+      d: `${fin.financing.lease.termYears} yr, ${fmtPct(fin.financing.lease.escalatorPct, 1)} escalator${vsCash}` };
   }
   return { k: "Loan payment", v: fmtMoney(f.monthlyPayment || 0) + "/mo",
-    d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr` };
+    d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr${vsCash}` };
+}
+
+/** SCE's sizing lines for this household, or null before any meter data is loaded. */
+function capFor(state, ctx) {
+  if (!ctx.recentAnnualKwh) return null;
+  return sceCap({ annualKwh: ctx.recentAnnualKwh, panelW: state.system.panelW, acFactor: state.system.acFactor });
+}
+
+function renderCapLine(state, ctx, cap) {
+  const node = $("heat-cap");
+  if (!node) return;
+  clear(node);
+  if (!cap) { node.hidden = true; return; }
+  node.hidden = false;
+  const best = ctx.priced && ctx.priced.best;
+  node.appendChild(el("strong", { text: `SCE sizing line: ${cap.panelsAt150} panels.` }));
+  node.appendChild(document.createTextNode(
+    ` Your last 12 months used ${fmtKwh(cap.annualKwh, 0)}; SCE counts each ${state.system.panelW} W panel as `
+    + `${fmtKwh(cap.kwhPerPanel, 0)}/yr and refuses an application above 150%. Up to ${cap.panelsAt100} panels needs no `
+    + `paperwork; ${cap.panelsAt100 + 1} to ${cap.panelsAt150} needs an affidavit that your usage will grow to match.`
+    + (best && best.panels > cap.panelsAt150 ? ` The optimiser's pick of ${best.panels} is above the line.` : "")));
+  if (state.system.maxPanels > cap.panelsAt150) {
+    node.appendChild(document.createTextNode(" "));
+    node.appendChild(el("button.chip-action", { type: "button", text: `Cap the search at ${cap.panelsAt150}`,
+      style: "font-size:11px;padding:2px 9px", on: { click: () => ctx.actions.setMaxPanels(cap.panelsAt150) } }));
+  }
 }
 
 /** With nothing paid up front the cash flow never changes sign, so there is no IRR. */

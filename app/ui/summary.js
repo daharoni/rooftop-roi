@@ -7,6 +7,7 @@
  * ========================================================================== */
 
 import { fmtMoney, fmtNum, fmtPct, fmtYears } from "./format.js";
+import { sceCap } from "../../core/sizing.js";
 
 export function summaryText(state, ctx) {
   const cell = ctx.selected;
@@ -74,6 +75,12 @@ export function summaryText(state, ctx) {
   L.push(`         monthly outlay     ${fmtMoney(f.firstYearMonthlyOutlay)}/mo in year 1 `
     + `vs ${fmtMoney(f.currentMonthlyBill)}/mo today`);
   L.push(`         LCOE               ${fmtMoney(cell.lcoe, 3)}/kWh`);
+  const cap = ctx.recentAnnualKwh
+    ? sceCap({ annualKwh: ctx.recentAnnualKwh, panelW: state.system.panelW, acFactor: state.system.acFactor }) : null;
+  if (cap) {
+    L.push(`         SCE sizing line    ${cap.panelsAt150} panels at 150% of ${fmtNum(cap.annualKwh, 0)} kWh/yr recorded `
+      + `(${cap.panelsAt100} without an affidavit)${cell.panels > cap.panelsAt150 ? "  ** this system is above it **" : ""}`);
+  }
   L.push(`         production         ${fmtNum(cell.pvKwh, 0)} kWh/yr, ${fmtPct(cell.selfSufficiency, 0)} self-sufficient, `
     + `${fmtNum(cell.exportKwh, 0)} kWh exported, ${fmtNum(cell.cycles, 0)} cycles/yr`);
   L.push("");
