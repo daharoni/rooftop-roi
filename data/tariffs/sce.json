@@ -1,0 +1,1823 @@
+{
+ "utility": {
+  "id": "sce",
+  "name": "Southern California Edison",
+  "states": [
+   "CA"
+  ],
+  "zipPrefixes": [
+   "900",
+   "902",
+   "903",
+   "904",
+   "905",
+   "906",
+   "907",
+   "908",
+   "910",
+   "911",
+   "912",
+   "913",
+   "917",
+   "918",
+   "922",
+   "923",
+   "924",
+   "925",
+   "926",
+   "927",
+   "928",
+   "930",
+   "931",
+   "932",
+   "935",
+   "936"
+  ],
+  "website": "https://www.sce.com/save-money/rates-financing/residential-rate-plans",
+  "baselineRegions": {
+   "note": "SCE baseline allocations in kWh per DAY, from SCE's Tiered Rate Plan page (rates current as of 6/1/26). Summer runs 12 a.m. June 1 to 12 a.m. October 1. Medical Baseline adds 16.5 kWh/day; a heat-pump water heater adds 1.9 summer / 2.6 winter on TOU-D-4-9PM and TOU-D-5-8PM (basic customers; SCE omits the all-electric increment from its own page). Region 15 genuinely publishes a summer basic allocation (45.0) larger than its all-electric one (24.0) - that is what SCE prints, and it matches the older archived table; region 15 is the Coachella Valley extreme desert. CLIMATE GROUPING: hot 13/14/15, moderate 5/9/10, cool 6/8/16. THE ZIP HINTS BELOW ARE HINTS, NOT TARIFF FACTS. SCE states outright that 'ZIP codes do not correlate with Climate Zones'; baseline is assigned per premises and is printed on page 3 of the bill. Ten of the 26 SCE prefixes cover two or more regions that no ZIP can separate (903, 904, 905, 908, 913, 923, 924, 930, 931, 935 in particular). The hints were built by parsing SCE's Index of Communities (Cal. PUC Sheet 53902-E) for 445 communities and weighting the city-to-region map by actual SCE residential account counts per ZIP from SCE's 2026-Q2 Electric Usage by ZIP file; the first entry in each list is the account-weighted most likely region. The UI must seed a dropdown from this, never hard-assign. Baseline only has a price effect on plans with a non-zero baseline_credit_per_kwh (TOU-D-4-9PM and TOU-D-5-8PM); TOU-D-PRIME has none, so on that plan the region is economically irrelevant.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "allocations": {
+    "5": {
+     "summer": 17.0,
+     "winter": 18.4,
+     "summer_all_electric": 16.8,
+     "winter_all_electric": 27.0,
+     "label": "Region 5 - Santa Barbara / south coast (moderate)"
+    },
+    "6": {
+     "summer": 11.4,
+     "winter": 11.0,
+     "summer_all_electric": 8.7,
+     "winter_all_electric": 12.6,
+     "label": "Region 6 - coastal basin (cool)"
+    },
+    "8": {
+     "summer": 12.8,
+     "winter": 10.3,
+     "summer_all_electric": 9.9,
+     "winter_all_electric": 12.3,
+     "label": "Region 8 - inner coastal basin (cool)"
+    },
+    "9": {
+     "summer": 16.9,
+     "winter": 12.0,
+     "summer_all_electric": 12.5,
+     "winter_all_electric": 13.9,
+     "label": "Region 9 - inland valleys / San Gabriel Valley (moderate)"
+    },
+    "10": {
+     "summer": 19.3,
+     "winter": 12.1,
+     "summer_all_electric": 15.9,
+     "winter_all_electric": 16.4,
+     "label": "Region 10 - Inland Empire (moderate, hot summers)"
+    },
+    "13": {
+     "summer": 22.2,
+     "winter": 12.2,
+     "summer_all_electric": 24.2,
+     "winter_all_electric": 23.0,
+     "label": "Region 13 - San Joaquin Valley, Tulare/Kings (hot)"
+    },
+    "14": {
+     "summer": 19.2,
+     "winter": 11.9,
+     "summer_all_electric": 18.5,
+     "winter_all_electric": 21.1,
+     "label": "Region 14 - Antelope Valley / high desert (hot)"
+    },
+    "15": {
+     "summer": 45.0,
+     "winter": 9.7,
+     "summer_all_electric": 24.0,
+     "winter_all_electric": 17.4,
+     "label": "Region 15 - Coachella Valley / low desert (hot)"
+    },
+    "16": {
+     "summer": 14.7,
+     "winter": 12.4,
+     "summer_all_electric": 13.5,
+     "winter_all_electric": 23.2,
+     "label": "Region 16 - mountains (cool)"
+    }
+   },
+   "zipHints": {
+    "900": [
+     "9",
+     "8",
+     "6"
+    ],
+    "902": [
+     "8",
+     "6"
+    ],
+    "903": [
+     "6",
+     "8"
+    ],
+    "904": [
+     "6",
+     "9"
+    ],
+    "905": [
+     "6",
+     "8"
+    ],
+    "906": [
+     "8",
+     "9"
+    ],
+    "907": [
+     "8",
+     "6"
+    ],
+    "908": [
+     "6",
+     "8"
+    ],
+    "910": [
+     "9",
+     "16"
+    ],
+    "911": [
+     "9",
+     "16"
+    ],
+    "912": [
+     "9",
+     "16"
+    ],
+    "913": [
+     "9",
+     "6",
+     "16",
+     "14"
+    ],
+    "917": [
+     "9",
+     "10",
+     "16"
+    ],
+    "918": [
+     "9"
+    ],
+    "922": [
+     "15",
+     "14",
+     "10"
+    ],
+    "923": [
+     "10",
+     "14",
+     "16"
+    ],
+    "924": [
+     "10",
+     "16"
+    ],
+    "925": [
+     "10",
+     "16"
+    ],
+    "926": [
+     "6",
+     "8"
+    ],
+    "927": [
+     "8",
+     "6"
+    ],
+    "928": [
+     "8",
+     "10"
+    ],
+    "930": [
+     "6",
+     "9",
+     "16"
+    ],
+    "931": [
+     "5",
+     "6"
+    ],
+    "932": [
+     "13",
+     "16"
+    ],
+    "935": [
+     "14",
+     "16"
+    ],
+    "936": [
+     "16",
+     "13"
+    ],
+    "91301": [
+     "6",
+     "9"
+    ],
+    "91302": [
+     "6",
+     "9"
+    ],
+    "91320": [
+     "6",
+     "9"
+    ],
+    "91360": [
+     "6",
+     "9"
+    ],
+    "91361": [
+     "6",
+     "9"
+    ],
+    "91362": [
+     "6",
+     "9"
+    ],
+    "91377": [
+     "6",
+     "9"
+    ],
+    "92284": [
+     "14"
+    ],
+    "92286": [
+     "14"
+    ],
+    "92277": [
+     "14"
+    ],
+    "92252": [
+     "14"
+    ],
+    "92220": [
+     "10"
+    ],
+    "92223": [
+     "10"
+    ],
+    "92879": [
+     "10"
+    ],
+    "92880": [
+     "10"
+    ],
+    "92881": [
+     "10"
+    ],
+    "92882": [
+     "10"
+    ],
+    "92883": [
+     "10"
+    ]
+   }
+  }
+ },
+ "meta": {
+  "as_of": "2026-09-15",
+  "rates_effective": "2026-07-01",
+  "sources": [
+   {
+    "title": "Customer SCE bill, billing period 2026-07-23 to 2026-08-20, TOU-D-PRIME, CPA 100% Green Power generation (local file data/download.pdf)",
+    "url": "local:data/download.pdf",
+    "used_for": "PRIMARY ANCHOR. SCE summer delivery energy rates for TOU-D-PRIME ($0.29033 on/mid, $0.19058 off); Base Services Charge $0.76862/day; the CCA surcharge stack (PCIA $0.02311 + CCA wildfire fund $0.00591 + CTC $0.00014 + fixed recovery charge $0.00619 = $0.03535/kWh); Generation Municipal Surcharge factor 0.009294; CPA 100% Green generation rates; $36 California Climate Credit in August and September; 2018 Vintage CRS"
+   },
+   {
+    "title": "SCE - Time-of-Use Residential Rate Plans (bundled $/kWh by period; 'Current rates as of 6/1/26')",
+    "url": "https://www.sce.com/save-money/rates-financing/residential-rate-plans/time-of-use-plans",
+    "used_for": "SCE bundled total $/kWh by plan/season/period (whole cents); $0.10/kWh baseline credit on TOU-D-4-9 and TOU-D-5-8; TOU period hour definitions"
+   },
+   {
+    "title": "SCE - Tiered Rate Plan (baseline allocation table by region)",
+    "url": "https://www.sce.com/save-money/rates-financing/residential-rate-plans/tiered-rate-plan",
+    "used_for": "Baseline allocation kWh/day by region, summer and winter, basic and all-electric"
+   },
+   {
+    "title": "SCE - Index of Communities (Revised Cal. PUC Sheet No. 53902-E)",
+    "url": "https://www.sce.com/sites/default/files/inline-files/ce62-12.pdf",
+    "used_for": "Agoura Hills baseline region assignment (regions 6 and 9)"
+   },
+   {
+    "title": "SCE - Base Services Charge",
+    "url": "https://www.sce.com/save-money/rates-financing/residential-rate-plans/bsc",
+    "used_for": "$24.15/month standard ($6.00 CARE, $12.08 FERA), effective November 2025; minimum charge no longer applicable"
+   },
+   {
+    "title": "SCE and CPA Joint Rate Comparisons (SCE rates as of June 1 2026; CPA rates as of July 1 2026)",
+    "url": "https://www.sce.com/customer-service-center/community-choice-aggregation/sce-cpa-joint-rate-comparisons",
+    "used_for": "The published relationship SCE generation rate = CPA Clean Power generation rate + $0.02433/kWh, used to split SCE bundled totals into delivery and generation for every period"
+   },
+   {
+    "title": "Clean Power Alliance - Residential Rates, 2018 Vintage, effective July 1, 2026",
+    "url": "https://files.cleanpoweralliance.org/uploads/2026/06/Clean-Power-Alliance-Residential-Rates-2018-Vintage-Effective-July-1-2026.pdf",
+    "used_for": "CPA Lean / Clean / 100% Green generation $/kWh by plan, season and period; Agoura Hills default product (100% Green Power)"
+   },
+   {
+    "title": "SCE - Schedule NBT, Net Billing Tariff (Revised Cal. PUC Sheet No. 87677-E)",
+    "url": "https://www.sce.com/sites/default/files/custom-files/PDF_Files/ELECTRIC_SCHEDULES_NBT.pdf",
+    "used_for": "ACC Plus Adder table by vintage year, 9-year lock-in, non-bypassable charge definition, Net Surplus Compensation rate methodology"
+   },
+   {
+    "title": "Clean Power Alliance - Net Billing Tariff (adopted 2023-07-06, amended 2026-02-05)",
+    "url": "https://files.cleanpoweralliance.org/uploads/2026/03/CPA-Net-Billing-Tariff-2026-02-05.pdf",
+    "used_for": "CPA export credit mechanics: ACC-derived export credit split into a generation component paid by CPA and a delivery component paid by SCE; 9-year lock-in; April annual true-up"
+   },
+   {
+    "title": "Clean Power Alliance - NSC / AREC rate schedule, September 2026",
+    "url": "https://files.cleanpoweralliance.org/uploads/2026/09/CPA-NSCR-AREC-SEP-2026.pdf",
+    "used_for": "CPA Net Surplus Compensation rate $0.02008/kWh for usage ending September 2026"
+   },
+   {
+    "title": "Clean Power Alliance - Solar / Net Energy Metering",
+    "url": "https://cleanpoweralliance.org/solar/",
+    "used_for": "CPA NSC set 10% above SCE's rate; CPA adds no adder above SCE ACC export prices under the Solar Billing Plan"
+   },
+   {
+    "title": "EIA Form 861 / 861M - SCE bundled residential revenue and sales",
+    "url": "https://www.eia.gov/electricity/data/eia861/",
+    "used_for": "SCE average residential rate 2015-2026 and the historical CAGR"
+   },
+   {
+    "title": "CPUC 2025 SB 695 Report on electric rates (published 2025-09-30)",
+    "url": "https://www.cpuc.ca.gov/-/media/cpuc-website/divisions/office-of-governmental-affairs-division/reports/2025/2025-sb-695-report_093025.pdf",
+    "used_for": "Validation of the EIA rate series and CPUC's forward SCE rate projection through 2028"
+   },
+   {
+    "title": "26 U.S.C. section 25D (as amended by P.L. 119-21 section 70506)",
+    "url": "https://uscode.house.gov/view.xhtml?req=(title:26%20section:25D%20edition:prelim)",
+    "used_for": "Termination of the residential clean energy credit for expenditures made after 2025-12-31"
+   },
+   {
+    "title": "26 U.S.C. section 48E",
+    "url": "https://uscode.house.gov/view.xhtml?req=(title:26%20section:48E%20edition:prelim)",
+    "used_for": "30% ITC still available to third-party owners of residential solar and storage in 2026"
+   },
+   {
+    "title": "California SGIP - program metrics (self-dated 2026-09-15) and CPUC D.25-12-003",
+    "url": "https://www.selfgenca.com/home/program_metrics/",
+    "used_for": "All ratepayer-funded SGIP budgets closed to new applications on 2025-12-30"
+   },
+   {
+    "title": "SCE Emergency Load Reduction Program - customer FAQ",
+    "url": "https://elrp.sce.com/customer-faq/",
+    "used_for": "ELRP runs 2021-2027 at $2.00/kWh; residential batteries participate only through a 500 kW or larger VPP aggregator (subgroup A.4)"
+   },
+   {
+    "title": "Clean Power Alliance - Power Response Smart Home",
+    "url": "https://cleanpoweralliance.org/smarthome/",
+    "used_for": "CPA battery demand-response payments: $400 signup + $300/year, SolarEdge batteries only"
+   },
+   {
+    "title": "SCE - Understanding Export Pricing / EEC factor file 'EEC Factors_Upload File - Pacific Time Zone - FINAL.xlsx', sheet 'PTO Grp 4 (2026)' (file modified 2026-03-05)",
+    "url": "https://www.sce.com/customer-service-center/help-center/solar/solar-billing-plan/understanding-export-pricing",
+    "used_for": "The full 12x24 weekday and weekend export credit matrices for the NBT26 vintage, and the 2026-2034 annual trajectory; cross-validated against SCE's NBT26 MIDAS CSV"
+   },
+   {
+    "title": "SCE - Schedule NBT, Net Billing Tariff (Revised Cal. PUC Sheet No. 87677-E)",
+    "url": "https://www.sce.com/sites/default/files/custom-files/PDF_Files/ELECTRIC_SCHEDULES_NBT.pdf",
+    "used_for": "ACC Plus Adder table by vintage, 9-year lock-in, non-bypassable charge definition, NSC methodology, paired-storage export cap (Special Condition 5.c)"
+   },
+   {
+    "title": "SCE - Net Surplus Compensation rate page (updated monthly)",
+    "url": "https://www.sce.com/regulatory/regulatory-information/ferc-Standards-conduct/tariff-books/rates-pricing-choices/net-surplus-compensation",
+    "used_for": "SCE NSCR $0.01825/kWh for relevant periods ending September 2026, and the 21-month history"
+   },
+   {
+    "title": "SCE - EEC Adjustment Pricing (the Average Retail Export Compensation Rate of Schedule NBT SC 4.e.i)",
+    "url": "https://www.sce.com/regulatory/regulatory-information/ferc-Standards-conduct/tariff-books/rates-pricing-choices/eec-adjustment-pricing",
+    "used_for": "Annual true-up clawback rate: September 2026 = delivery $0.01163 + generation $0.04818 = $0.05981/kWh"
+   },
+   {
+    "title": "SCE Schedule TOU-D / Schedule D non-bypassable charge components (Advice 5829-E, effective 2026-06-01)",
+    "url": "https://www.sce.com/regulatory/tariff-books/rates-pricing-choices",
+    "used_for": "PPPC $0.00171 + NDC $0.00003 + CTC $0.00014 + WFC $0.00591 = $0.00779/kWh on imported energy"
+   }
+  ],
+  "confidence": {
+   "rates": {
+    "level": "high",
+    "note": "TOU-D-PRIME summer delivery is verbatim from the customer's bill, so that plan/season is exact. Every other delivery figure is derived as published_SCE_total - cpa_clean - $0.02433 from SCE's posted per-period bundled rates, which SCE publishes only to the whole cent, so derived values carry up to +/-$0.005/kWh."
+   },
+   "schedules": "high",
+   "providers": {
+    "level": "high",
+    "note": "CPA Lean / Clean / 100% Green generation rates from CPA's own 2018-Vintage residential rate sheet effective 2026-07-01; the customer's bill confirms the cpa_green column to the cent."
+   },
+   "baseline": {
+    "level": "medium",
+    "note": "Allocations HIGH (verbatim from SCE's Tiered Rate Plan page). ZIP-to-region hints MEDIUM to LOW: derived from the Index of Communities weighted by SCE's own ZIP account counts, but SCE says ZIP does not determine climate zone and ten prefixes are genuinely ambiguous."
+   },
+   "fixed_charge": "high",
+   "export_rates": {
+    "level": "high",
+    "note": "SCE's published EEC factor workbook, sheet 'PTO Grp 4 (2026)', read cell by cell. Nothing interpolated."
+   },
+   "climate_credit": "high",
+   "incentives": {
+    "level": "medium",
+    "note": "Programs change without notice; SGIP closure and 25D termination are statutory and HIGH, the demand-response payment figures are as-published and MEDIUM."
+   }
+  },
+  "baseline_region": "9",
+  "baseline_kwh_per_day": {
+   "summer": 16.9,
+   "winter": 12.0
+  },
+  "climate_credit": {
+   "amount": 36,
+   "months": [
+    8,
+    9
+   ]
+  },
+  "escalation": {
+   "historical_cagr": 0.0634,
+   "period": "2015-2026",
+   "recommended_default": 0.05,
+   "note": "SCE bundled residential average rate from EIA Form 861/861M: 16.51 c/kWh (2015) -> 32.46 c/kWh (2026 YTD), a 6.34%/yr CAGR over 11 years. The series is extremely front-loaded: 2020-2023 ran +12% to +31%/yr (2020->2026 CAGR 10.1%), while 2024, 2025 and 2026 YTD are all essentially flat on a realized-revenue basis. Using the recent-history CAGR alone would badly overstate future savings. The CPUC 2025 SB 695 Report projects SCE bundled residential at $0.293 (2024 actual) -> $0.325 (2025) -> $0.344 (2026) -> $0.361 (2027) -> $0.374 (2028), i.e. 6.3%/yr 2024-2028 but only 4.3%/yr 2026-2028; its 2026 projection matches SCE's posted 34.4 c/kWh exactly. Recommended default 5%/yr, with 3% low and 8% high bands."
+  },
+  "bill_validation": {
+   "note": "Figures from the customer's actual SCE bill, used to calibrate this file. A correct simulation of this billing period against plans[TOU-D-PRIME] with provider cpa_green must reproduce these numbers. The model's summer cpa_green rates match the bill exactly: on 0.66603, mid 0.43183, off 0.28907.",
+   "billing_period": {
+    "start": "2026-07-23",
+    "end": "2026-08-20",
+    "days": 29
+   },
+   "plan": "TOU-D-PRIME",
+   "provider": "cpa_green",
+   "kwh": {
+    "on": 436,
+    "mid": 176,
+    "off": 1362,
+    "total": 1974
+   },
+   "sce_side": {
+    "basic_charge": 22.29,
+    "delivery_energy": {
+     "on": 126.58,
+     "mid": 51.1,
+     "off": 259.57,
+     "total": 437.25
+    },
+    "pcia": 45.62,
+    "cca_wildfire_fund_charge": 11.67,
+    "ctc": 0.28,
+    "fixed_recovery_charge": 12.22,
+    "generation_municipal_surcharge": 2.27,
+    "ca_climate_credit": -36.0,
+    "total": 495.6
+   },
+   "cpa_side": {
+    "generation": {
+     "on": 148.56,
+     "mid": 18.64,
+     "off": 85.98,
+     "total": 253.18
+    },
+    "energy_surcharge": 0.59,
+    "total": 253.77
+   },
+   "total_new_charges": 749.37,
+   "model_reproduces_bill": {
+    "model_total": 749.41,
+    "actual_total": 749.37,
+    "error_dollars": 0.04,
+    "error_pct": 0.01,
+    "method": "436.488 kWh x rates.summer.on.cpa_green + 175.596 x .mid + 1361.73 x .off + 29 x fixed_charge_per_day + generation_municipal_surcharge_factor x CPA generation + cpa_energy_surcharge_per_kwh x 1974 - climate_credit. Residual is kWh rounding."
+   },
+   "delivery_detail": {
+    "transmission": 48.97,
+    "distribution": 378.95,
+    "public_purpose_programs": 13.22,
+    "new_system_generation_charge": 16.37
+   },
+   "generation_municipal_surcharge_factor": 0.009294,
+   "cpa_energy_surcharge_per_kwh": 0.000299
+  },
+  "notes": "RATE MODEL AND ITS ANCHOR. This file is calibrated against the customer's actual SCE bill for 2026-07-23 to 2026-08-20 (TOU-D-PRIME, CPA 100% Green Power). Three identities hold everywhere: (1) sce_generation[period] = cpa_clean[period] + $0.02433; (2) sce[period] = delivery[period] + sce_generation[period]; (3) cpa_X[period] = delivery[period] + cpa_X_generation[period] + $0.03535. The $0.02433 comes from SCE's own SCE/CPA Joint Rate Comparison, in which SCE's published Generation Rate minus CPA Clean Power's is exactly $0.02433/kWh for every residential schedule. The $0.03535 is the CCA surcharge stack read off the bill: PCIA $0.02311 + CCA wildfire fund charge $0.00591 + CTC $0.00014 + fixed recovery charge $0.00619. SCE bundled customers do not pay these as separate lines because they are already inside SCE's published bundled rates, which is why the sce totals carry no surcharge. WHICH NUMBERS ARE MEASURED AND WHICH ARE DERIVED. TOU-D-PRIME summer delivery ($0.29033 for both on-peak and mid-peak, $0.19058 off-peak) is taken verbatim from the bill, so TOU-D-PRIME summer is exact. Every other delivery figure is derived as published_SCE_total - cpa_clean - $0.02433 using SCE's posted per-period bundled rates. Because SCE posts those only to the whole cent, derived delivery values carry up to +/-$0.005/kWh. Cross-check: applying the derivation to TOU-D-PRIME summer reproduces the bill's delivery rates to within $0.005 in all three periods, and reproduces SCE's posted 59/40/26 cents as 58.5/39.6/26.1 cents. CPA IS MORE EXPENSIVE THAN SCE BUNDLED, which contradicts SCE's own marketing comparison. In the Joint Rate Comparison SCE's total and CPA Clean Power's total are identical, because that document assumes a CCA surcharge of $0.02433/kWh. The customer's actual surcharge stack is $0.03535/kWh, $0.01102 higher. So on this bill CPA Clean Power costs $0.01102/kWh MORE than SCE bundled at every hour, and CPA 100% Green Power (the Agoura Hills default, and what this customer is on) costs about $0.08/kWh more on summer on-peak and $0.028/kWh more off-peak. Prefer these bill-derived numbers. PROVIDER DEFAULT: Agoura Hills' default CPA product is 100% Green Power and the bill confirms the customer is on it, so cpa_green is the correct baseline provider for this household, not cpa_clean. BASELINE REGION: SCE's Index of Communities assigns Agoura Hills to baseline regions 6 AND 9 (the city straddles the boundary). Region 9 is used here because most of ZIP 91301 lies inland of the coastal band; if the premises is in Region 6 the basic allocations are 11.4 kWh/day summer and 11.0 kWh/day winter. Values given are Basic (non-all-electric); Region 9 all-electric is 12.5 summer / 13.9 winter. Baseline allocation only matters on TOU-D-4-9PM and TOU-D-5-8PM, which carry a $0.10/kWh baseline credit. TOU-D-PRIME has no baseline credit, so for the customer's current plan the baseline region is economically irrelevant. HOLIDAYS: the weekend schedule applies on the eight SCE holidays (New Year's Day, Presidents' Day, Memorial Day, Independence Day, Labor Day, Veterans Day, Thanksgiving, Christmas). The dashboard should treat those dates as weekend. FIXED CHARGE: fixed_charge_per_day is $0.76862, the exact Base Services Charge on the customer's bill (29 days x $0.76862 = $22.29). SCE posts $24.15/month (about $0.79/day) for standard residential service; the customer's CCA rate is slightly lower. The Base Services Charge took effect November 2025 and is the CPUC income-graduated fixed charge under D.24-05-028 / Pub. Util. Code 739.9(e): $24.15/mo standard, $6.00 CARE, $12.08 FERA and deed-restricted affordable housing. It REPLACED the old minimum charge, which no longer applies, so minimum_charge_per_day is 0.00 - a real value, not a placeholder. It is unavoidable and is not offset by solar exports, so it floors the bill. CHARGES NOT IN THE PER-kWh RATES. Two small items on the bill are deliberately excluded so the rate tables stay clean; apply them on top if you want to reproduce the bill to the cent. (1) Generation Municipal Surcharge: factor 0.009294 applied to generation charges (Agoura Hills levies it), $2.27 on this bill. (2) CPA Energy Surcharge: $0.59 on 1,974 kWh, about $0.000299/kWh. Together they are under 0.4% of the bill. The $36 California Climate Credit IS captured, in meta.climate_credit - from 2026 it arrives on the August and September bills rather than April and October. PERIOD COVERAGE: these plans do not use all four period ids in both seasons - summer has no super-off-peak and winter has no on-peak. So that any [season][period] lookup resolves to a real number, summer.super_off is filled with the summer off-peak values and winter.on is filled with the winter mid-peak values (the highest-priced winter period). The 24-hour schedule arrays never emit those ids, so a correct simulation never reads them."
+ },
+ "providers": {
+  "sce": {
+   "name": "SCE bundled"
+  },
+  "cpa_lean": {
+   "name": "CPA Lean Power"
+  },
+  "cpa_clean": {
+   "name": "CPA Clean Power"
+  },
+  "cpa_green": {
+   "name": "CPA 100% Green Power"
+  }
+ },
+ "plans": [
+  {
+   "id": "TOU-D-PRIME",
+   "name": "TOU-D-PRIME",
+   "eligibility_note": "Requires an EV, a behind-the-meter battery, or an electric heat pump (space or water). Required rate for new SCE Solar Billing Plan (NBT) customers. No baseline credit.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.76862,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sce": 0.58532,
+      "cpa_lean": 0.57643,
+      "cpa_clean": 0.59634,
+      "cpa_green": 0.66603,
+      "delivery": 0.29033,
+      "sce_generation": 0.29499
+     },
+     "mid": {
+      "sce": 0.39601,
+      "cpa_lean": 0.39994,
+      "cpa_clean": 0.40703,
+      "cpa_green": 0.43183,
+      "delivery": 0.29033,
+      "sce_generation": 0.10568
+     },
+     "off": {
+      "sce": 0.26149,
+      "cpa_lean": 0.26778,
+      "cpa_clean": 0.27251,
+      "cpa_green": 0.28907,
+      "delivery": 0.19058,
+      "sce_generation": 0.07091
+     },
+     "super_off": {
+      "sce": 0.26149,
+      "cpa_lean": 0.26778,
+      "cpa_clean": 0.27251,
+      "cpa_green": 0.28907,
+      "delivery": 0.19058,
+      "sce_generation": 0.07091
+     }
+    },
+    "winter": {
+     "mid": {
+      "sce": 0.56,
+      "cpa_lean": 0.55324,
+      "cpa_clean": 0.57102,
+      "cpa_green": 0.63324,
+      "delivery": 0.29649,
+      "sce_generation": 0.26351
+     },
+     "off": {
+      "sce": 0.24,
+      "cpa_lean": 0.24702,
+      "cpa_clean": 0.25102,
+      "cpa_green": 0.26501,
+      "delivery": 0.17989,
+      "sce_generation": 0.06011
+     },
+     "super_off": {
+      "sce": 0.24,
+      "cpa_lean": 0.24702,
+      "cpa_clean": 0.25102,
+      "cpa_green": 0.26501,
+      "delivery": 0.17989,
+      "sce_generation": 0.06011
+     },
+     "on": {
+      "sce": 0.56,
+      "cpa_lean": 0.55324,
+      "cpa_clean": 0.57102,
+      "cpa_green": 0.63324,
+      "delivery": 0.29649,
+      "sce_generation": 0.26351
+     }
+    }
+   }
+  },
+  {
+   "id": "TOU-D-4-9",
+   "name": "TOU-D-4-9PM",
+   "default": true,
+   "eligibility_note": "Open to all residential customers; default TOU plan. Has a $0.10/kWh baseline credit up to the monthly baseline allocation.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.76862,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.1,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sce": 0.58,
+      "cpa_lean": 0.57477,
+      "cpa_clean": 0.59102,
+      "cpa_green": 0.64787,
+      "delivery": 0.32806,
+      "sce_generation": 0.25194
+     },
+     "mid": {
+      "sce": 0.46,
+      "cpa_lean": 0.46247,
+      "cpa_clean": 0.47102,
+      "cpa_green": 0.50094,
+      "delivery": 0.3269,
+      "sce_generation": 0.1331
+     },
+     "off": {
+      "sce": 0.34,
+      "cpa_lean": 0.34628,
+      "cpa_clean": 0.35102,
+      "cpa_green": 0.36763,
+      "delivery": 0.26565,
+      "sce_generation": 0.07435
+     },
+     "super_off": {
+      "sce": 0.34,
+      "cpa_lean": 0.34628,
+      "cpa_clean": 0.35102,
+      "cpa_green": 0.36763,
+      "delivery": 0.26565,
+      "sce_generation": 0.07435
+     }
+    },
+    "winter": {
+     "mid": {
+      "sce": 0.51,
+      "cpa_lean": 0.5095,
+      "cpa_clean": 0.52102,
+      "cpa_green": 0.56134,
+      "delivery": 0.33103,
+      "sce_generation": 0.17897
+     },
+     "off": {
+      "sce": 0.37,
+      "cpa_lean": 0.37445,
+      "cpa_clean": 0.38102,
+      "cpa_green": 0.40402,
+      "delivery": 0.26742,
+      "sce_generation": 0.10258
+     },
+     "super_off": {
+      "sce": 0.33,
+      "cpa_lean": 0.3356,
+      "cpa_clean": 0.34102,
+      "cpa_green": 0.36,
+      "delivery": 0.24519,
+      "sce_generation": 0.08481
+     },
+     "on": {
+      "sce": 0.51,
+      "cpa_lean": 0.5095,
+      "cpa_clean": 0.52102,
+      "cpa_green": 0.56134,
+      "delivery": 0.33103,
+      "sce_generation": 0.17897
+     }
+    }
+   }
+  },
+  {
+   "id": "TOU-D-5-8",
+   "name": "TOU-D-5-8PM",
+   "eligibility_note": "Open to all residential customers. Has a $0.10/kWh baseline credit up to the monthly baseline allocation.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.76862,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.1,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "mid",
+      "mid",
+      "mid",
+      "off",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sce": 0.74,
+      "cpa_lean": 0.72451,
+      "cpa_clean": 0.75102,
+      "cpa_green": 0.84377,
+      "delivery": 0.33119,
+      "sce_generation": 0.40881
+     },
+     "mid": {
+      "sce": 0.54,
+      "cpa_lean": 0.5374,
+      "cpa_clean": 0.55102,
+      "cpa_green": 0.59866,
+      "delivery": 0.3295,
+      "sce_generation": 0.2105
+     },
+     "off": {
+      "sce": 0.34,
+      "cpa_lean": 0.34697,
+      "cpa_clean": 0.35102,
+      "cpa_green": 0.36522,
+      "delivery": 0.27653,
+      "sce_generation": 0.06347
+     },
+     "super_off": {
+      "sce": 0.34,
+      "cpa_lean": 0.34697,
+      "cpa_clean": 0.35102,
+      "cpa_green": 0.36522,
+      "delivery": 0.27653,
+      "sce_generation": 0.06347
+     }
+    },
+    "winter": {
+     "mid": {
+      "sce": 0.6,
+      "cpa_lean": 0.59326,
+      "cpa_clean": 0.61102,
+      "cpa_green": 0.67318,
+      "delivery": 0.32569,
+      "sce_generation": 0.27431
+     },
+     "off": {
+      "sce": 0.38,
+      "cpa_lean": 0.38461,
+      "cpa_clean": 0.39102,
+      "cpa_green": 0.41348,
+      "delivery": 0.2802,
+      "sce_generation": 0.0998
+     },
+     "super_off": {
+      "sce": 0.32,
+      "cpa_lean": 0.3265,
+      "cpa_clean": 0.33102,
+      "cpa_green": 0.34683,
+      "delivery": 0.24941,
+      "sce_generation": 0.07059
+     },
+     "on": {
+      "sce": 0.6,
+      "cpa_lean": 0.59326,
+      "cpa_clean": 0.61102,
+      "cpa_green": 0.67318,
+      "delivery": 0.32569,
+      "sce_generation": 0.27431
+     }
+    }
+   }
+  }
+ ],
+ "nbt": {
+  "vintage": "2026",
+  "lock_in_years": 9,
+  "export_rates": {
+   "note": "$/kWh credit for exported energy, SCE ACC values; [month 0..11][hour 0..23]. Values are SCE Energy Export Credit (EEC) prices for the NBT26 vintage, CALENDAR YEAR 2026, read from SCE's own published EEC factor file - real hourly data, nothing interpolated. Hour index is hour-BEGINNING 0..23 in Pacific PREVAILING time (DST aware). Holidays use the weekend table. Each value is the TOTAL credit = generation component + delivery component. For this customer (CPA generation, SCE delivery) the total is unchanged but it arrives split: SCE credits the delivery component and CPA credits the generation component. IMPORTANT - these are 2026 values only, and the 9-year lock-in freezes a 9-YEAR TRAJECTORY, not a flat table; see nbt.notes for the year-by-year escalation the dashboard must apply.",
+   "weekday": [
+    [
+     0.08878,
+     0.08656,
+     0.08421,
+     0.08386,
+     0.08579,
+     0.08956,
+     0.0894,
+     0.08514,
+     0.07334,
+     0.06534,
+     0.06368,
+     0.0629,
+     0.06282,
+     0.05997,
+     0.0591,
+     0.0611,
+     0.07777,
+     0.10825,
+     0.09952,
+     0.09023,
+     0.08886,
+     0.0881,
+     0.09269,
+     0.09052
+    ],
+    [
+     0.08807,
+     0.08553,
+     0.08737,
+     0.08752,
+     0.08952,
+     0.08794,
+     0.08441,
+     0.08127,
+     0.06243,
+     0.05229,
+     0.04949,
+     0.04759,
+     0.04419,
+     0.03944,
+     0.03298,
+     0.03111,
+     0.06481,
+     0.10739,
+     0.09235,
+     0.08671,
+     0.08709,
+     0.08409,
+     0.09111,
+     0.08725
+    ],
+    [
+     0.07369,
+     0.07013,
+     0.06622,
+     0.06564,
+     0.06681,
+     0.06993,
+     0.0722,
+     0.0653,
+     0.04658,
+     0.02194,
+     0.01739,
+     0.01621,
+     0.01648,
+     0.01248,
+     0.01092,
+     0.01197,
+     0.02296,
+     0.05651,
+     0.08126,
+     0.08015,
+     0.07524,
+     0.07234,
+     0.0682,
+     0.06973
+    ],
+    [
+     0.07388,
+     0.07176,
+     0.07678,
+     0.07435,
+     0.07331,
+     0.07635,
+     0.06786,
+     0.05467,
+     0.01252,
+     0.00503,
+     0.00821,
+     0.00729,
+     0.00434,
+     0.00173,
+     0.00087,
+     0.00036,
+     0.00095,
+     0.00475,
+     0.0734,
+     0.07323,
+     0.0725,
+     0.07103,
+     0.06835,
+     0.07451
+    ],
+    [
+     0.07698,
+     0.07293,
+     0.07547,
+     0.08055,
+     0.08003,
+     0.07381,
+     0.06596,
+     0.06179,
+     0.02174,
+     0.01219,
+     0.01338,
+     0.01022,
+     0.00975,
+     0.01082,
+     0.00923,
+     0.00873,
+     0.01162,
+     0.03207,
+     0.08018,
+     0.08549,
+     0.07465,
+     0.07308,
+     0.07435,
+     0.07539
+    ],
+    [
+     0.07512,
+     0.07303,
+     0.06996,
+     0.07316,
+     0.07085,
+     0.06983,
+     0.06604,
+     0.06047,
+     0.04225,
+     0.03571,
+     0.03381,
+     0.02949,
+     0.02934,
+     0.03069,
+     0.0354,
+     0.03045,
+     0.03415,
+     0.04654,
+     0.08871,
+     0.08996,
+     0.08544,
+     0.08199,
+     0.07611,
+     0.07011
+    ],
+    [
+     0.07172,
+     0.07227,
+     0.06946,
+     0.0703,
+     0.0677,
+     0.0676,
+     0.07064,
+     0.06745,
+     0.0644,
+     0.05766,
+     0.05887,
+     0.05677,
+     0.05273,
+     0.0904,
+     0.17744,
+     0.22669,
+     0.22881,
+     0.28366,
+     0.2321,
+     0.23452,
+     0.09304,
+     0.08354,
+     0.07996,
+     0.0736
+    ],
+    [
+     0.08673,
+     0.08809,
+     0.08497,
+     0.0815,
+     0.08115,
+     0.08158,
+     0.07813,
+     0.06954,
+     0.06321,
+     0.06225,
+     0.06215,
+     0.06174,
+     0.06184,
+     0.06213,
+     0.13946,
+     0.29952,
+     0.39256,
+     1.14724,
+     1.06614,
+     0.97466,
+     1.01736,
+     0.87751,
+     0.86729,
+     0.08896
+    ],
+    [
+     0.08958,
+     0.08746,
+     0.08591,
+     0.08231,
+     0.08112,
+     0.08394,
+     0.08145,
+     0.06843,
+     0.06136,
+     0.05756,
+     0.05573,
+     0.05561,
+     0.0556,
+     0.05591,
+     0.05376,
+     0.05354,
+     0.07018,
+     0.13359,
+     0.45231,
+     0.58417,
+     0.31201,
+     0.15166,
+     0.15066,
+     0.09543
+    ],
+    [
+     0.08615,
+     0.08674,
+     0.08342,
+     0.07932,
+     0.07928,
+     0.07932,
+     0.08358,
+     0.07366,
+     0.06381,
+     0.0582,
+     0.05716,
+     0.05553,
+     0.05496,
+     0.05451,
+     0.05437,
+     0.05418,
+     0.05994,
+     0.09031,
+     0.09303,
+     0.09039,
+     0.0865,
+     0.08191,
+     0.08813,
+     0.0888
+    ],
+    [
+     0.08359,
+     0.08229,
+     0.0805,
+     0.07937,
+     0.08347,
+     0.08525,
+     0.08165,
+     0.07236,
+     0.06239,
+     0.05975,
+     0.0575,
+     0.05514,
+     0.05416,
+     0.04893,
+     0.05095,
+     0.0641,
+     0.09103,
+     0.09369,
+     0.08797,
+     0.08564,
+     0.08436,
+     0.08613,
+     0.08666,
+     0.08962
+    ],
+    [
+     0.08577,
+     0.08401,
+     0.0809,
+     0.08152,
+     0.08361,
+     0.08615,
+     0.09603,
+     0.08027,
+     0.07118,
+     0.06702,
+     0.06472,
+     0.06109,
+     0.05728,
+     0.05768,
+     0.05678,
+     0.06736,
+     0.09183,
+     0.09671,
+     0.09623,
+     0.08925,
+     0.08791,
+     0.08743,
+     0.08881,
+     0.08899
+    ]
+   ],
+   "weekend": [
+    [
+     0.08828,
+     0.0888,
+     0.08709,
+     0.08562,
+     0.08512,
+     0.08611,
+     0.08934,
+     0.08034,
+     0.06654,
+     0.05722,
+     0.05558,
+     0.05451,
+     0.05482,
+     0.0503,
+     0.05375,
+     0.05545,
+     0.07984,
+     0.10548,
+     0.09469,
+     0.0872,
+     0.08649,
+     0.08846,
+     0.08958,
+     0.08572
+    ],
+    [
+     0.08462,
+     0.08565,
+     0.08429,
+     0.08413,
+     0.08319,
+     0.083,
+     0.07931,
+     0.07002,
+     0.04782,
+     0.02716,
+     0.02712,
+     0.02483,
+     0.02448,
+     0.02207,
+     0.02164,
+     0.01904,
+     0.05704,
+     0.09802,
+     0.10095,
+     0.08939,
+     0.08635,
+     0.08326,
+     0.08408,
+     0.09072
+    ],
+    [
+     0.06682,
+     0.06807,
+     0.06941,
+     0.07098,
+     0.06997,
+     0.06993,
+     0.06743,
+     0.06094,
+     0.00634,
+     0.00185,
+     0.00465,
+     0.00289,
+     0.00066,
+     0.00065,
+     5e-05,
+     0.00383,
+     0.01639,
+     0.03147,
+     0.07077,
+     0.07338,
+     0.07101,
+     0.07052,
+     0.06865,
+     0.06488
+    ],
+    [
+     0.06429,
+     0.06498,
+     0.07209,
+     0.07629,
+     0.07265,
+     0.07377,
+     0.06707,
+     0.04491,
+     0.00155,
+     0.00179,
+     0.00748,
+     0.00444,
+     0.00077,
+     5e-05,
+     5e-05,
+     3e-05,
+     3e-05,
+     0.00269,
+     0.06838,
+     0.07823,
+     0.06647,
+     0.06734,
+     0.06593,
+     0.06801
+    ],
+    [
+     0.06773,
+     0.06934,
+     0.07908,
+     0.0786,
+     0.0759,
+     0.06893,
+     0.06639,
+     0.0318,
+     0.0044,
+     0.00452,
+     0.00427,
+     0.005,
+     0.00453,
+     0.00389,
+     6e-05,
+     5e-05,
+     5e-05,
+     0.00068,
+     0.0569,
+     0.08358,
+     0.07647,
+     0.0743,
+     0.07413,
+     0.07555
+    ],
+    [
+     0.07107,
+     0.06897,
+     0.06898,
+     0.06934,
+     0.06657,
+     0.08273,
+     0.06883,
+     0.05689,
+     0.01765,
+     0.0131,
+     0.01762,
+     0.01121,
+     0.01223,
+     0.0071,
+     0.00905,
+     0.00926,
+     0.01016,
+     0.02157,
+     0.07049,
+     0.09358,
+     0.08104,
+     0.07687,
+     0.07607,
+     0.07204
+    ],
+    [
+     0.07813,
+     0.07214,
+     0.06971,
+     0.06956,
+     0.06713,
+     0.06786,
+     0.06428,
+     0.06142,
+     0.0247,
+     0.0245,
+     0.02654,
+     0.02238,
+     0.02488,
+     0.02623,
+     0.1079,
+     0.11488,
+     0.11664,
+     0.136,
+     0.18099,
+     0.11321,
+     0.09882,
+     0.07948,
+     0.07728,
+     0.07411
+    ],
+    [
+     0.08552,
+     0.08391,
+     0.08575,
+     0.07917,
+     0.07646,
+     0.07656,
+     0.07073,
+     0.05984,
+     0.04219,
+     0.03871,
+     0.0383,
+     0.03844,
+     0.03546,
+     0.0356,
+     0.03703,
+     0.04515,
+     0.06066,
+     0.87515,
+     0.92925,
+     0.94655,
+     1.02109,
+     0.93523,
+     0.92603,
+     0.0876
+    ],
+    [
+     0.07899,
+     0.08186,
+     0.08012,
+     0.07653,
+     0.07558,
+     0.07551,
+     0.07343,
+     0.06054,
+     0.03594,
+     0.02347,
+     0.02049,
+     0.01972,
+     0.0169,
+     0.01916,
+     0.0237,
+     0.02669,
+     0.12438,
+     0.20327,
+     0.52383,
+     0.68069,
+     0.34205,
+     0.16289,
+     0.16304,
+     0.09202
+    ],
+    [
+     0.07867,
+     0.07958,
+     0.07613,
+     0.07679,
+     0.0752,
+     0.07442,
+     0.07208,
+     0.06486,
+     0.04323,
+     0.02108,
+     0.02107,
+     0.0204,
+     0.02008,
+     0.01927,
+     0.02104,
+     0.02233,
+     0.03847,
+     0.07979,
+     0.08219,
+     0.08092,
+     0.07951,
+     0.07717,
+     0.08882,
+     0.08304
+    ],
+    [
+     0.08012,
+     0.0773,
+     0.07574,
+     0.07513,
+     0.0762,
+     0.07741,
+     0.07747,
+     0.05733,
+     0.03858,
+     0.03014,
+     0.02793,
+     0.02547,
+     0.02447,
+     0.02214,
+     0.02206,
+     0.0427,
+     0.07884,
+     0.08867,
+     0.0842,
+     0.08109,
+     0.07941,
+     0.07881,
+     0.08322,
+     0.07927
+    ],
+    [
+     0.0797,
+     0.07812,
+     0.07456,
+     0.07081,
+     0.06984,
+     0.07177,
+     0.07481,
+     0.06492,
+     0.04248,
+     0.0222,
+     0.02101,
+     0.01915,
+     0.02036,
+     0.01465,
+     0.01403,
+     0.04053,
+     0.08116,
+     0.08648,
+     0.08457,
+     0.08047,
+     0.07919,
+     0.07446,
+     0.07564,
+     0.07453
+    ]
+   ]
+  },
+  "cpa_export_adder_per_kwh": 0.0,
+  "net_surplus_compensation_per_kwh": 0.02008,
+  "nonbypassable_charges_per_kwh": 0.00779,
+  "true_up": "annual",
+  "notes": "WHAT THESE NUMBERS ARE. Under the Net Billing Tariff (NBT, 'NEM 3.0') exported energy is no longer credited at the retail rate. It is credited at hourly Avoided Cost Calculator values - the export_rates matrices above, which are SCE's published EEC prices for the NBT26 vintage, calendar year 2026. Real hourly data from SCE's own factor file; nothing is interpolated or estimated. \n\nSHAPE. The spread is enormous and it, not the annual average, drives battery economics. Peak: August weekday hour 17 (5-6 p.m.) = $1.14724/kWh, hour 18 = $1.06614, hour 20 = $1.01736; August weekend hour 20 = $1.02109; September weekday hour 19 = $0.58417. Trough: April and May WEEKEND midday runs $0.00003 to $0.00006/kWh - effectively zero. Even summer midday is weak: August weekday noon = $0.06184, September weekday noon = $0.05560. Annual simple average is $0.09605 weekday / $0.08146 weekend. The practical consequence: midday solar export is worth roughly a twentieth of what the same kWh costs to import, so self-consumption and evening battery discharge carry essentially all the value. \n\nTHE 9-YEAR LOCK-IN FREEZES A TRAJECTORY, NOT A FLAT TABLE, AND THE ERROR CHANGES SIGN. A customer with a 2026 PTO date locks the NBT26 vintage for 9 years, but that vintage specifies a DIFFERENT 12x24 matrix for every year: the generation component falls while the delivery component rises sharply. NBT26 annual simple average across all 8760 hours, total, weekday/weekend: 2026 0.09605/0.08146; 2027 0.10262/0.08808; 2028 0.10210/0.08818; 2029 0.11829/0.09340; 2030 0.14679/0.11420; 2031 0.16508/0.12424; 2032 0.17114/0.12786; 2033 0.18133/0.13730; 2034 0.17028/0.12777 (final lock-in year). DO NOT APPLY A SINGLE SCALAR CORRECTION. That all-hours average roughly doubles, but it is carried by overnight and shoulder hours where a solar customer exports little or nothing, and it does not describe the hours that actually earn money. Comparing 2026 against the mean of the nine locked years, by hour window (unweighted within each window): ALL HOURS weekday 0.09605 -> 0.13930, 2026 low by 31%; all hours weekend 0.08146 -> 0.10916, low by 25%. HOURS 08-17, daytime PV export: weekday 0.06856 -> 0.09016, low by 24%; weekend 0.03918 -> 0.04159, low by only 6%. HOURS 16-21, battery discharge: weekday 0.17304 -> 0.22744, low by 24%; weekend 0.15646 -> 0.18902, low by 17%. AUGUST-SEPTEMBER HOURS 16-21, the hours that dominate a battery system's export revenue: weekday 0.59828 -> 0.53142 and weekend 0.56709 -> 0.46400 - here 2026 is HIGH by 11% and 18%, so applying the 2026 matrix flat OVERSTATES battery export revenue rather than understating it. The mechanism is that the summer-evening generation-capacity spike decays sharply after 2028 - August weekday hour 17 runs 1.1472, 1.2027, 1.0457, 0.6544, 0.7358, 0.8215, 0.8308, 0.8521, 0.8347 across 2026-2034, a nine-year mean of 0.9028 against 2026's 1.1472 - while the delivery component that grows over time is spread thinly across many more hours. Illustrative mix shift, August weekday hour 19: 2026 = generation 0.89396 + delivery 0.08070; 2033 = generation 0.23654 + delivery 0.36493. The correct treatment is to apply each year's own matrix. If a single correction factor is unavoidable, compute it against this system's own modelled hourly export shape - the brackets above establish sign and magnitude, not the factor itself. After the lock-in ends the customer moves to whatever vintage is then current. \n\nVINTAGE NOTE. NBT25 and NBT26 are numerically IDENTICAL (verified cell by cell), because there was no 2025 ACC - the 2024 ACC (Resolution E-5328, adopted 2024-11-13) was still 'the ACC approved as of January 1' on both 2025-01-01 and 2026-01-01. The 2026 ACC was adopted 2026-09-03 (D.26-09-007) and will drive NBT27, which WILL differ. For reference the older NBT23/NBT24 vintages are far richer at the summer peak (August 2026 weekday hour 19 = $1.61483 versus NBT26's $0.97466), so earlier adopters are better off. \n\nACC PLUS ADDER - ON TOP OF THE MATRIX. SCE Schedule NBT pays residential customers an extra per-kWh credit on exports, by vintage year: 2023 $0.040, 2024 $0.032, 2025 $0.024, 2026 $0.016, 2027 $0.008, 2028 and later $0.000 (residential non-equity); the residential equity figures are 0.093/0.074/0.056/0.037/0.019/0.000. A 2026 PTO date therefore earns $0.016/kWh on every exported kWh, fixed for the same 9-year lock-in and then dropping to zero. Eligibility requires an Original PTO Date between 2023-04-15 and 2027-12-31. This adder is NOT included in the export_rates matrices - add it. It is also the one credit that CAN offset non-bypassable charges, the Base Services Charge and other fixed charges, which ordinary export credits cannot. CPA customers receive it from SCE on the delivery portion of the bill; switching to or from CPA does not change its value. \n\nCPA SPECIFICS. cpa_export_adder_per_kwh is 0.0: CPA pays no premium above SCE's ACC prices. CPA's Net Billing Tariff computes its Energy Export Credit from the same CPUC ACC, splits each hourly price into a generation component (paid by CPA) and a delivery component (paid by SCE), and locks it for the same 9 years for PTO dates through 2027-12-31. So the total export credit is the same whether the customer takes generation from CPA or SCE - only who pays it changes. \n\nNETTING AND TRUE-UP. Netting is hourly, not monthly: each hour's exports earn that hour's EEC price and each hour's imports are charged the retail rate for that TOU period - they do not cancel out at the same price. Within a billing period, credits offset that period's energy charges. Any excess credit rolls forward month to month. At the ANNUAL true-up (SCE uses the customer's 12-month Relevant Period; CPA runs its true-up in the APRIL billing cycle), remaining credits are settled. \n\nTRUE-UP CLAWBACK - EASY TO MISS AND IT PENALISES OVERSIZING. Before any net surplus is paid out, Schedule NBT SC 4.e.i applies an 'Average Retail Export Compensation Rate', published by SCE under the name 'EEC Adjustment Pricing': September 2026 = $0.05981/kWh (delivery $0.01163 + generation $0.04818). Net Surplus Energy is then compensated at the NSC rate, which is only $0.02008/kWh (CPA) or $0.01825/kWh (SCE bundled) - roughly a THIRD of the clawback rate. Modelling surplus at the NSC rate alone substantially understates the penalty for an oversized array. The correct design conclusion is to size to self-consumption plus battery, not to annual kWh offset. \n\nNET SURPLUS COMPENSATION. net_surplus_compensation_per_kwh is set to 0.02008, CPA's rate for usage ending September 2026, because this customer takes generation from CPA. SCE's own NSCR for the same period is $0.01825/kWh; CPA sets its rate 10% above SCE's and the two series track to 3-4 significant figures. Note that CCA and Direct Access customers are NOT eligible for NSC from SCE at all (Schedule NBT SC 4.g.iv), which is precisely why CPA pays its own. Both rates are recalculated monthly as a 12-month rolling average of CAISO day-ahead DLAP prices for hours ending 08 through 17, so they drift; SCE's ranged $0.01309 to $0.01864 over the last 21 months. NSC requires an affirmative election by the customer. \n\nNON-BYPASSABLE CHARGES. nonbypassable_charges_per_kwh is $0.00779/kWh on every IMPORTED kWh, per Schedule TOU-D effective 2026-06-01: PPPC $0.00171 + NDC $0.00003 + CTC $0.00014 + WFC $0.00591. DO NOT ADD THIS ON TOP OF THE RATES TABLES - it is already inside them. It is recorded separately only to show which part of the import price solar cannot escape by exporting. Two cautions: (a) CARE and Medical Baseline customers are exempt from the wildfire fund charge, giving them $0.00188/kWh (FERA is NOT exempt); (b) SCE moved most public-purpose-program recovery out of the volumetric rate into the fixed Base Services Charge effective 2025-11-15, so only $0.00171/kWh of PPPC remains volumetric - a naive division of the bill's $13.22 PPP line by kWh gives $0.0067 and is wrong, because most of that line is the fixed BSC component. \n\nBATTERY RULES - TWO HARD CONSTRAINTS. (1) Battery discharge to the grid IS compensated at the same EEC prices, which is what makes evening arbitrage work. But for paired-storage systems under 10 kW with no Net Generation Output Meter, creditable monthly export is CAPPED at SCE's estimated PV production (CSI EPBB production factor for the month and CEC climate zone, times installed PV kW). Export above the cap is FORFEITED, and Schedule NBT SC 5.c.vii deems the forfeited kWh to have occurred during the customer's HIGHEST-PRICED billing period regardless of when they were actually exported, cascading downward - so over-export is penalised at the most valuable hours by construction, and forfeited kWh do not count toward Net Surplus Energy either. The month is chosen by the FIRST DAY of the billing period. A small system can escape the cap by opting into NGOM metering at the start of a Relevant Period (metering cost capped at $600) - for a battery intended to discharge to the grid this is likely worth doing. Systems over 10 kW AC storage must have an NGOM or certified power control, and storage output is limited to 150% of the renewable generator's capacity. (2) GRID-CHARGING THEN EXPORTING IS PROHIBITED. SCE: 'Battery systems in a Paired Storage agreement are charged by a renewable generator ... but are not permitted to charge from the grid.' Schedule NBT SC 5.b.ii.B allows certified power-control firmware that 'prevents electricity imported from the grid to charge the storage device' in lieu of an NGOM. So there is no pure price-arbitrage strategy: the battery may only be charged from solar, and even if it were grid-charged the export cap would mean the exported kWh earned nothing. There is no limit on storage kWh capacity, and the old NEM 150% PV sizing rule is suspended. \n\nUNRESOLVED. SCE does not publish the paired-storage production-factor table (kWh/kW by month and climate zone) anywhere findable; the tariff describes it but does not reproduce it. Reconstructing it would mean running the CSI EPBB calculator with SCE's stated assumptions. If the dashboard models a sub-10 kW battery without an NGOM, the export cap is therefore approximate."
+ },
+ "incentives": {
+  "federal_itc_residential_pct": 0.0,
+  "federal_itc_note": "The Section 25D Residential Clean Energy Credit is TERMINATED for a homeowner-owned system installed in 2026. P.L. 119-21 (One Big Beautiful Bill Act) sec. 70506, enacted 2025-07-04, amended 26 U.S.C. 25D(h) to read: 'The credit allowed under this section shall not apply with respect to any expenditures made after December 31, 2025.' This is an EXPENDITURE test, not a placed-in-service test, and 25D(e)(8)(A) treats the expenditure as made when the original installation is completed - so prepaying in 2025 does not preserve the credit if installation finishes in 2026 (IRS FS-2025-05). Model 25D at 0% for this customer. The only federal credit still reachable in 2026 is Section 48E, claimed by a THIRD-PARTY OWNER under a lease or PPA, at 30% (48E(a)(2)(A)(ii)(I) grants the 30% rate automatically to facilities under 1 MW AC with no prevailing-wage or apprenticeship compliance), plus potential +10pp domestic content and +10pp energy community adders; Sunrun's Q2 2026 filing reports an average realized ITC of 44.0% of subscriber value. 48E(i) denies the credit only for property described in 25D(d)(1) (solar water heating) and (4) (small wind) - rooftop PV, 25D(d)(2), and storage, 25D(d)(6), remain eligible, though the subsection heading says 'wind and solar leasing' and is widely read as a drafting error that a technical corrections bill could close. Energy storage is exempt from the 2027 placed-in-service cliff entirely under 48E(e)(4)(C). Caveat for the dashboard: the homeowner claims nothing themselves and sees the credit only as a lower lease or PPA payment - pass-through is a pricing decision, not an entitlement, and is not disclosed on customer paperwork.",
+  "sgip_residential_per_kwh": 0.0,
+  "sgip_note": "SGIP is effectively closed to this customer; model $0. CPUC D.25-12-003 (issued 2025-12-04, implemented by joint Tier 1 advice letter 2026-01-05) stopped ALL ratepayer-funded SGIP budgets from accepting applications on 2025-12-30, and cancelled every application still on a waitlist at 2025-12-31. The statutory basis is Pub. Util. Code 379.6, which authorized administration only 'until January 1, 2026' (the SB 700 sunset). The general-market Small Residential Storage budget was at Step 7, $0.15/Wh = $150/kWh, when it closed; Equity Resiliency was at $1.00/Wh = $1,000/kWh. Residual 'available funds' still displayed on the closed budgets are stranded, not awardable. The only surviving path is RSSE (Residential Solar and Storage Equity, created by D.24-03-071 implementing AB 209, funded at $280M from GGRF), which pays $1.10/Wh = $1,100/kWh for storage plus $3.10/W for solar - but in SCE territory the RSSE-Ratepayer budget is CLOSED, RSSE AB 209 Non-POU is WAITLIST ONLY, and the one budget still OPEN (RSSE AB 209 POU, ~$1M unallocated) is reserved for customers of publicly owned utilities that use SCE as program administrator. An ordinary SCE bundled or CPA CCA residential customer in Agoura Hills falls in the waitlist-only bucket with no funding guarantee. Note also that the CPUC's own SGIP web page is stale - it still shows rates 'available through 2025' and never mentions the closeout.",
+  "other": [
+   {
+    "name": "Federal Section 48E ITC via third-party ownership (lease or PPA)",
+    "value": "30% base, commonly 40-44% realized with adders",
+    "note": "Claimed by the system owner, not the homeowner; reaches the customer only as lower lease/PPA pricing. Storage is exempt from the 2027 placed-in-service cliff. TPO share of the residential market is projected at 60-69% for 2026 precisely because 25D is gone."
+   },
+   {
+    "name": "CPA Power Response Smart Home - home battery",
+    "value": "$400 signup e-gift card + $300/year, paid each October",
+    "note": "Administered by Uplight. IMPORTANT CONSTRAINT: SolarEdge is the only supported battery brand - Tesla, Enphase, FranklinWH, Generac, LG, sonnen and Panasonic are all absent from the eligible list. Payments are flat annual, not per-event or per-kWh. Materially changes the battery hardware choice if the customer wants this revenue."
+   },
+   {
+    "name": "CPA Sun Storage Rebate",
+    "value": "$2,000 base, up to $3,500 with adders",
+    "note": "Open, first-come first-served. Adders: +$1,250 Reliability+ (PSPS-prone area), +$250 Medical Baseline, +$250 income-qualified. Over 1,200 battery models eligible, far broader than Power Response. The stated components sum to $3,750 against a published $3,500 cap - unresolved discrepancy, treat $3,500 as the max."
+   },
+   {
+    "name": "CPA Power Response Home (manual, no smart device)",
+    "value": "$20 signup + $2.00/kWh reduced during Energy Saving Events",
+    "note": "24-hour notice, manual load reduction. The only CPA offering with a per-kWh rate."
+   },
+   {
+    "name": "SCE Emergency Load Reduction Program (ELRP)",
+    "value": "$2.00/kWh of incremental load reduction",
+    "note": "Program runs 2021-2027 (seven years, extended by D.23-12-005), not a 5-year pilot. Residential batteries CANNOT enroll directly - the residential path is subgroup A.4 (Virtual Power Plant aggregators), which requires the aggregation to total at least 500 kW, so the customer must go through an aggregator such as Tesla, AutoGrid, EnergyHub, Enersponse, Leap or Stem. Events: 60 dispatch hours/year max, May 1 - Oct 31, 4-9 p.m., 1-5 hours, day-ahead notice, triggered by CAISO EEA Watch/1/2/3. No penalty for non-performance; paid as a bill credit by March 31 of the following year. No successor program is announced for after 2027, so any DR revenue modeled beyond 2027 is an assumption, not a fact."
+   },
+   {
+    "name": "SCE Power Saver Rewards",
+    "value": "$0 - terminated",
+    "note": "The residential program sunset at the conclusion of the 2025 ELRP program year; powersaver.sce.com now redirects to SCE's generic demand-response page. Note for historical modeling that it paid $1/kWh, not $2/kWh - the $2 figure is the non-residential ELRP rate."
+   },
+   {
+    "name": "SCE BTM Optimization of Load Technology Study",
+    "value": "up to $400 per battery",
+    "note": "What SCE actually offers a residential battery owner directly in 2026, via EnergyHub, Octopus or Uplight/Optiwatt. Framed as a study rather than a standing program, so do not assume it recurs."
+   },
+   {
+    "name": "CEC Demand Side Grid Support (DSGS)",
+    "value": "Option 1 suspended for 2026; Option 3 ~$107.64/kW-year plus $1/kWh",
+    "note": "DSGS Option 1, the $2/kWh program, is suspended for the 2026 program year due to budget constraints. Option 3 (Market-Aware Storage VPP) pays $82.80/kW-year for a 4-hour battery plus a 30% PY2026 bonus, but 2026 participation is limited to storage VPP aggregations that already participated in October 2025 - new aggregations are locked out."
+   },
+   {
+    "name": "CPA Solar and Battery Access Program",
+    "value": "$0 - waitlisted",
+    "note": "CPA states the statewide incentives funding this program have been fully allocated. Do not count on it."
+   },
+   {
+    "name": "SCE Base Services Charge (cost, not incentive)",
+    "value": "$24.15/month standard; $6.00 CARE; $12.08 FERA",
+    "note": "Effective November 2025. This is the CPUC income-graduated fixed charge under D.24-05-028. It replaced the minimum charge entirely. It is unavoidable and is NOT offset by solar exports, so it sets a floor on the customer's bill."
+   }
+  ]
+ }
+}

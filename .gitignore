@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+.playwright-mcp/
+*.log
+# never commit personal utility data; the demo dataset in data/demo/ is scrubbed on purpose
+private/
+*.pdf
+.cache/

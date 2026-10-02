@@ -1,0 +1,2350 @@
+{
+ "utility": {
+  "id": "pge",
+  "name": "Pacific Gas and Electric",
+  "states": [
+   "CA"
+  ],
+  "zipPrefixes": [
+   "931",
+   "932",
+   "933",
+   "934",
+   "935",
+   "936",
+   "937",
+   "939",
+   "940",
+   "941",
+   "943",
+   "944",
+   "945",
+   "946",
+   "947",
+   "948",
+   "949",
+   "950",
+   "951",
+   "952",
+   "953",
+   "954",
+   "955",
+   "956",
+   "957",
+   "958",
+   "959",
+   "960",
+   "961"
+  ],
+  "website": "https://www.pge.com/en/account/rate-plans/find-your-best-rate-plan.html",
+  "baselineRegions": {
+   "note": "PG&E baseline allocations in kWh per DAY, from Schedule E-1 Special Condition 2 (values unchanged since 2022-06-01). Code B is basic, non-all-electric; the all_electric figures are PG&E's Code H, which requires permanently installed electric space heating as the PRIMARY heat source. Baseline summer is June 1 - September 30 and a straddling billing cycle is prorated by days. Territory boundaries are ELEVATION CONTOURS, drawn around communities rather than by ZIP, and PG&E publishes no ZIP-to-territory table at all - the zipHints below are a join of PG&E's official county-and-elevation table with its 2014 service-area ZIP map, ordered most-likely-first, and are INFERENCE rather than tariff. The six five-digit entries (95005, 95006, 95007, 95018, 95033, 95041) are the only ZIPs PG&E names normatively, as Territory Q exceptions in Santa Cruz County. Allocations range more than threefold (5.9 to 19.2 kWh/day in summer), so a wrong guess is expensive; the territory letter is printed on page 3 of the customer's bill under 'Service Information' and the UI should ask them to confirm. Baseline only has a price effect on E-TOU-C, the only plan in this file with a baseline credit.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "allocations": {
+    "P": {
+     "summer": 13.5,
+     "winter": 11.0,
+     "summer_all_electric": 15.2,
+     "winter_all_electric": 26.0,
+     "label": "P - Sierra/Coast Range foothills 1,500-3,000 ft, plus all of Lake County"
+    },
+    "Q": {
+     "summer": 9.8,
+     "winter": 11.0,
+     "summer_all_electric": 8.5,
+     "winter_all_electric": 26.0,
+     "label": "Q - coastal ridges at or above 1,500 ft (Santa Cruz Mountains, Skyline)"
+    },
+    "R": {
+     "summer": 17.7,
+     "winter": 10.4,
+     "summer_all_electric": 19.9,
+     "winter_all_electric": 26.7,
+     "label": "R - hot inland valley (Fresno, Merced, Redding, Red Bluff)"
+    },
+    "S": {
+     "summer": 15.0,
+     "winter": 10.2,
+     "summer_all_electric": 17.8,
+     "winter_all_electric": 23.7,
+     "label": "S - Sacramento Valley and northern San Joaquin Valley (Sacramento, Stockton, Modesto)"
+    },
+    "T": {
+     "summer": 6.5,
+     "winter": 7.5,
+     "summer_all_electric": 7.1,
+     "winter_all_electric": 12.9,
+     "label": "T - coastal marine: all of San Francisco, Oakland-Berkeley, Richmond, southern Marin, Monterey Peninsula, coastal San Luis Obispo. LOWEST allowance in the system."
+    },
+    "V": {
+     "summer": 7.1,
+     "winter": 8.1,
+     "summer_all_electric": 10.4,
+     "winter_all_electric": 19.1,
+     "label": "V - coastal Humboldt only (Eureka, Arcata)"
+    },
+    "W": {
+     "summer": 19.2,
+     "winter": 9.8,
+     "summer_all_electric": 22.4,
+     "winter_all_electric": 19.0,
+     "label": "W - hottest: southern San Joaquin Valley below 1,000 ft (Bakersfield, Hanford, Visalia). HIGHEST summer allowance."
+    },
+    "X": {
+     "summer": 9.8,
+     "winter": 9.7,
+     "summer_all_electric": 8.5,
+     "winter_all_electric": 14.6,
+     "label": "X - inland Bay Area and North Bay catch-all (San Jose, Napa, Santa Rosa, Concord, Fremont, San Rafael). The most common territory."
+    },
+    "Y": {
+     "summer": 10.5,
+     "winter": 11.1,
+     "summer_all_electric": 12.0,
+     "winter_all_electric": 24.0,
+     "label": "Y - mid-mountain, roughly 3,000-6,000 ft"
+    },
+    "Z": {
+     "summer": 5.9,
+     "winter": 7.8,
+     "summer_all_electric": 6.7,
+     "winter_all_electric": 15.7,
+     "label": "Z - high Sierra, all of Alpine County. LOWEST summer allowance."
+    }
+   },
+   "zipHints": {
+    "931": [
+     "T"
+    ],
+    "932": [
+     "W",
+     "R"
+    ],
+    "933": [
+     "W"
+    ],
+    "934": [
+     "T",
+     "X",
+     "R"
+    ],
+    "935": [
+     "R"
+    ],
+    "936": [
+     "R",
+     "Y",
+     "Z"
+    ],
+    "937": [
+     "R"
+    ],
+    "939": [
+     "T",
+     "X"
+    ],
+    "940": [
+     "X",
+     "T"
+    ],
+    "941": [
+     "T"
+    ],
+    "943": [
+     "X"
+    ],
+    "944": [
+     "X"
+    ],
+    "945": [
+     "X",
+     "S"
+    ],
+    "946": [
+     "T",
+     "X"
+    ],
+    "947": [
+     "T"
+    ],
+    "948": [
+     "T"
+    ],
+    "949": [
+     "X",
+     "T"
+    ],
+    "950": [
+     "X",
+     "T",
+     "Q"
+    ],
+    "951": [
+     "X"
+    ],
+    "952": [
+     "S",
+     "P",
+     "Y",
+     "Z"
+    ],
+    "953": [
+     "S",
+     "R",
+     "P",
+     "Y"
+    ],
+    "954": [
+     "X",
+     "T",
+     "P"
+    ],
+    "955": [
+     "V",
+     "Y",
+     "X"
+    ],
+    "956": [
+     "S",
+     "P",
+     "Y"
+    ],
+    "957": [
+     "S",
+     "P",
+     "Y",
+     "Z"
+    ],
+    "958": [
+     "S"
+    ],
+    "959": [
+     "S",
+     "P",
+     "Y"
+    ],
+    "960": [
+     "R",
+     "Y",
+     "Z"
+    ],
+    "961": [
+     "Z",
+     "Y"
+    ],
+    "95005": [
+     "Q"
+    ],
+    "95006": [
+     "Q"
+    ],
+    "95007": [
+     "Q"
+    ],
+    "95018": [
+     "Q"
+    ],
+    "95033": [
+     "Q"
+    ],
+    "95041": [
+     "Q"
+    ]
+   }
+  }
+ },
+ "meta": {
+  "as_of": "2026-09-16",
+  "rates_effective": "2026-06-01",
+  "sources": [
+   {
+    "title": "PG&E Electric Schedule E-TOU-C (tariff book PDF), rates effective 2026-06-01, Advice 7921-E / D.26-04-036",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf",
+    "used_for": "E-TOU-C total $/kWh by season and period, the $0.08140/kWh baseline credit, the Conservation Incentive Adjustment split, the unbundled generation/distribution components, TOU period hours and the 4-month summer season, and the Base Services Charge"
+   },
+   {
+    "title": "PG&E Electric Schedule E-TOU-D (tariff book PDF), effective 2026-06-01",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-D.pdf",
+    "used_for": "E-TOU-D totals and components; the weekday-only 5-8 p.m. peak and the all-off-peak weekend/holiday schedule"
+   },
+   {
+    "title": "PG&E Electric Schedule E-ELEC (tariff book PDF), effective 2026-06-01",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-ELEC.pdf",
+    "used_for": "E-ELEC totals and components; the peak / part-peak / off-peak structure with off-peak running midnight-3 p.m. every day"
+   },
+   {
+    "title": "PG&E Electric Schedule EV2 (Sch. EV2-A) (tariff book PDF), effective 2026-06-01",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV2%20(Sch).pdf",
+    "used_for": "EV2-A totals and components, the 800%-of-baseline cap, and the confirmation that EV2-A uses the 4-month E-1 baseline season"
+   },
+   {
+    "title": "PG&E Electric Schedule EV (Rate B) (tariff book PDF), Rev. Cal. P.U.C. Sheet 61168-E, Advice 7846-E, effective 2026-03-01",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_EV%20(Sch).pdf",
+    "used_for": "EV-B totals and unbundled components, the May-October summer season, the $0.04928/day meter charge in place of a Base Services Charge, the absence of a climate credit, the 2-9 p.m. weekday / 3-7 p.m. weekend peak, and the elimination of EV Rate A on 2025-11-30"
+   },
+   {
+    "title": "PG&E Electric Schedule E-1 (tariff book PDF), Special Condition 2 (baseline quantities) and 6 (baseline season)",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-1.pdf",
+    "used_for": "Baseline allocations in kWh/day for territories P, Q, R, S, T, V, W, X, Y, Z, Code B and Code H; the June 1 - September 30 baseline season and the mid-cycle proration rule; the non-bypassable charge components"
+   },
+   {
+    "title": "PG&E Electric Preliminary Statement Part A, section A.1.b - baseline territory definitions by county and elevation (table last revised 2019-04-25, Advice 5522-E)",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_PRELIM_A.pdf",
+    "used_for": "County-to-territory assignment and elevation bands; the only ZIP codes PG&E names normatively for baseline (the six Santa Cruz County Territory Q exceptions)"
+   },
+   {
+    "title": "PG&E Electric Service Area Map, Cal. P.U.C. Sheet 34575-E, Advice 4535-E, effective 2014-12-17",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_MAPS_Service%20Area%20Map.pdf",
+    "used_for": "The 1,119 five-digit ZIP codes in PG&E's electric service territory, collapsed to the 3-digit prefixes in utility.zipPrefixes"
+   },
+   {
+    "title": "PG&E Base Services Charge (income-graduated fixed charge, AB 205 / CPUC D.24-05-028), Advice 7846-E effective 2026-03-01",
+    "url": "https://www.pge.com/en/account/billing-and-assistance/base-services-charge.html",
+    "used_for": "$0.79343/day standard, $0.39688/day FERA or deed-restricted affordable housing, $0.19713/day CARE; and the removal of the Delivery Minimum Bill from every mainstream residential schedule"
+   },
+   {
+    "title": "PG&E - California Climate Credit",
+    "url": "https://www.pge.com/en/account/billing-and-assistance/understand-your-bill/california-climate-credit.html",
+    "used_for": "$36.18 per credit, twice a year, on the August and September 2026 bills (moved from April/October by the CPUC on 2026-04-30 in R.25-07-013 under AB 1207)"
+   },
+   {
+    "title": "PG&E Solar Billing Plan export rates - 'PG&E NBT EEC Values 2026 Vintage.csv', the CPUC Resolution E-5301 machine-readable MIDAS compliance file",
+    "url": "https://www.pge.com/assets/pge/docs/vanities/PGE-Solar-Billing-Plan-Export-Rates.zip",
+    "used_for": "The 12x24 weekday and weekend export-credit matrices for the NBT26 vintage, calendar year 2026, and their generation/delivery split. Cross-checked cell by cell against PG&E's own published PDF price sheet: 1,149 of 1,152 cells identical, the three exceptions differing by no more than $0.0005 in the November DST fall-back hours"
+   },
+   {
+    "title": "PG&E Electric Schedule NBT (Net Billing Tariff / Solar Billing Plan), Sheet 11 (ACC Plus) and Sheet 17 Special Condition 2.f (non-bypassable charges)",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_NBT.pdf",
+    "used_for": "ACC Plus adder $0.0088/kWh for the 2026 residential non-equity vintage and its glide path; the nine-year lock-in; the four non-bypassable charges and the rule that only the ACC Plus credit may offset them; the true-up clawback mechanism in Special Condition 5.d"
+   },
+   {
+    "title": "PG&E Net Surplus Compensation Rates for Energy (AB 920 rate table), September 2026 true-up month",
+    "url": "https://www.pge.com/assets/pge/docs/clean-energy/solar/AB920-RateTable.pdf",
+    "used_for": "Net surplus compensation $0.02751/kWh; the rate is indexed by TRUE-UP month, not by the month of export"
+   },
+   {
+    "title": "MCE residential rate table, effective 2026-04-01 (board-adopted 2026-02-19)",
+    "url": "https://www.mcecleanenergy.org/wp-content/uploads/2025/09/MCE-website-rate-table_RES_as-of-4.1.26.pdf",
+    "used_for": "MCE Light Green generation rates and the -$0.0062/kWh Cost Relief Credit"
+   },
+   {
+    "title": "Silicon Valley Clean Energy residential rate sheet, effective 2026-01-01",
+    "url": "https://svcleanenergy.org/wp-content/uploads/SVCE-Residential-Rate-Sheet-Jan-1-2026.pdf",
+    "used_for": "SVCE GreenStart generation rates by schedule, season and period (1.00% below PG&E's net generation rate)"
+   },
+   {
+    "title": "CleanPowerSF residential rate tables, effective 2026-03-01, re-adopted unchanged for FY26-27 from 2026-07-01",
+    "url": "https://www.cleanpowersf.org/residential-rate-tables",
+    "used_for": "CleanPowerSF Green generation rates by schedule, season and period"
+   },
+   {
+    "title": "WestLight Energy (formerly Peninsula Clean Energy) residential rates, effective 2026-07-01",
+    "url": "https://westlightenergy.org/wp-content/uploads/2026/07/Res-WestLight-Energy-Rates-Effective-July-1-2026.pdf",
+    "used_for": "WestLight ECOplus generation rates (5.00% below PG&E's net generation rate) and the rebrand from Peninsula Clean Energy on 2026-07-01"
+   },
+   {
+    "title": "Ava Community Energy (formerly East Bay Community Energy) residential rate sheet and system fees, effective 2026-01-01",
+    "url": "https://avaenergy.org/wp-content/uploads/2026/02/2026-January-Rate-Sheet-2018-Vintage.pdf",
+    "used_for": "Ava Bright Choice generation rates (0.50% below PG&E's net generation rate) and the confirmation that Ava is vintage-neutral across 2017-2025"
+   },
+   {
+    "title": "San Jose Clean Energy residential rates, effective 2026-03-01",
+    "url": "https://www.sanjosecleanenergy.org/wp-content/uploads/2026/02/SJCE-Residential-Rates-March-1-2026.pdf",
+    "used_for": "SJCE GreenSource generation rates, including the fact that the discount is 3% on E-TOU-C/E-TOU-D but 0-5% on E-ELEC and EV2-A"
+   },
+   {
+    "title": "PG&E residential PCIA and Franchise Fee Surcharge by vintage, effective 2026-01-01 (Schedule E-TOU-C Sheet 8, Advice 7846-E; Schedule E-FFS, Advice 7797-E)",
+    "url": "https://sonomacleanpower.org/uploads/documents/PCIA-FF-to-PDF-for-Web-Effective-1.1.2026.pdf",
+    "used_for": "PCIA by vintage (2016 $0.03687, 2017 $0.03661, 2018 $0.03679) plus the $0.00059/kWh franchise fee surcharge, and PG&E's own bundled PCIA of -$0.01011"
+   },
+   {
+    "title": "PG&E joint rate comparisons with each CCA",
+    "url": "https://www.pge.com/en/account/rate-plans/community-choice-aggregation.html",
+    "used_for": "Cross-check only. These documents give class-average $/kWh, not per-period rates, and their PG&E side is dated March 2026, before the June 1 tariff. Their generation figures were NOT used"
+   },
+   {
+    "title": "CPUC 2025 SB 695 Report on electric rates, Table 17 (forecast bundled residential average rates)",
+    "url": "https://www.cpuc.ca.gov/-/media/cpuc-website/divisions/office-of-governmental-affairs-division/reports/2025/2025-sb-695-report_093025.pdf",
+    "used_for": "PG&E bundled residential average rate: $0.361 actual 2024, $0.350 projected 2025, $0.380 2026, $0.414 2027, $0.445 2028 - the basis for meta.escalation"
+   },
+   {
+    "title": "26 U.S.C. section 25D as amended by P.L. 119-21 section 70506, and 26 U.S.C. section 48E",
+    "url": "https://uscode.house.gov/view.xhtml?req=(title:26%20section:25D%20edition:prelim)",
+    "used_for": "Termination of the residential clean energy credit for expenditures made after 2025-12-31, and the surviving 30% third-party-owner credit"
+   },
+   {
+    "title": "California SGIP program metrics and CPUC D.25-12-003",
+    "url": "https://www.selfgenca.com/home/program_metrics/",
+    "used_for": "All ratepayer-funded SGIP budgets closed to new applications on 2025-12-30"
+   }
+  ],
+  "confidence": {
+   "rates": {
+    "level": "high",
+    "note": "PG&E columns transcribed verbatim from the tariff-book schedules and independently verified by re-summing generation + distribution + the flat adder stack to the published total in all 26 cells. CCA columns reproduce the CCAs' own published all-in tables to five decimals."
+   },
+   "schedules": {
+    "level": "high",
+    "note": "TOU hours read from each schedule's Special Conditions, not from marketing pages. The weekday=weekend identity on E-TOU-C, E-ELEC and EV2-A is deliberate and tariff-sourced."
+   },
+   "providers": {
+    "level": "high",
+    "note": "All six CCA generation tables are from the CCAs' own adopted rate sheets. Effective dates differ by CCA and are recorded per provider; MCE has a pending Cost Relief Credit change (board vote 2026-10-15) that would cut its premium by about $0.031/kWh."
+   },
+   "baseline": {
+    "level": "medium",
+    "note": "Allocations HIGH - verbatim from Schedule E-1 Special Condition 2. ZIP-to-territory hints LOW: PG&E publishes no such table and territory boundaries are elevation contours. Treat as a seeded default the user must confirm."
+   },
+   "fixed_charge": {
+    "level": "high",
+    "note": "Base Services Charge read from the Other Charges block of every schedule; the removal of the Delivery Minimum Bill confirmed by its absence from the tariff text and by PG&E's own comparison workbook."
+   },
+   "export_rates": {
+    "level": "high",
+    "note": "PG&E's CPUC Resolution E-5301 machine-readable MIDAS compliance file, already carrying the mandated month/day-type/hour aggregation - 576 distinct cells per component with no conflicting values, so nothing was re-averaged. Cross-checked against PG&E's published PDF price sheet: 1,149/1,152 cells identical."
+   },
+   "climate_credit": {
+    "level": "high",
+    "note": "$36.18 x 2 on the August and September bills, printed in every current residential tariff sheet and confirmed by PG&E's July 2026 press release and the CPUC's April 2026 vote."
+   },
+   "ev_b_cca_columns": {
+    "level": "low",
+    "note": "The single estimated block in this file. No CCA publishes an EV-B generation rate, so each CCA's EV-B column is PG&E's EV-B total plus that CCA's per-period all-in delta on EV2-A. PG&E's own EV-B column is exact."
+   },
+   "escalation": {
+    "level": "medium",
+    "note": "CPUC SB 695 Report Table 17 forecast, a projection rather than a measurement; the 2026-2028 leg implies 8.2%/yr, well above the 5.4%/yr 2024-2028 average, so the recommended default is deliberately conservative."
+   },
+   "incentives": {
+    "level": "medium",
+    "note": "The Section 25D termination and the SGIP closure are statutory and HIGH. Utility and CCA program terms change without notice and are MEDIUM."
+   }
+  },
+  "climate_credit": {
+   "amount": 36.18,
+   "months": [
+    8,
+    9
+   ],
+   "note": "Per appearance, not per year: $36.18 on the August bill and $36.18 on the September bill, $72.36 a year. Not paid on Schedule EV-B."
+  },
+  "baseline_region": "X",
+  "baseline_kwh_per_day": {
+   "summer": 9.8,
+   "winter": 9.7,
+   "note": "Territory X, the inland Bay Area and North Bay catch-all and PG&E's most common territory, used as the fallback when no territory has been chosen."
+  },
+  "escalation": {
+   "historical_cagr": 0.0537,
+   "period": "2024-2028 (projected)",
+   "recommended_default": 0.05,
+   "low": 0.03,
+   "high": 0.08,
+   "note": "CPUC 2025 SB 695 Report Table 17 projects PG&E's bundled residential average rate at $0.361/kWh actual for 2024, then $0.350 (2025), $0.380 (2026), $0.414 (2027) and $0.445 (2028). That is a 5.37%/yr CAGR over 2024-2028, but it is strongly back-loaded: 2026-2028 alone implies 8.21%/yr, while 2024-2025 was actually NEGATIVE. PG&E's projected rate is the highest of the three California IOUs and its projected increase is the steepest. The recommended default of 5%/yr is deliberately below the back-loaded projection - a forecast is not a measurement, and a model that compounds 8%/yr for 25 years would overstate solar savings badly. Use 3% low and 8% high as the sensitivity band. FLAGGED: unlike the SCE file, this figure rests on a CPUC projection rather than a realised EIA Form 861 revenue series, so it is MEDIUM confidence."
+  },
+  "notes": "RATE MODEL. Every rates[season][period][provider] value is the FULL retail $/kWh that provider's customer pays in that hour - delivery plus generation plus every volumetric surcharge. PG&E's own columns are transcribed verbatim from the tariff-book schedules effective 2026-06-01 (Advice 7921-E, D.26-04-036); EV-B is effective 2026-03-01 (Advice 7846-E), the June revision did not touch it. HOW THE CCA COLUMNS WERE BUILT, AND WHY THEY ARE EXACT. PG&E unbundles every residential schedule into generation, distribution and a flat adder stack, and the three re-sum to the published total in all 26 season/period cells of this file (verified programmatically). A CCA customer keeps PG&E's delivery and adders, drops PG&E's generation, gives back PG&E's BUNDLED PCIA CREDIT of -$0.01011/kWh, and instead pays the CCA's generation plus that CCA's vintaged PCIA and the $0.00059/kWh franchise fee surcharge. So cca_total = pge_total - pge_generation + 0.01011 + cca_generation + pcia_and_franchise_fee. Applying that identity reproduces the CCAs' own published all-in comparison tables to the fifth decimal, so these are transcriptions, not estimates. THE STRUCTURAL FACT THAT SURPRISES PEOPLE: a CCA customer swaps a PCIA CREDIT of about -$0.0092/kWh for a PCIA CHARGE of about +$0.037/kWh. That is a roughly $0.047/kWh headwind the CCA's generation discount has to overcome before the customer saves anything. Only WestLight (5% off generation) clears a meaningful part of it; MCE and CleanPowerSF end up MORE expensive all-in than bundled PG&E. Ranking on E-TOU-C summer peak, cheapest first: WestLight $0.51251, SJCE $0.51647, SVCE $0.52042, Ava $0.52141, PG&E bundled $0.52240, CleanPowerSF $0.52479, MCE $0.56351. E-TOU-C RATES ARE PRE-CREDIT. E-TOU-C is still tiered. The values in this file are the OVER-BASELINE rates (they carry the Conservation Incentive Adjustment at +$0.05354/kWh); usage up to the daily baseline allocation gets -$0.08140/kWh, exposed as baseline_credit_per_kwh, exactly as the SCE file does it. No other PG&E residential TOU plan has a baseline tier. WEEKENDS. Three of the five plans - E-TOU-C, E-ELEC and EV2-A - make NO weekday/weekend distinction at all: the weekend arrays are identical to the weekday arrays by design, not by oversight. Only E-TOU-D (no peak at all on weekends and holidays) and EV-B (a shorter 3-7 p.m. weekend peak with no part-peak) differ. Holidays bill the weekend schedule; on the three all-day plans that changes nothing. PERIOD COVERAGE AND FILLER. period_ids declares all four ids on every plan so that any [season][period] lookup resolves, but no plan emits all four. E-TOU-C and E-TOU-D use only on and off: their mid cells are filled with the on values and their super_off cells with the off values. E-ELEC, EV2-A and EV-B use on, mid and off: their super_off cells are filled with the off values. PG&E has NO residential super-off-peak period - on E-ELEC and EV2-A the midnight-3 p.m. block IS off-peak, and calling it super-off-peak is a common modelling error. The 24-hour schedule arrays never emit a filler id, so a correct simulation never reads one. EV-B IS NOT A WHOLE-HOME RATE - the biggest trap in this file. It is a SECOND meter on a separately metered EV circuit, so it cannot be used to model a household's total bill and the UI must not offer it as an alternative to E-TOU-C. Its summer is May 1 - October 31, not June-September. It carries no Base Services Charge (fixed_charge_per_day is its $0.04928/day Total Meter Charge instead) and no California Climate Credit, so meta.climate_credit does NOT apply to it. Schedule EV also contains a DST clause that shifts its periods one hour later between the second Sunday in March and the first Sunday in April, and between the last Sunday in October and the first Sunday in November; this file does NOT model that shift - it affects at most six weeks of a schedule that should not be driving a whole-home model anyway. FLAGGED AS THE ONE ESTIMATED BLOCK IN THIS FILE: no CCA publishes an EV-B generation rate, so the six CCA columns on EV-B carry the per-period all-in DELTA each CCA shows on EV2-A - its structural twin - added to PG&E's EV-B total. Confidence LOW. PG&E's own EV-B column is exact. FIXED CHARGE. $0.79343/day standard is the CPUC income-graduated fixed charge under AB 205 and D.24-05-028, introduced by Advice 7846-E on 2026-03-01: $0.39688/day for FERA and deed-restricted affordable housing, $0.19713/day for CARE. It is unavoidable, is not offset by solar exports, and floors the bill. It REPLACED the Delivery Minimum Bill on every mainstream residential schedule, so minimum_charge_per_day is a real 0.00, not a placeholder. The old ~$0.398/day minimum survives only on Schedules EM and EM-TOU (master-metered mobilehome parks), which this file does not carry. CLIMATE CREDIT. $36.18 per credit, twice, on the AUGUST and SEPTEMBER 2026 bills - moved from the historical April/October by a CPUC vote on 2026-04-30 (R.25-07-013, under AB 1207). PG&E's own residential rate-comparison workbook still carries a stale column header reading 'March & Oct Bill'; the tariffs and PG&E's July 2026 press release both say August and September. The $46.26 residential GAS credit (April 2026) is a different credit and is not in this file. EV-B receives no climate credit. BASELINE TERRITORIES. Allocations are verbatim from Schedule E-1 Special Condition 2 and are unchanged since 2022-06-01. Two apparent typos are real and appear identically in the 2023, 2025 and 2026 sheets: territories Q and X have an all-electric SUMMER allowance (8.5) BELOW their basic summer allowance (9.8), and W has an all-electric winter allowance (19.0) below its all-electric summer allowance (22.4). Baseline summer is June 1 - September 30, the same as the TOU summer on every plan except EV-B; a billing cycle that straddles a season boundary is prorated by days. THE ZIP HINTS ARE INFERENCE, NOT TARIFF. PG&E publishes NO ZIP-to-baseline-territory table anywhere - not in the tariff book, not on pge.com, not in any advice letter. The only ZIPs it names normatively are the six Santa Cruz County Territory Q exceptions (95005, 95006, 95007, 95018, 95033, 95041), which are in utility.baselineRegions.zipHints as five-digit entries. Everything else is a join of PG&E's official county-and-elevation table with its 2014 service-area ZIP map, ordered by likelihood. Territory boundaries are ELEVATION CONTOURS and metes-and-bounds descriptions, so several prefixes genuinely straddle two or three territories - 940 (bayside X versus coastside T), 949 (Marin X versus T), 950 (Santa Clara X, Santa Cruz T, mountain Q), 953 (Modesto S versus Merced R), 957 (valley S versus Sierra Y and Z). This matters: allocations range from 5.9 to 19.2 kWh/day in summer, more than threefold, so a wrong guess is expensive. The territory letter is PRINTED ON PAGE 3 OF THE BILL under 'Service Information' - the UI should seed a dropdown from these hints and ask the customer to confirm. Note also that baseline only has a price effect on E-TOU-C, the only plan here with a baseline credit. ZIP PREFIXES OVERLAP WITH SCE. 931, 932, 933, 935 and 936 appear in both files because both utilities serve parts of them (933 Bakersfield is PG&E; 931 Santa Barbara city is SCE). utilityForZip() returns every candidate with ambiguous:true and the UI must ask. Large municipal utilities carve holes inside PG&E's footprint that ZIP cannot see: SMUD (Sacramento), Palo Alto, Silicon Valley Power (Santa Clara), Alameda, Modesto and Turlock Irrigation Districts, Lodi, Roseville, Redding, Truckee Donner and Liberty Utilities at Lake Tahoe. 938 and 942 are PO-box ranges with no service at all. CHARGES NOT IN THE PER-kWh RATES. Local utility users' taxes and city franchise surcharges vary by jurisdiction and are not in these tables, exactly as PG&E's own published totals exclude them. The CCA franchise fee surcharge IS included, because the CCAs' published comparisons include it."
+ },
+ "providers": {
+  "pge": {
+   "name": "PG&E bundled",
+   "default": true,
+   "note": "Pacific Gas and Electric bundled service: PG&E supplies both delivery and generation."
+  },
+  "mce": {
+   "name": "MCE Light Green (default tier)",
+   "tier": "Light Green",
+   "service_area": "Marin County (all); Contra Costa: Concord, Danville, El Cerrito, Hercules, Lafayette, Martinez, Moraga, Oakley, Pinole, Pittsburg, Pleasant Hill, Richmond, San Pablo, San Ramon, Walnut Creek, unincorporated; Napa County; Solano: Benicia, Fairfield, Vallejo, unincorporated",
+   "zipPrefixes": [
+    "945",
+    "948",
+    "949"
+   ],
+   "pcia_vintage": "2017",
+   "note": "Light Green is 60% renewable and is the default; Deep Green (100%) adds $0.0125/kWh, Local Sol is a flat $0.142/kWh. MCE's generation rates are IDENTICAL to PG&E's to five decimals; the only difference is a flat -$0.0062/kWh Cost Relief Credit, in force through 2026-12-31. Because MCE swaps PG&E's bundled PCIA credit for a vintaged PCIA charge and does not discount generation, MCE is the most expensive of the six CCAs here - about +$0.041/kWh on every period. MCE has PROPOSED raising the Cost Relief Credit to as much as $0.03725/kWh for 2026-11-01 to 2027-03-31 (board vote 2026-10-15, not yet approved); if it passes, MCE's premium falls to about +$0.010/kWh."
+  },
+  "svce": {
+   "name": "Silicon Valley Clean Energy GreenStart (default tier)",
+   "tier": "GreenStart",
+   "service_area": "Santa Clara County: Campbell, Cupertino, Gilroy, Los Altos, Los Altos Hills, Los Gatos, Milpitas, Monte Sereno, Morgan Hill, Mountain View, Saratoga, Sunnyvale, unincorporated. NOT Palo Alto, Santa Clara city or San Jose.",
+   "zipPrefixes": [
+    "940",
+    "950"
+   ],
+   "pcia_vintage": "2017",
+   "note": "GreenStart is carbon-free and is the default; GreenPrime (100% renewable) adds $0.0074/kWh. SVCE prices generation at exactly 1.00% below PG&E's generation rate net of the bundled PCIA, on every schedule and period."
+  },
+  "cleanpowersf": {
+   "name": "CleanPowerSF Green (default tier)",
+   "tier": "Green",
+   "service_area": "City and County of San Francisco. Excludes premises served from SFPUC's own Hetch Hetchy grid (Treasure Island, Hunters Point Shipyard, Transbay).",
+   "zipPrefixes": [
+    "941"
+   ],
+   "pcia_vintage": "2018",
+   "note": "Green is 54% renewable and is the default; SuperGreen (100%) adds $0.0100/kWh. CleanPowerSF is the one CCA here with NO percentage rule - it sets its own schedule, and its TOU shape is far FLATTER than PG&E's. On E-TOU-C summer it costs only +$0.002/kWh at peak but +$0.057/kWh off-peak. That flatness materially weakens battery arbitrage and solar self-consumption value in San Francisco relative to every other CCA in this file."
+  },
+  "pce": {
+   "name": "WestLight Energy ECOplus (default tier, formerly Peninsula Clean Energy)",
+   "tier": "ECOplus",
+   "service_area": "San Mateo County (all cities and unincorporated) plus the City of Los Banos in Merced County.",
+   "zipPrefixes": [
+    "940",
+    "944",
+    "93635"
+   ],
+   "pcia_vintage": "2016",
+   "note": "Peninsula Clean Energy REBRANDED to WestLight Energy on 2026-07-01 (bills from 2026-07-17); same agency, same territory, same board. The provider id stays `pce` for continuity. ECOplus is the default; ECO100 adds $0.0100/kWh. WestLight discounts generation 5.00% below PG&E's net generation rate - the deepest of the six, and the only one that makes a CCA customer meaningfully cheaper than bundled PG&E."
+  },
+  "ebce": {
+   "name": "Ava Community Energy Bright Choice (default tier, formerly East Bay Community Energy)",
+   "tier": "Bright Choice",
+   "service_area": "Alameda County: Albany, Berkeley, Dublin, Emeryville, Fremont, Hayward, Livermore, Newark, Oakland, Piedmont, Pleasanton, San Leandro, Union City, unincorporated (NOT the City of Alameda, which has its own municipal utility). San Joaquin County: Stockton, Tracy, Lathrop, unincorporated (added May 2026).",
+   "zipPrefixes": [
+    "945",
+    "946",
+    "947",
+    "952",
+    "953"
+   ],
+   "pcia_vintage": "2018 (vintage-neutral)",
+   "note": "East Bay Community Energy REBRANDED to Ava Community Energy; the provider id stays `ebce` for continuity. Bright Choice is the default; Renewable 100 is PG&E-equivalent plus $0.0175/kWh. Ava discounts generation 0.50% below PG&E's net generation rate. Ava is VINTAGE-NEUTRAL: it adjusts generation per PCIA vintage so the total is identical for every vintage 2017-2025, so this file's single column is correct for any Ava customer."
+  },
+  "sjce": {
+   "name": "San Jose Clean Energy GreenSource (default tier)",
+   "tier": "GreenSource",
+   "service_area": "City of San Jose only.",
+   "zipPrefixes": [
+    "951",
+    "95002"
+   ],
+   "pcia_vintage": "2018 (2019/2020 normalised to 2018)",
+   "note": "GreenSource is the default; TotalGreen adds $0.0100/kWh. SJCE's discount is NOT a flat percentage: exactly 3% on E-TOU-C and E-TOU-D, but 0-5% on E-ELEC and EV2-A (5% on E-ELEC summer peak, 0% on E-ELEC winter part- and off-peak and on EV2-A off-peak and winter part-peak). Do not model SJCE as a single percentage."
+  }
+ },
+ "plans": [
+  {
+   "id": "E-TOU-C",
+   "name": "E-TOU-C (Time-of-Use 4-9 p.m., with baseline credit)",
+   "default": true,
+   "eligibility_note": "PG&E's DEFAULT residential rate and the one most households are on. Open to everyone, no eligibility test. The only PG&E residential TOU plan that still has a baseline tier: usage up to the daily baseline allocation earns a $0.08140/kWh credit. Peak is 4-9 p.m. EVERY day - weekends and holidays are priced exactly like weekdays.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0814,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "pge": 0.5224,
+      "mce": 0.56351,
+      "svce": 0.52042,
+      "cleanpowersf": 0.52479,
+      "pce": 0.51251,
+      "ebce": 0.52141,
+      "sjce": 0.51647,
+      "delivery": 0.27115,
+      "pge_generation": 0.20782
+     },
+     "mid": {
+      "pge": 0.5224,
+      "mce": 0.56351,
+      "svce": 0.52042,
+      "cleanpowersf": 0.52479,
+      "pce": 0.51251,
+      "ebce": 0.52141,
+      "sjce": 0.51647,
+      "delivery": 0.27115,
+      "pge_generation": 0.20782
+     },
+     "off": {
+      "pge": 0.3994,
+      "mce": 0.44051,
+      "svce": 0.39845,
+      "cleanpowersf": 0.45654,
+      "pce": 0.39466,
+      "ebce": 0.39893,
+      "sjce": 0.39656,
+      "delivery": 0.25115,
+      "pge_generation": 0.10482
+     },
+     "super_off": {
+      "pge": 0.3994,
+      "mce": 0.44051,
+      "svce": 0.39845,
+      "cleanpowersf": 0.45654,
+      "pce": 0.39466,
+      "ebce": 0.39893,
+      "sjce": 0.39656,
+      "delivery": 0.25115,
+      "pge_generation": 0.10482
+     }
+    },
+    "winter": {
+     "on": {
+      "pge": 0.39757,
+      "mce": 0.43868,
+      "svce": 0.3963,
+      "cleanpowersf": 0.42665,
+      "pce": 0.39122,
+      "ebce": 0.39694,
+      "sjce": 0.39376,
+      "delivery": 0.21704,
+      "pge_generation": 0.1371
+     },
+     "mid": {
+      "pge": 0.39757,
+      "mce": 0.43868,
+      "svce": 0.3963,
+      "cleanpowersf": 0.42665,
+      "pce": 0.39122,
+      "ebce": 0.39694,
+      "sjce": 0.39376,
+      "delivery": 0.21704,
+      "pge_generation": 0.1371
+     },
+     "off": {
+      "pge": 0.36757,
+      "mce": 0.40868,
+      "svce": 0.36657,
+      "cleanpowersf": 0.40976,
+      "pce": 0.36255,
+      "ebce": 0.36707,
+      "sjce": 0.36456,
+      "delivery": 0.21372,
+      "pge_generation": 0.11042
+     },
+     "super_off": {
+      "pge": 0.36757,
+      "mce": 0.40868,
+      "svce": 0.36657,
+      "cleanpowersf": 0.40976,
+      "pce": 0.36255,
+      "ebce": 0.36707,
+      "sjce": 0.36456,
+      "delivery": 0.21372,
+      "pge_generation": 0.11042
+     }
+    }
+   }
+  },
+  {
+   "id": "E-TOU-D",
+   "name": "E-TOU-D (Time-of-Use 5-8 p.m., weekdays only)",
+   "eligibility_note": "Open to everyone. A narrow 5-8 p.m. weekday peak and NO peak at all on weekends or holidays, which suits a household that can shift only a little. No baseline credit - all usage is priced the same regardless of how much you use.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "pge": 0.47708,
+      "mce": 0.51819,
+      "svce": 0.47512,
+      "cleanpowersf": 0.5005,
+      "pce": 0.46727,
+      "ebce": 0.4761,
+      "sjce": 0.4712,
+      "delivery": 0.28093,
+      "pge_generation": 0.20626
+     },
+     "mid": {
+      "pge": 0.47708,
+      "mce": 0.51819,
+      "svce": 0.47512,
+      "cleanpowersf": 0.5005,
+      "pce": 0.46727,
+      "ebce": 0.4761,
+      "sjce": 0.4712,
+      "delivery": 0.28093,
+      "pge_generation": 0.20626
+     },
+     "off": {
+      "pge": 0.34212,
+      "mce": 0.38323,
+      "svce": 0.34121,
+      "cleanpowersf": 0.37929,
+      "pce": 0.33756,
+      "ebce": 0.34166,
+      "sjce": 0.33938,
+      "delivery": 0.25093,
+      "pge_generation": 0.1013
+     },
+     "super_off": {
+      "pge": 0.34212,
+      "mce": 0.38323,
+      "svce": 0.34121,
+      "cleanpowersf": 0.37929,
+      "pce": 0.33756,
+      "ebce": 0.34166,
+      "sjce": 0.33938,
+      "delivery": 0.25093,
+      "pge_generation": 0.1013
+     }
+    },
+    "winter": {
+     "on": {
+      "pge": 0.38747,
+      "mce": 0.42858,
+      "svce": 0.38592,
+      "cleanpowersf": 0.41624,
+      "pce": 0.37971,
+      "ebce": 0.38669,
+      "sjce": 0.38281,
+      "delivery": 0.23219,
+      "pge_generation": 0.16539
+     },
+     "mid": {
+      "pge": 0.38747,
+      "mce": 0.42858,
+      "svce": 0.38592,
+      "cleanpowersf": 0.41624,
+      "pce": 0.37971,
+      "ebce": 0.38669,
+      "sjce": 0.38281,
+      "delivery": 0.23219,
+      "pge_generation": 0.16539
+     },
+     "off": {
+      "pge": 0.34886,
+      "mce": 0.38997,
+      "svce": 0.34766,
+      "cleanpowersf": 0.38223,
+      "pce": 0.34285,
+      "ebce": 0.34826,
+      "sjce": 0.34525,
+      "delivery": 0.22866,
+      "pge_generation": 0.13031
+     },
+     "super_off": {
+      "pge": 0.34886,
+      "mce": 0.38997,
+      "svce": 0.34766,
+      "cleanpowersf": 0.38223,
+      "pce": 0.34285,
+      "ebce": 0.34826,
+      "sjce": 0.34525,
+      "delivery": 0.22866,
+      "pge_generation": 0.13031
+     }
+    }
+   }
+  },
+  {
+   "id": "E-ELEC",
+   "name": "E-ELEC (Electric Home)",
+   "eligibility_note": "Requires an electric heat pump for space or water heating, an EV with a home charger, or a battery. Peak 4-9 p.m. and part-peak 3-4 p.m. plus 9 p.m.-midnight, EVERY day. Off-peak is the whole of midnight-3 p.m., which is what makes it attractive with daytime solar. No baseline credit. Note E-ELEC has no separate super-off-peak period - off-peak IS the midnight-3 p.m. block.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "pge": 0.55214,
+      "mce": 0.59325,
+      "svce": 0.54961,
+      "cleanpowersf": 0.57991,
+      "pce": 0.5395,
+      "ebce": 0.55088,
+      "sjce": 0.5395,
+      "delivery": 0.29926,
+      "pge_generation": 0.26299
+     },
+     "mid": {
+      "pge": 0.39026,
+      "mce": 0.43137,
+      "svce": 0.38872,
+      "cleanpowersf": 0.43154,
+      "pce": 0.38257,
+      "ebce": 0.38949,
+      "sjce": 0.38565,
+      "delivery": 0.23649,
+      "pge_generation": 0.16388
+     },
+     "off": {
+      "pge": 0.33358,
+      "mce": 0.37469,
+      "svce": 0.33249,
+      "cleanpowersf": 0.381,
+      "pce": 0.32815,
+      "ebce": 0.33304,
+      "sjce": 0.33141,
+      "delivery": 0.22491,
+      "pge_generation": 0.11878
+     },
+     "super_off": {
+      "pge": 0.33358,
+      "mce": 0.37469,
+      "svce": 0.33249,
+      "cleanpowersf": 0.381,
+      "pce": 0.32815,
+      "ebce": 0.33304,
+      "sjce": 0.33141,
+      "delivery": 0.22491,
+      "pge_generation": 0.11878
+     }
+    },
+    "winter": {
+     "on": {
+      "pge": 0.32063,
+      "mce": 0.36174,
+      "svce": 0.31972,
+      "cleanpowersf": 0.37049,
+      "pce": 0.31609,
+      "ebce": 0.32018,
+      "sjce": 0.31882,
+      "delivery": 0.22988,
+      "pge_generation": 0.10086
+     },
+     "mid": {
+      "pge": 0.29854,
+      "mce": 0.33965,
+      "svce": 0.29783,
+      "cleanpowersf": 0.35112,
+      "pce": 0.295,
+      "ebce": 0.29819,
+      "sjce": 0.29854,
+      "delivery": 0.22776,
+      "pge_generation": 0.08089
+     },
+     "off": {
+      "pge": 0.28468,
+      "mce": 0.32579,
+      "svce": 0.28411,
+      "cleanpowersf": 0.33908,
+      "pce": 0.28181,
+      "ebce": 0.28439,
+      "sjce": 0.28468,
+      "delivery": 0.22725,
+      "pge_generation": 0.06754
+     },
+     "super_off": {
+      "pge": 0.28468,
+      "mce": 0.32579,
+      "svce": 0.28411,
+      "cleanpowersf": 0.33908,
+      "pce": 0.28181,
+      "ebce": 0.28439,
+      "sjce": 0.28468,
+      "delivery": 0.22725,
+      "pge_generation": 0.06754
+     }
+    }
+   }
+  },
+  {
+   "id": "EV2-A",
+   "name": "EV2-A (Home Charging)",
+   "eligibility_note": "Requires a registered EV or plug-in hybrid at the premises; whole-home, single meter. Structurally identical to E-ELEC (peak 4-9 p.m., part-peak 3-4 p.m. and 9 p.m.-midnight, off-peak midnight-3 p.m., every day) but with a much cheaper off-peak - $0.22558/kWh in both seasons - and a more expensive part-peak. Carries an 800%-of-annual-baseline usage cap: exceed it for 12 consecutive months and PG&E moves you to E-TOU-D and bars you from every EV rate for 12 months. Taking a second meter on EV-B makes the premises ineligible for EV2-A.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "mid"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "pge": 0.53809,
+      "mce": 0.5792,
+      "svce": 0.53631,
+      "cleanpowersf": 0.58234,
+      "pce": 0.52918,
+      "ebce": 0.5372,
+      "sjce": 0.53274,
+      "delivery": 0.3599,
+      "pge_generation": 0.1883
+     },
+     "mid": {
+      "pge": 0.4276,
+      "mce": 0.46871,
+      "svce": 0.42627,
+      "cleanpowersf": 0.47472,
+      "pce": 0.42093,
+      "ebce": 0.42693,
+      "sjce": 0.4236,
+      "delivery": 0.29412,
+      "pge_generation": 0.14359
+     },
+     "off": {
+      "pge": 0.22558,
+      "mce": 0.26669,
+      "svce": 0.22466,
+      "cleanpowersf": 0.27533,
+      "pce": 0.22096,
+      "ebce": 0.22512,
+      "sjce": 0.22558,
+      "delivery": 0.13324,
+      "pge_generation": 0.10245
+     },
+     "super_off": {
+      "pge": 0.22558,
+      "mce": 0.26669,
+      "svce": 0.22466,
+      "cleanpowersf": 0.27533,
+      "pce": 0.22096,
+      "ebce": 0.22512,
+      "sjce": 0.22558,
+      "delivery": 0.13324,
+      "pge_generation": 0.10245
+     }
+    },
+    "winter": {
+     "on": {
+      "pge": 0.41099,
+      "mce": 0.4521,
+      "svce": 0.40978,
+      "cleanpowersf": 0.45887,
+      "pce": 0.40492,
+      "ebce": 0.41038,
+      "sjce": 0.40856,
+      "delivery": 0.28967,
+      "pge_generation": 0.13143
+     },
+     "mid": {
+      "pge": 0.39428,
+      "mce": 0.43539,
+      "svce": 0.39319,
+      "cleanpowersf": 0.44298,
+      "pce": 0.38884,
+      "ebce": 0.39374,
+      "sjce": 0.39428,
+      "delivery": 0.28545,
+      "pge_generation": 0.11894
+     },
+     "off": {
+      "pge": 0.22558,
+      "mce": 0.26669,
+      "svce": 0.22473,
+      "cleanpowersf": 0.27578,
+      "pce": 0.22131,
+      "ebce": 0.22515,
+      "sjce": 0.22558,
+      "delivery": 0.14023,
+      "pge_generation": 0.09546
+     },
+     "super_off": {
+      "pge": 0.22558,
+      "mce": 0.26669,
+      "svce": 0.22473,
+      "cleanpowersf": 0.27578,
+      "pce": 0.22131,
+      "ebce": 0.22515,
+      "sjce": 0.22558,
+      "delivery": 0.14023,
+      "pge_generation": 0.09546
+     }
+    }
+   }
+  },
+  {
+   "id": "EV-B",
+   "name": "EV-B (Schedule EV, Rate B - separately metered EV service)",
+   "eligibility_note": "STILL OPEN but only for a SEPARATELY METERED EV charging circuit - it is a second meter, not a whole-home rate, so it cannot be used to model a household's total bill. EV Rate A was eliminated 2025-11-30; from 2025-12-01 only Rate B remains. Enrolling on EV-B makes the premises ineligible for EV2-A. THREE THINGS DIFFER FROM EVERY OTHER PLAN IN THIS FILE: (1) summer is MAY 1 - OCTOBER 31, not June-September; (2) there is NO Base Services Charge on this meter - only a $0.04928/day Total Meter Charge, which is what fixed_charge_per_day holds; (3) there is NO California Climate Credit on this schedule. It also has a peak window unlike any other PG&E plan: weekdays 2-9 p.m. peak, 7 a.m.-2 p.m. and 9-11 p.m. part-peak; weekends and holidays 3-7 p.m. peak with no part-peak. Subject to the same 800%-of-baseline cap as EV2-A.",
+   "summer_months": [
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "fixed_charge_per_day": 0.04928,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "mid",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "mid",
+      "mid",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "pge": 0.62131,
+      "mce": 0.66242,
+      "svce": 0.61953,
+      "cleanpowersf": 0.66556,
+      "pce": 0.6124,
+      "ebce": 0.62042,
+      "sjce": 0.61596,
+      "delivery": 0.33445,
+      "pge_generation": 0.29697
+     },
+     "mid": {
+      "pge": 0.3772,
+      "mce": 0.41831,
+      "svce": 0.37587,
+      "cleanpowersf": 0.42432,
+      "pce": 0.37053,
+      "ebce": 0.37653,
+      "sjce": 0.3732,
+      "delivery": 0.23381,
+      "pge_generation": 0.1535
+     },
+     "off": {
+      "pge": 0.26465,
+      "mce": 0.30576,
+      "svce": 0.26373,
+      "cleanpowersf": 0.3144,
+      "pce": 0.26003,
+      "ebce": 0.26419,
+      "sjce": 0.26465,
+      "delivery": 0.16764,
+      "pge_generation": 0.10712
+     },
+     "super_off": {
+      "pge": 0.26465,
+      "mce": 0.30576,
+      "svce": 0.26373,
+      "cleanpowersf": 0.3144,
+      "pce": 0.26003,
+      "ebce": 0.26419,
+      "sjce": 0.26465,
+      "delivery": 0.16764,
+      "pge_generation": 0.10712
+     }
+    },
+    "winter": {
+     "on": {
+      "pge": 0.43878,
+      "mce": 0.47989,
+      "svce": 0.43757,
+      "cleanpowersf": 0.48666,
+      "pce": 0.43271,
+      "ebce": 0.43817,
+      "sjce": 0.43635,
+      "delivery": 0.34639,
+      "pge_generation": 0.1025
+     },
+     "mid": {
+      "pge": 0.30677,
+      "mce": 0.34788,
+      "svce": 0.30568,
+      "cleanpowersf": 0.35547,
+      "pce": 0.30133,
+      "ebce": 0.30623,
+      "sjce": 0.30677,
+      "delivery": 0.23923,
+      "pge_generation": 0.07765
+     },
+     "off": {
+      "pge": 0.23504,
+      "mce": 0.27615,
+      "svce": 0.23419,
+      "cleanpowersf": 0.28524,
+      "pce": 0.23077,
+      "ebce": 0.23461,
+      "sjce": 0.23504,
+      "delivery": 0.1675,
+      "pge_generation": 0.07765
+     },
+     "super_off": {
+      "pge": 0.23504,
+      "mce": 0.27615,
+      "svce": 0.23419,
+      "cleanpowersf": 0.28524,
+      "pce": 0.23077,
+      "ebce": 0.23461,
+      "sjce": 0.23504,
+      "delivery": 0.1675,
+      "pge_generation": 0.07765
+     }
+    }
+   }
+  }
+ ],
+ "nbt": {
+  "vintage": "NBT26",
+  "vintage_year": 2026,
+  "lock_in_years": 9,
+  "export_rates": {
+   "note": "$/kWh credit for exported energy, PG&E Energy Export Credit prices for the NBT26 vintage, calendar year 2026, from PG&E's CPUC Resolution E-5301 MIDAS compliance file. [month 0..11][hour 0..23], hour-BEGINNING in Pacific prevailing time. Holidays use the weekend table. Each value is the TOTAL credit, generation component plus delivery component; the split is in data/export/pge-nbt26.json. The ACC Plus adder is NOT included - see acc_plus_adder_per_kwh.",
+   "weekday": [
+    [
+     0.09431,
+     0.09245,
+     0.09089,
+     0.08983,
+     0.09182,
+     0.09405,
+     0.09492,
+     0.08954,
+     0.07747,
+     0.06926,
+     0.06863,
+     0.06848,
+     0.06721,
+     0.06555,
+     0.06411,
+     0.06654,
+     0.08244,
+     0.10945,
+     0.10249,
+     0.09429,
+     0.09352,
+     0.09452,
+     0.09741,
+     0.09587
+    ],
+    [
+     0.09397,
+     0.09236,
+     0.09344,
+     0.0937,
+     0.09454,
+     0.09227,
+     0.08892,
+     0.08405,
+     0.06463,
+     0.05398,
+     0.05185,
+     0.05081,
+     0.04672,
+     0.04259,
+     0.03482,
+     0.0347,
+     0.06764,
+     0.10769,
+     0.09537,
+     0.0891,
+     0.08822,
+     0.08936,
+     0.09413,
+     0.09141
+    ],
+    [
+     0.08125,
+     0.07819,
+     0.0747,
+     0.07439,
+     0.0759,
+     0.07899,
+     0.07983,
+     0.07309,
+     0.05282,
+     0.02635,
+     0.02205,
+     0.02009,
+     0.01926,
+     0.01742,
+     0.01689,
+     0.01753,
+     0.02556,
+     0.06213,
+     0.08653,
+     0.08464,
+     0.0803,
+     0.07667,
+     0.07604,
+     0.0774
+    ],
+    [
+     0.07779,
+     0.07675,
+     0.08053,
+     0.07941,
+     0.07759,
+     0.07751,
+     0.07117,
+     0.06147,
+     0.01732,
+     0.00711,
+     0.00838,
+     0.00839,
+     0.0085,
+     0.00391,
+     0.0018,
+     0.00018,
+     0.00141,
+     0.00697,
+     0.07828,
+     0.0783,
+     0.07418,
+     0.07264,
+     0.07191,
+     0.0764
+    ],
+    [
+     0.07821,
+     0.07432,
+     0.07655,
+     0.07989,
+     0.08127,
+     0.07577,
+     0.06987,
+     0.06423,
+     0.02562,
+     0.0138,
+     0.01454,
+     0.01249,
+     0.0133,
+     0.01588,
+     0.01242,
+     0.01225,
+     0.01506,
+     0.03458,
+     0.08162,
+     0.08734,
+     0.07612,
+     0.07213,
+     0.07302,
+     0.07522
+    ],
+    [
+     0.07839,
+     0.07696,
+     0.07558,
+     0.07777,
+     0.07599,
+     0.07598,
+     0.07301,
+     0.0666,
+     0.04699,
+     0.0398,
+     0.03841,
+     0.03333,
+     0.03307,
+     0.03329,
+     0.03828,
+     0.03313,
+     0.12609,
+     0.22832,
+     0.27103,
+     0.27007,
+     0.17682,
+     0.08368,
+     0.08121,
+     0.07605
+    ],
+    [
+     0.0735,
+     0.07518,
+     0.07338,
+     0.0749,
+     0.07174,
+     0.07279,
+     0.07692,
+     0.07364,
+     0.06881,
+     0.06103,
+     0.06353,
+     0.06196,
+     0.05763,
+     0.05429,
+     0.05435,
+     0.05641,
+     0.14115,
+     0.32547,
+     0.36433,
+     0.45746,
+     0.2642,
+     0.08416,
+     0.0823,
+     0.07574
+    ],
+    [
+     0.0918,
+     0.09199,
+     0.09032,
+     0.08737,
+     0.08694,
+     0.08792,
+     0.08554,
+     0.07465,
+     0.06854,
+     0.06796,
+     0.06765,
+     0.0671,
+     0.06801,
+     0.06842,
+     0.068,
+     0.07174,
+     0.16432,
+     1.01459,
+     1.13014,
+     1.15441,
+     1.08038,
+     0.89781,
+     0.89024,
+     0.09358
+    ],
+    [
+     0.09633,
+     0.09442,
+     0.0923,
+     0.08936,
+     0.08798,
+     0.09,
+     0.08742,
+     0.07786,
+     0.06806,
+     0.06498,
+     0.06332,
+     0.06311,
+     0.06236,
+     0.06155,
+     0.06216,
+     0.06278,
+     0.07673,
+     0.13951,
+     0.46076,
+     0.59505,
+     0.31874,
+     0.15554,
+     0.1552,
+     0.09669
+    ],
+    [
+     0.09042,
+     0.09043,
+     0.08837,
+     0.0868,
+     0.08602,
+     0.08546,
+     0.08593,
+     0.0775,
+     0.06643,
+     0.0604,
+     0.06077,
+     0.05873,
+     0.05786,
+     0.05731,
+     0.05725,
+     0.05705,
+     0.0629,
+     0.09197,
+     0.0945,
+     0.09297,
+     0.08821,
+     0.08511,
+     0.08979,
+     0.09129
+    ],
+    [
+     0.08703,
+     0.08807,
+     0.08653,
+     0.08527,
+     0.08648,
+     0.08688,
+     0.08338,
+     0.07373,
+     0.06343,
+     0.06084,
+     0.05983,
+     0.05806,
+     0.05631,
+     0.05057,
+     0.05169,
+     0.06617,
+     0.09378,
+     0.09811,
+     0.08995,
+     0.08709,
+     0.0862,
+     0.08693,
+     0.08795,
+     0.09317
+    ],
+    [
+     0.09049,
+     0.09002,
+     0.08769,
+     0.08836,
+     0.08966,
+     0.09274,
+     0.09964,
+     0.08758,
+     0.07551,
+     0.07085,
+     0.07003,
+     0.06603,
+     0.06341,
+     0.0627,
+     0.0639,
+     0.07224,
+     0.09291,
+     0.0982,
+     0.09818,
+     0.09082,
+     0.09057,
+     0.09245,
+     0.09265,
+     0.09135
+    ]
+   ],
+   "weekend": [
+    [
+     0.09113,
+     0.09067,
+     0.09184,
+     0.09067,
+     0.0902,
+     0.09153,
+     0.09349,
+     0.08473,
+     0.06956,
+     0.05979,
+     0.05861,
+     0.05798,
+     0.05858,
+     0.05755,
+     0.05629,
+     0.05862,
+     0.08529,
+     0.10588,
+     0.09963,
+     0.0928,
+     0.09103,
+     0.09138,
+     0.09432,
+     0.09361
+    ],
+    [
+     0.08539,
+     0.08766,
+     0.09041,
+     0.09211,
+     0.08939,
+     0.08656,
+     0.08151,
+     0.07389,
+     0.05012,
+     0.02912,
+     0.03136,
+     0.02697,
+     0.02884,
+     0.0266,
+     0.03051,
+     0.02368,
+     0.06153,
+     0.10028,
+     0.10371,
+     0.09029,
+     0.08752,
+     0.08744,
+     0.08976,
+     0.09348
+    ],
+    [
+     0.06798,
+     0.06912,
+     0.06839,
+     0.07309,
+     0.07366,
+     0.07571,
+     0.07432,
+     0.06766,
+     0.00999,
+     0.00387,
+     0.00479,
+     0.00681,
+     0.00936,
+     0.00158,
+     0.0008,
+     0.00721,
+     0.01894,
+     0.03422,
+     0.07581,
+     0.07708,
+     0.0748,
+     0.0727,
+     0.07367,
+     0.0704
+    ],
+    [
+     0.06613,
+     0.06757,
+     0.07222,
+     0.07676,
+     0.07514,
+     0.07546,
+     0.06859,
+     0.0478,
+     0.00488,
+     0.00599,
+     0.00684,
+     0.01103,
+     0.00926,
+     0.00305,
+     2e-05,
+     2e-05,
+     2e-05,
+     0.0065,
+     0.07318,
+     0.08148,
+     0.07011,
+     0.06936,
+     0.06811,
+     0.07126
+    ],
+    [
+     0.0679,
+     0.07168,
+     0.07841,
+     0.07984,
+     0.07667,
+     0.06817,
+     0.06977,
+     0.03635,
+     0.00324,
+     0.0063,
+     0.0056,
+     0.00595,
+     0.00835,
+     0.00817,
+     0.0023,
+     1e-05,
+     0.00341,
+     0.00523,
+     0.06212,
+     0.08498,
+     0.07422,
+     0.07263,
+     0.07136,
+     0.07264
+    ],
+    [
+     0.07301,
+     0.07103,
+     0.07182,
+     0.07245,
+     0.0707,
+     0.08861,
+     0.07459,
+     0.06233,
+     0.02244,
+     0.01875,
+     0.0193,
+     0.01295,
+     0.01919,
+     0.01523,
+     0.01345,
+     0.01418,
+     0.01508,
+     0.02971,
+     0.07633,
+     0.09656,
+     0.08635,
+     0.08132,
+     0.08055,
+     0.07666
+    ],
+    [
+     0.08047,
+     0.07483,
+     0.07278,
+     0.07413,
+     0.07221,
+     0.07164,
+     0.06887,
+     0.067,
+     0.02784,
+     0.02764,
+     0.02919,
+     0.02743,
+     0.02958,
+     0.03225,
+     0.02845,
+     0.03252,
+     0.0329,
+     0.05085,
+     0.09441,
+     0.11911,
+     0.10278,
+     0.08138,
+     0.08032,
+     0.07775
+    ],
+    [
+     0.08547,
+     0.08447,
+     0.0856,
+     0.08147,
+     0.08079,
+     0.08127,
+     0.07554,
+     0.06223,
+     0.0436,
+     0.03991,
+     0.04048,
+     0.04051,
+     0.03733,
+     0.03699,
+     0.03735,
+     0.04422,
+     0.05947,
+     0.89099,
+     0.94585,
+     1.19289,
+     1.04468,
+     0.95377,
+     0.94703,
+     0.09026
+    ],
+    [
+     0.08066,
+     0.0844,
+     0.08388,
+     0.08115,
+     0.08115,
+     0.08296,
+     0.08108,
+     0.06615,
+     0.04026,
+     0.02775,
+     0.02527,
+     0.02325,
+     0.02131,
+     0.02232,
+     0.02718,
+     0.02984,
+     0.04376,
+     0.13084,
+     0.53366,
+     0.69865,
+     0.3525,
+     0.16747,
+     0.16773,
+     0.09478
+    ],
+    [
+     0.07828,
+     0.08054,
+     0.07769,
+     0.07603,
+     0.07992,
+     0.08001,
+     0.07925,
+     0.07097,
+     0.04289,
+     0.02131,
+     0.02111,
+     0.02112,
+     0.02294,
+     0.02058,
+     0.02255,
+     0.02514,
+     0.04282,
+     0.0832,
+     0.08955,
+     0.08594,
+     0.0826,
+     0.07942,
+     0.09283,
+     0.0879
+    ],
+    [
+     0.08425,
+     0.0811,
+     0.07919,
+     0.08099,
+     0.08262,
+     0.0853,
+     0.08354,
+     0.06369,
+     0.044,
+     0.03552,
+     0.03225,
+     0.02967,
+     0.02805,
+     0.0259,
+     0.02223,
+     0.04528,
+     0.08231,
+     0.09327,
+     0.08755,
+     0.08551,
+     0.08449,
+     0.08344,
+     0.08761,
+     0.08532
+    ],
+    [
+     0.08404,
+     0.08127,
+     0.07761,
+     0.07374,
+     0.07407,
+     0.07599,
+     0.07851,
+     0.06743,
+     0.04497,
+     0.02337,
+     0.02031,
+     0.02105,
+     0.02259,
+     0.01642,
+     0.01568,
+     0.04292,
+     0.08722,
+     0.08905,
+     0.08622,
+     0.08095,
+     0.08173,
+     0.08203,
+     0.08361,
+     0.08287
+    ]
+   ]
+  },
+  "acc_plus_adder_per_kwh": 0.0088,
+  "acc_plus_schedule_residential": {
+   "2023": 0.022,
+   "2024": 0.0176,
+   "2025": 0.0132,
+   "2026": 0.0088,
+   "2027": 0.0044,
+   "2028": 0.0
+  },
+  "acc_plus_schedule_residential_equity": {
+   "2023": 0.09,
+   "2024": 0.072,
+   "2025": 0.054,
+   "2026": 0.036,
+   "2027": 0.018,
+   "2028": 0.0
+  },
+  "cca_export_adder_per_kwh": 0.0,
+  "net_surplus_compensation_per_kwh": 0.02751,
+  "nonbypassable_charges_per_kwh": 0.0123,
+  "true_up": "annual",
+  "notes": "WHAT THESE NUMBERS ARE. Under the Net Billing Tariff (PG&E brands it the Solar Billing Plan, everyone else calls it NEM 3.0) exported energy is credited at hourly Avoided Cost Calculator values, not at the retail rate. The export_rates matrices are PG&E's own published Energy Export Credit prices for the NBT26 vintage, calendar year 2026, taken from its CPUC Resolution E-5301 machine-readable MIDAS compliance file. The file already carries the CPUC-mandated month / day-type / hour aggregation in its ValueName field ('Aug Weekday HS19'), so these are tariff values verbatim - 576 distinct cells per component with zero conflicting values, nothing interpolated or re-averaged. Cross-checked against PG&E's own PDF price sheet: 1,149 of 1,152 cells identical, the three exceptions differing by at most $0.0005 in the November DST fall-back hours. The underlying model is the 2024 ACC (Resolution E-5328). Hour index is hour-BEGINNING 0-23 in Pacific PREVAILING time, DST aware; the weekend table applies on Saturdays, Sundays and the eight holidays, which is how PG&E defines the day types (254 weekday / 111 weekend-holiday days in 2026). Each value is the TOTAL credit = generation component + delivery component; a CCA customer receives the delivery component from PG&E and the generation component from the CCA, and the sum is unchanged, which is why switching provider does not change export value. The split is preserved in data/export/pge-nbt26.json. SHAPE - THIS, NOT THE ANNUAL AVERAGE, DRIVES BATTERY ECONOMICS. Peak: August weekday hour 19 (7-8 p.m.) = $1.15441/kWh, hour 18 = $1.13014, hour 20 = $1.08038; August WEEKEND hour 19 = $1.19289, the highest cell in the table. Trough: spring weekend midday runs to $0.00001/kWh - effectively zero. The midday mean over hours 9-15 is $0.04664 weekday and $0.02407 weekend, against an unweighted all-hours mean of $0.10187 weekday and $0.08396 weekend. The all-hours mean is misleading: it is carried by a handful of extreme August-evening cells that a PV array alone never reaches. THE PRACTICAL CONSEQUENCE: exporting a midday kWh earns roughly a tenth of what importing one costs, so self-consumption and evening battery discharge carry essentially all of the value, and sizing to annual kWh offset is the wrong objective. ACC PLUS ADDER - ON TOP OF THE MATRIX, AND PG&E'S IS ABOUT HALF SCE'S. CPUC D.22-12-056 pays residential exporters a per-kWh adder above the ACC price, by the vintage year of the interconnection application, declining by 20% of the first-year value each year: PG&E residential non-equity 2023 $0.0220, 2024 $0.0176, 2025 $0.0132, 2026 $0.0088, 2027 $0.0044, 2028 and later $0.0000. The low-income/equity figures are $0.090 / $0.072 / $0.054 / $0.036 / $0.018 / $0.000. A 2026 PTO therefore earns $0.0088/kWh on every exported kWh, locked for the same nine years - roughly half SCE's $0.016 for the same vintage, and SDG&E gets nothing at all. This adder is NOT inside the matrices; add it. It is also the ONLY export credit that may offset non-bypassable charges. THE NINE-YEAR LOCK-IN FREEZES A TRAJECTORY, NOT A FLAT TABLE. A 2026 vintage locks NBT26 for nine years, but that vintage specifies a different 12x24 matrix for every year: the generation component decays after 2028 while the delivery component grows. This file carries the 2026 matrix only. SCE's file documents the same effect in detail and the direction is identical - applying a single year's matrix flat OVERSTATES summer-evening battery export revenue in later years while understating overnight and shoulder hours. PG&E publishes each vintage year's sheets in the ZIP at pge.com/energyexportcredit; a future revision of this file should carry all nine years. NETTING AND TRUE-UP. Netting is HOURLY, not monthly: each exported kWh earns that hour's EEC price while each imported kWh in the same hour is charged the full retail TOU rate. They do not cancel. Surplus credit rolls forward month to month and is settled at the annual true-up. TRUE-UP CLAWBACK - IT PENALISES OVERSIZING AND PG&E DOES NOT PUBLISH THE NUMBER. Schedule NBT Special Condition 5.d debits net surplus kWh at 'the utility's average real-world retail export compensation rates for all NBT customers in their service territory over the past 12 months' BEFORE crediting them at the far lower Net Surplus Compensation rate of $0.02751/kWh. SCE publishes its equivalent (EEC Adjustment Pricing, about $0.060/kWh in September 2026, roughly three times its NSC). PG&E publishes only the input - the hourly EEC price sheets - and no standalone average. UNRESOLVED: this file therefore cannot state PG&E's clawback rate. Do not model surplus at the NSC rate alone; that understates the penalty for an oversized array. Size to self-consumption plus battery. NET SURPLUS COMPENSATION. $0.02751/kWh, the September 2026 figure from PG&E's AB 920 rate table. The table is indexed by TRUE-UP MONTH, not by the month of export: the rate posted for a month applies to any customer whose 12-month Relevant Period completes in it. Computed under D.11-06-016 as a simple average of PG&E DLAP day-ahead prices for hours 7 a.m.-5 p.m. over the year ending on the 20th of the prior month, so it drifts: the 2026 range was $0.02684 (August) to $0.03116 (January). A separate Renewable Adjustment Amount is paid only if the customer certifies ownership of the renewable energy credits. NON-BYPASSABLE CHARGES. $0.01230/kWh on every IMPORTED kWh, per Schedule NBT Special Condition 2.f, which names exactly four: Public Purpose Programs $0.00614, Nuclear Decommissioning -$0.00002 (currently negative), Competition Transition Charge $0.00027, Wildfire Fund Charge $0.00591. DO NOT ADD THIS ON TOP OF THE RATE TABLES - it is already inside them. It is recorded separately only to show which part of the import price solar can never escape. Two cautions: the Wildfire Hardening charge ($0.00391) and the Recovery Bond charge/credit (+/-$0.00857, which cancel) are NOT non-bypassable and are commonly miscounted; and CARE and Medical Baseline customers are exempt from the Wildfire Fund Charge, giving them $0.00639/kWh."
+ },
+ "incentives": {
+  "federal_itc_residential_pct": 0.0,
+  "federal_itc_note": "The Section 25D Residential Clean Energy Credit is TERMINATED for a homeowner-owned system installed in 2026. P.L. 119-21 (One Big Beautiful Bill Act) section 70506, enacted 2025-07-04, amended 26 U.S.C. 25D(h) so that the credit 'shall not apply with respect to any expenditures made after December 31, 2025'. It is an EXPENDITURE test and 25D(e)(8)(A) treats the expenditure as made when the original installation is completed, so prepaying in 2025 does not preserve it if installation finishes in 2026 (IRS FS-2025-05). Model 25D at 0%. The only federal credit still reachable in 2026 is Section 48E at 30%, claimed by a THIRD-PARTY OWNER under a lease or PPA, plus potential domestic-content and energy-community adders; the homeowner sees it only as lower lease or PPA pricing, which is a pricing decision and not an entitlement.",
+  "sgip_residential_per_kwh": 0.0,
+  "sgip_note": "SGIP is closed; model $0. CPUC D.25-12-003 stopped all ratepayer-funded SGIP budgets from accepting applications on 2025-12-30 and cancelled every waitlisted application at 2025-12-31, because Pub. Util. Code 379.6 authorised administration only 'until January 1, 2026'. The general-market Small Residential Storage budget was at Step 7, $0.15/Wh, when it closed. The only surviving path is RSSE (Residential Solar and Storage Equity), which is income-qualified and heavily oversubscribed.",
+  "other": [
+   {
+    "name": "Federal Section 48E ITC via third-party ownership (lease or PPA)",
+    "value": "30% base, commonly 40-44% realised with adders",
+    "note": "Claimed by the system owner, not the homeowner; reaches the customer only as lower lease or PPA pricing. Storage is exempt from the 2027 placed-in-service cliff."
+   },
+   {
+    "name": "PG&E Base Services Charge (a cost, not an incentive)",
+    "value": "$0.79343/day standard; $0.39688/day FERA or deed-restricted affordable housing; $0.19713/day CARE",
+    "note": "Effective 2026-03-01 (Advice 7846-E), the CPUC income-graduated fixed charge under AB 205 and D.24-05-028. It replaced the Delivery Minimum Bill on every mainstream residential schedule. Unavoidable, not offset by solar exports, so it floors the bill at about $24/month before a single kWh."
+   },
+   {
+    "name": "PG&E ACC Plus export adder",
+    "value": "$0.0088/kWh for a 2026 interconnection vintage, locked 9 years",
+    "note": "Roughly half SCE's $0.016 for the same vintage. The only export credit that may offset non-bypassable charges. Steps down to $0.0044 for a 2027 vintage and to zero from 2028, so the timing of the interconnection application is worth real money."
+   },
+   {
+    "name": "California Climate Credit",
+    "value": "$36.18 twice a year = $72.36/year",
+    "note": "Now on the AUGUST and SEPTEMBER bills, moved from April/October by the CPUC on 2026-04-30 under AB 1207. Not paid on Schedule EV-B. A separate $46.26 gas credit arrives in April 2026 and moves to February from 2027."
+   },
+   {
+    "name": "MCE Cost Relief Credit",
+    "value": "-$0.0062/kWh through 2026-12-31; a rise to as much as -$0.03725/kWh is proposed for 2026-11-01 to 2027-03-31",
+    "note": "Board vote 2026-10-15, NOT yet approved. Included at the current $0.0062 in this file's MCE column. If it passes, MCE's premium over bundled PG&E falls from about +$0.041 to about +$0.010/kWh, which would change the provider ranking for MCE customers."
+   },
+   {
+    "name": "PG&E 800%-of-baseline cap on EV rates",
+    "value": "forced transfer to E-TOU-D plus a 12-month ban from all EV rates",
+    "note": "Applies to EV2-A and EV-B. Exceeding 800% of the annual baseline allocation for 12 consecutive months triggers it. Relevant to a large all-electric household with two EVs; E-ELEC remains available."
+   }
+  ]
+ }
+}

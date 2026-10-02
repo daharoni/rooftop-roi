@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panels or Portfolio</title>
+<meta name="description" content="Does rooftop solar plus a battery beat putting the same cash in the market? Priced hour by hour against two years of real SCE meter data for a house in Agoura Hills.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
+        integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>/*INLINE:styles.css*/</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ============================================================ controls -->
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <h1>Panels or Portfolio</h1>
+      <div class="sub">Agoura Hills 91301 &middot; SCE meter, 2024-09 &rarr; 2026-09</div>
+      <div class="status" id="status" role="status" aria-live="polite">
+        <span id="status-text">Starting&hellip;</span>
+        <span class="bar" id="status-bar"><i></i></span>
+      </div>
+    </div>
+    <div id="controls"></div>
+    <div style="display:flex;gap:8px;padding:16px 0 0;flex-wrap:wrap">
+      <button class="btn" id="btn-reset" type="button">Reset to defaults</button>
+      <button class="btn" id="btn-copy" type="button">Copy summary</button>
+    </div>
+  </aside>
+
+  <!-- ================================================================ main -->
+  <main class="main">
+
+    <!-- 1. headline ------------------------------------------------------- -->
+    <section class="headline" id="headline" aria-labelledby="hl-title">
+      <div class="hero-verdict">
+        <span class="eyebrow" id="hl-title">Net present value vs. investing the cash</span>
+        <div class="hero-figure num" id="hero-npv">&mdash;</div>
+        <span class="verdict-pill pill-mid" id="hero-pill"><span class="dot"></span><span id="hero-pill-text">calculating</span></span>
+        <p class="hero-note" id="hero-note"></p>
+      </div>
+      <div>
+        <div class="tiles" id="tiles"></div>
+        <p class="note" id="config-line" style="margin:10px 0 0"></p>
+      </div>
+    </section>
+
+    <!-- 2. optimizer surface + 3. cash flow -------------------------------- -->
+    <div class="row2">
+      <section class="card" aria-labelledby="h-heat">
+        <div class="card-head"><h2 id="h-heat">Which system size wins</h2><span class="tag" id="heat-obj">max NPV</span></div>
+        <p class="card-sub">Every cell is a full two-year hourly simulation. Click one to override the
+          optimizer and price that system instead.</p>
+        <div class="heat-wrap"><div class="heat" id="heat" role="grid" aria-label="Objective value by panel and battery count"></div></div>
+        <div class="heat-legend">
+          <span id="heat-lo">&mdash;</span>
+          <span class="heat-ramp" id="heat-ramp"></span>
+          <span id="heat-hi">&mdash;</span>
+          <span style="margin-left:auto" id="heat-hint">solid ring = optimum</span>
+        </div>
+        <h3 style="margin:20px 0 2px">Slices through the chosen system</h3>
+        <div class="chart-box" style="height:150px"><canvas id="c-slice-p"></canvas></div>
+        <div class="chart-box" style="height:150px"><canvas id="c-slice-b"></canvas></div>
+        <details class="data-view"><summary>Show the full grid as a table</summary>
+          <div class="table-scroll"><table id="t-heat"></table></div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="h-cash">
+        <div class="card-head"><h2 id="h-cash">The money over time</h2></div>
+        <p class="card-sub">The system's running cash position against the same cash left in the market,
+          plus what the system is worth if every year's saving is reinvested at the same return.</p>
+        <div class="chart-box" style="height:290px"><canvas id="c-cash"></canvas></div>
+        <div class="legend" id="l-cash"></div>
+        <details class="data-view"><summary>Show the year-by-year table</summary>
+          <div class="table-scroll"><table id="t-cash"></table></div>
+        </details>
+      </section>
+    </div>
+
+    <!-- 4. monthly bills + plan comparison --------------------------------- -->
+    <section class="card" aria-labelledby="h-bill">
+      <div class="card-head"><h2 id="h-bill">Where the bill goes</h2><span class="tag" id="bill-plan"></span></div>
+      <p class="card-sub">Each month, the bill you would pay today next to the bill with the selected
+        system, broken into what the tariff actually charges for.</p>
+      <div class="chart-box" style="height:280px"><canvas id="c-month"></canvas></div>
+      <div class="legend" id="l-month"></div>
+      <div class="row2" style="margin-top:22px;gap:22px">
+        <div>
+          <h3 style="margin:0 0 6px">Same system, every rate plan</h3>
+          <div class="table-scroll"><table id="t-plans"></table></div>
+        </div>
+        <div>
+          <h3 style="margin:0 0 6px">Same system, every generation provider</h3>
+          <div class="table-scroll"><table id="t-providers"></table></div>
+          <p class="note" id="provider-note" style="margin-top:8px"></p>
+        </div>
+      </div>
+      <details class="data-view"><summary>Show the monthly bill table</summary>
+        <div class="table-scroll"><table id="t-month"></table></div>
+      </details>
+    </section>
+
+    <!-- 5. typical day ------------------------------------------------------ -->
+    <section class="card" aria-labelledby="h-day">
+      <div class="card-head">
+        <h2 id="h-day">A typical weekday, hour by hour</h2>
+        <div class="seg" id="season-seg" style="width:180px">
+          <button type="button" data-season="0" aria-pressed="true">Summer</button>
+          <button type="button" data-season="1" aria-pressed="false">Winter</button>
+        </div>
+      </div>
+      <p class="card-sub">Average weekday shape for the selected system. The band under the axis is the
+        tariff period in force at that hour.</p>
+      <div class="chart-box" style="height:260px"><canvas id="c-day"></canvas></div>
+      <div id="period-ribbon" aria-hidden="true" style="display:flex;height:9px;gap:1px;margin:2px 0 0"></div>
+      <div class="legend" id="l-day"></div>
+      <div class="chart-box" style="height:110px;margin-top:6px"><canvas id="c-soc"></canvas></div>
+      <details class="data-view"><summary>Show the hourly table</summary>
+        <div class="table-scroll"><table id="t-day"></table></div>
+      </details>
+    </section>
+
+    <!-- 6. weather + 7. tornado --------------------------------------------- -->
+    <div class="row2">
+      <section class="card" aria-labelledby="h-weather">
+        <div class="card-head"><h2 id="h-weather">If the weather disagrees</h2></div>
+        <p class="card-sub">The same system run against every modelled weather year. P90 is the
+          conservative low-sun case, P10 the optimistic one &mdash; the solar industry's exceedance convention.</p>
+        <div class="chart-box" style="height:250px"><canvas id="c-weather"></canvas></div>
+        <div class="legend" id="l-weather"></div>
+        <details class="data-view"><summary>Show the weather table</summary>
+          <div class="table-scroll"><table id="t-weather"></table></div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="h-tornado">
+        <div class="card-head"><h2 id="h-tornado">What the answer hangs on</h2></div>
+        <p class="card-sub">Change one input by &plusmn;20% and see what happens to NPV. Everything else
+          stays where you set it.</p>
+        <div class="chart-box" style="height:250px"><canvas id="c-tornado"></canvas></div>
+        <div class="legend" id="l-tornado"></div>
+        <div class="kv" id="breakeven" style="margin-top:14px"></div>
+      </section>
+    </div>
+
+    <!-- 8. method ------------------------------------------------------------ -->
+    <section class="card" aria-labelledby="h-method">
+      <div class="card-head"><h2 id="h-method">Assumptions &amp; method</h2></div>
+      <p class="card-sub">Everything below is what the model actually does, in the order it does it.</p>
+
+      <h3>Does the model match your paper bill?</h3>
+      <div class="table-scroll"><table id="t-validate"></table></div>
+      <p class="note" id="validate-note" style="margin-top:8px"></p>
+
+      <h3>Incentives as they actually stand</h3>
+      <div class="method" id="incentive-notes"></div>
+
+      <h3>Your data</h3>
+      <div class="kv" id="quality"></div>
+
+      <details class="data-view" open><summary>Dispatch, billing, EV and finance rules in full</summary>
+        <div class="method" id="method-body"></div>
+      </details>
+    </section>
+
+    <p class="note" style="text-align:center;margin:0">
+      Not financial advice, and not a quote. Hourly model of your own meter data &mdash; a real installer's
+      production estimate and a real vendor's price sheet both beat it.
+    </p>
+  </main>
+</div>
+
+<script id="app-data" type="application/json">/*INLINE:data*/</script>
+<script>/*INLINE:engine.js*/</script>
+<script>/*INLINE:finance.js*/</script>
+<script>/*INLINE:optimizer.js*/</script>
+<script id="worker-src" type="text/plain">/*INLINE:worker*/</script>
+<script>/*INLINE:app.js*/</script>
+</body>
+</html>

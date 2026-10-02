@@ -1,0 +1,2053 @@
+{
+ "utility": {
+  "id": "sdge",
+  "name": "San Diego Gas & Electric",
+  "states": [
+   "CA"
+  ],
+  "zipPrefixes": [
+   "919",
+   "920",
+   "921",
+   "926"
+  ],
+  "website": "https://www.sdge.com/residential/pricing-plans",
+  "baselineRegions": {
+   "note": "SDG&E baseline allowances in kWh per DAY for its four climate zones, from Schedule DR Sheet 5, Special Condition 3. Baseline summer is June 1 - October 31, the same five-month season as the TOU rates. The all_electric figures require permanently installed electric space heating, or electric water heating with no other energy source. Medical Baseline adds 16.5 kWh/day. THE ZIP HINTS ARE INFERENCE, AND WEAKER THAN ANYWHERE ELSE IN THIS LIBRARY: SDG&E publishes its zone boundaries only as 'Territory Served, Map No. 1' and an interactive GIS map - there is no table and no ZIP list at any level of detail. The hints below are ordinary San Diego County geography and should seed a dropdown, never decide anything. Separate warning: SDG&E also publishes 'Utility Zip Codes by Climate Zones', which lists CEC Title 24 BUILDING climate zones 1-16 and has nothing to do with baseline allowances - do not use it here. SDG&E's own baseline allowance calculator at sdge.com/baseline-allowance-calculator is the authoritative lookup. Baseline only has a price effect on TOU-DR1 and TOU-DR2, the two plans with a baseline credit, and that credit runs to 130% of the allocation rather than 100%.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "allocations": {
+    "coastal": {
+     "summer": 9.0,
+     "winter": 9.2,
+     "summer_all_electric": 8.3,
+     "winter_all_electric": 13.5,
+     "label": "Coastal - the marine strip; representative weather station San Diego downtown"
+    },
+    "inland": {
+     "summer": 10.4,
+     "winter": 9.6,
+     "summer_all_electric": 10.1,
+     "winter_all_electric": 15.8,
+     "label": "Inland - valleys behind the coastal strip; representative station Escondido"
+    },
+    "mountain": {
+     "summer": 13.6,
+     "winter": 12.9,
+     "summer_all_electric": 16.5,
+     "winter_all_electric": 26.0,
+     "label": "Mountain - Laguna/Cuyamaca/Palomar ranges; representative station Julian"
+    },
+    "desert": {
+     "summer": 15.9,
+     "winter": 10.9,
+     "summer_all_electric": 18.5,
+     "winter_all_electric": 20.0,
+     "label": "Desert - Anza-Borrego and the eastern county; representative station Borrego Valley Airport"
+    }
+   },
+   "zipHints": {
+    "91901": [
+     "mountain"
+    ],
+    "91905": [
+     "mountain"
+    ],
+    "91906": [
+     "mountain"
+    ],
+    "91916": [
+     "mountain"
+    ],
+    "91931": [
+     "mountain"
+    ],
+    "91948": [
+     "mountain"
+    ],
+    "91962": [
+     "mountain"
+    ],
+    "91963": [
+     "mountain"
+    ],
+    "91980": [
+     "mountain"
+    ],
+    "92036": [
+     "mountain"
+    ],
+    "92060": [
+     "mountain"
+    ],
+    "92061": [
+     "mountain"
+    ],
+    "92066": [
+     "mountain"
+    ],
+    "92070": [
+     "mountain"
+    ],
+    "92086": [
+     "mountain"
+    ],
+    "92004": [
+     "desert"
+    ],
+    "92003": [
+     "inland"
+    ],
+    "92019": [
+     "inland"
+    ],
+    "92020": [
+     "inland"
+    ],
+    "92021": [
+     "inland"
+    ],
+    "92025": [
+     "inland"
+    ],
+    "92026": [
+     "inland"
+    ],
+    "92027": [
+     "inland"
+    ],
+    "92028": [
+     "inland"
+    ],
+    "92029": [
+     "inland"
+    ],
+    "92040": [
+     "inland"
+    ],
+    "92064": [
+     "inland"
+    ],
+    "92065": [
+     "inland",
+     "mountain"
+    ],
+    "92069": [
+     "inland"
+    ],
+    "92071": [
+     "inland"
+    ],
+    "92078": [
+     "inland"
+    ],
+    "92081": [
+     "inland"
+    ],
+    "92082": [
+     "inland"
+    ],
+    "92083": [
+     "inland"
+    ],
+    "92084": [
+     "inland"
+    ],
+    "919": [
+     "coastal",
+     "mountain"
+    ],
+    "920": [
+     "coastal",
+     "inland"
+    ],
+    "921": [
+     "coastal",
+     "inland"
+    ],
+    "926": [
+     "coastal"
+    ]
+   }
+  }
+ },
+ "meta": {
+  "as_of": "2026-09-16",
+  "rates_effective": "2026-08-01",
+  "sources": [
+   {
+    "title": "SDG&E Schedule TOU-DR1 Total Rates Table, effective 2026-08-01",
+    "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20TOU-DR1%20Total%20Rates%20Table.pdf",
+    "used_for": "TOU-DR1 total $/kWh by season and period AND the full UDC component split (Transmission, Distribution, PPP, ND, CTC, LGC, RS, TRAC), Schedule WF-NBC + DWR-BC $0.00591, the Schedule EECC generation rate, the $0.10702/kWh baseline adjustment credit, the Base Services Charge, and the residential PCIA table by vintage"
+   },
+   {
+    "title": "SDG&E Schedule TOU-DR2 Total Rates Table, effective 2026-08-01",
+    "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20TOU-DR2%20Total%20Rates%20Table.pdf",
+    "used_for": "TOU-DR2 totals, its period-differentiated summer UDC, and the confirmation that it carries the same baseline credit as TOU-DR1"
+   },
+   {
+    "title": "SDG&E Schedule TOU-ELEC Total Rates Table, effective 2026-08-01",
+    "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20TOU-ELEC%20Total%20Rates%20Table.pdf",
+    "used_for": "TOU-ELEC totals and components; confirmation that it has no baseline credit and that its only fixed charge is the Base Services Charge"
+   },
+   {
+    "title": "SDG&E Schedule EV-TOU-5 Total Rates Table, effective 2026-08-01",
+    "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20EV-TOU-5%20Total%20Rates%20Table.pdf",
+    "used_for": "EV-TOU-5 totals and components, including the $0.04114/kWh super-off-peak UDC that makes its super-off-peak so cheap"
+   },
+   {
+    "title": "SDG&E Schedules EV-TOU and EV-TOU-2 Total Rates Table, effective 2026-08-01",
+    "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20EV-TOU-2%20Total%20Rates%20Table.pdf",
+    "used_for": "EV-TOU-2 totals and components. The same PDF also carries Schedule EV-TOU, the separately metered EV service with a $0.413/day minimum bill and no Base Services Charge - that schedule is NOT in this file"
+   },
+   {
+    "title": "SDG&E - Super Off-Peak pricing for residential customers",
+    "url": "https://www.sdge.com/super-off-peak-residential",
+    "used_for": "The change effective 2026-05-01 making the weekday 10 a.m.-2 p.m. super-off-peak window YEAR-ROUND (it was March and April only) for TOU-DR-1, TOU-DR, TOU-DR-P, EV-TOU-5, DR-SES and TOU-ELEC. EV-TOU-2 is absent from that list"
+   },
+   {
+    "title": "SDG&E - Residential pricing plans",
+    "url": "https://www.sdge.com/residential/pricing-plans",
+    "used_for": "TOU period hours for each plan, weekday and weekend/holiday, and the June 1 - October 31 summer season"
+   },
+   {
+    "title": "SDG&E Electric Rule 1 - definitions, including the holiday list",
+    "url": "https://www.sdge.com/sites/default/files/elec_elec-rules_erule1.pdf",
+    "used_for": "The eight holidays that bill on the weekend schedule and the Sunday-to-Monday observance rule"
+   },
+   {
+    "title": "SDG&E Schedule DR, Sheet 5, Special Condition 3 - baseline allowances",
+    "url": "https://www.sdge.com/sites/default/files/elec_elec-scheds_dr.pdf",
+    "used_for": "Baseline allocations in kWh/day for the Coastal, Inland, Mountain and Desert zones, basic and all-electric, and the +16.5 kWh/day Medical Baseline allowance"
+   },
+   {
+    "title": "SDG&E - Base Services Charge and electric billing",
+    "url": "https://www.sdge.com/electric-billing",
+    "used_for": "$0.79343/day standard, $0.39688/day FERA or deed-restricted affordable housing, $0.19713/day CARE, effective October 2025; and the fact that it replaced both the residential minimum bill and the old $16/month EV-TOU-5 / TOU-ELEC basic service fee"
+   },
+   {
+    "title": "SDG&E - California Climate Credit",
+    "url": "https://www.sdge.com/climatecredit",
+    "used_for": "$49.36 per credit on the August and September 2026 bills (moved from April/October by the CPUC), and the separate $32.58 gas credit in April 2026"
+   },
+   {
+    "title": "SDG&E Solar Billing Plan export pricing - 'LY2026 NBT Pricing Upload MIDAS.csv', the CPUC Resolution E-5301 machine-readable compliance file",
+    "url": "https://www.sdge.com/sites/default/files/LY2026%20NBT%20Pricing%20Upload%20MIDAS.zip",
+    "used_for": "The 12x24 weekday and weekend export-credit matrices for the NBT26 vintage, calendar year 2026, and their generation/delivery split"
+   },
+   {
+    "title": "San Diego Community Power - 2026 Current Residential Rates, effective 2026-05-01 (2022 vintage sheet; the 2021 vintage sheet gives identical generation-plus-PCIA totals)",
+    "url": "https://sdcommunitypower.org/rates/",
+    "used_for": "SDCP PowerOn and PowerBase generation $/kWh for TOU-DR-1, TOU-DR-2, TOU-ELEC, EV-TOU-2, EV-TOU-5 and DR-SES by season and period; the Power100 $0.01000/kWh adder; SDCP's own TOU period definitions, which confirm the year-round weekday 10 a.m.-2 p.m. super-off-peak; and its SDG&E-to-SDCP schedule mapping"
+   },
+   {
+    "title": "Clean Energy Alliance - Adopted Residential Rate Schedule effective 2026-06-01 (corrected 2026-06-30)",
+    "url": "https://thecleanenergyalliance.org/rates/",
+    "used_for": "CEA base generation $/kWh by schedule, season and period; the SDG&E-to-CEA schedule mapping that sends TOU-ELEC, EV-TOU, EV-TOU-2 and EV-TOU-5 to one rate; the -$0.03871/kWh Clean Impact Residential Rate Relief Credit; and CEA's TOU period table, which shows the weekday 10 a.m.-2 p.m. super-off-peak as year-round"
+   },
+   {
+    "title": "SDG&E / San Diego Community Power Joint Rate Comparison, effective 2026-06-01",
+    "url": "https://sdcommunitypower.org/rates/",
+    "used_for": "Cross-check of the all-in construction. Its TOU-DR1 line (SDG&E generation $0.12181 + PCIA $0.04988 = $0.17169; SDCP PowerOn $0.13000 + PCIA $0.03563 = $0.16563; totals $0.47513 against $0.46905) confirms that SDG&E's Schedule EECC rate equals generation plus the bundled PCIA, which is why a CCA total is delivery + CCA generation + CCA PCIA and nothing else"
+   },
+   {
+    "title": "SDG&E / Clean Energy Alliance Joint Rate Comparison, effective 2026-06-01",
+    "url": "https://thecleanenergyalliance.org/rates/",
+    "used_for": "Cross-check, and the source of the CEA PCIA of $0.02827 as of 2026-06-01 used to pin CEA's vintage in this file"
+   },
+   {
+    "title": "CPUC 2025 SB 695 Report on electric rates, Table 17 (forecast bundled residential average rates)",
+    "url": "https://www.cpuc.ca.gov/-/media/cpuc-website/divisions/office-of-governmental-affairs-division/reports/2025/2025-sb-695-report_093025.pdf",
+    "used_for": "SDG&E bundled residential average rate: $0.349 actual 2024, $0.378 projected 2025, $0.375 2026, $0.390 2027, $0.427 2028 - the basis for meta.escalation"
+   },
+   {
+    "title": "CPUC D.22-12-056 (Net Billing Tariff) and the CPUC net energy metering page",
+    "url": "https://www.cpuc.ca.gov/industries-and-topics/electrical-energy/demand-side-management/customer-generation/net-energy-metering-and-net-billing",
+    "used_for": "The nine-year vintage lock-in and the fact that the ACC Plus glide-path adder was granted ONLY to PG&E and SCE residential customers - SDG&E customers receive none"
+   },
+   {
+    "title": "26 U.S.C. section 25D as amended by P.L. 119-21 section 70506, and 26 U.S.C. section 48E",
+    "url": "https://uscode.house.gov/view.xhtml?req=(title:26%20section:25D%20edition:prelim)",
+    "used_for": "Termination of the residential clean energy credit for expenditures made after 2025-12-31, and the surviving 30% third-party-owner credit"
+   },
+   {
+    "title": "California SGIP program metrics and CPUC D.25-12-003",
+    "url": "https://www.selfgenca.com/home/program_metrics/",
+    "used_for": "All ratepayer-funded SGIP budgets closed to new applications on 2025-12-30"
+   }
+  ],
+  "confidence": {
+   "rates": {
+    "level": "high",
+    "note": "SDG&E columns transcribed verbatim from the 2026-08-01 Total Rates Tables and verified by re-summing UDC + WF-NBC/DWR-BC + EECC to the published total in all 26 cells, with zero mismatches. SDCP and CEA generation transcribed from their own adopted rate schedules."
+   },
+   "schedules": {
+    "level": "high",
+    "note": "HIGH for TOU-DR1, TOU-DR2, TOU-ELEC and EV-TOU-5, cross-confirmed by SDG&E's super-off-peak page and by both CCAs' own TOU tables. LOW for EV-TOU-2, whose super-off-peak window is genuinely contested - see meta.notes and schedule_overrides."
+   },
+   "providers": {
+    "level": "medium",
+    "note": "SDCP HIGH: published per-period generation, vintage-neutral, cross-checked against the joint rate comparison. CEA MEDIUM: per-period generation is published and exact, but CEA spans three PCIA vintages and publishes only one generation schedule, so the cea column can be off by about -$0.007 (Carlsbad/Del Mar/Solana Beach) to +$0.022 (Oceanside/Vista) per kWh depending on the city."
+   },
+   "baseline": {
+    "level": "low",
+    "note": "Allocation values MEDIUM: correct as published but from a Schedule DR sheet last revised December 2017. ZIP-to-zone hints LOW: SDG&E publishes no table or ZIP list at all, only a GIS map, so the hints are ordinary county geography. Do not present them as authoritative."
+   },
+   "fixed_charge": {
+    "level": "high",
+    "note": "Base Services Charge read from the Other Charges block of every schedule PDF; the removal of the minimum bill and of the $16/month EV plan fee confirmed by their absence from the current tables."
+   },
+   "export_rates": {
+    "level": "high",
+    "note": "SDG&E's CPUC Resolution E-5301 machine-readable MIDAS compliance file, already carrying the mandated month/day-type/hour aggregation - 576 distinct cells per component with no conflicting values, so nothing was re-averaged."
+   },
+   "climate_credit": {
+    "level": "high",
+    "note": "$49.36 x 2 on the August and September bills, from SDG&E's own climate credit page and the CPUC."
+   },
+   "acc_plus": {
+    "level": "medium",
+    "note": "SDG&E pays NO ACC Plus adder. This rests on D.22-12-056 having granted the adder only to PG&E and SCE residential customers, plus the complete absence of any adder provision in SDG&E's Solar Billing Plan materials. SDG&E's tariff viewer is a JavaScript application and its Schedule NBT PDF could not be retrieved directly, so this is an argument from two sources rather than a verbatim tariff reading."
+   },
+   "escalation": {
+    "level": "medium",
+    "note": "CPUC SB 695 Report Table 17 forecast, a projection rather than a measurement."
+   },
+   "incentives": {
+    "level": "medium",
+    "note": "The Section 25D termination and the SGIP closure are statutory and HIGH. Utility and CCA program terms change without notice and are MEDIUM."
+   }
+  },
+  "climate_credit": {
+   "amount": 49.36,
+   "months": [
+    8,
+    9
+   ],
+   "note": "Per appearance, not per year: $49.36 on the August bill and $49.36 on the September bill, $98.72 a year - the largest of the three California IOUs' electric climate credits."
+  },
+  "baseline_region": "coastal",
+  "baseline_kwh_per_day": {
+   "summer": 9.0,
+   "winter": 9.2,
+   "note": "The Coastal zone, which covers most of SDG&E's residential accounts, used as the fallback when no zone has been chosen."
+  },
+  "escalation": {
+   "historical_cagr": 0.0517,
+   "period": "2024-2028 (projected)",
+   "recommended_default": 0.05,
+   "low": 0.03,
+   "high": 0.08,
+   "note": "CPUC 2025 SB 695 Report Table 17 projects SDG&E's bundled residential average rate at $0.349/kWh actual for 2024, then $0.378 (2025), $0.375 (2026), $0.390 (2027) and $0.427 (2028) - a 5.17%/yr CAGR over 2024-2028, with a flat-to-negative 2025-2026 followed by 6.7%/yr over 2026-2028. SDG&E sits between PG&E ($0.445 by 2028) and SCE ($0.374) on both level and slope. Recommended default 5%/yr, with 3% low and 8% high. FLAGGED: unlike the SCE file, this rests on a CPUC projection rather than a realised EIA Form 861 revenue series, so it is MEDIUM confidence."
+  },
+  "notes": "RATE MODEL. Every rates[season][period][provider] value is the FULL retail $/kWh that provider's customer pays in that hour. SDG&E's own columns are transcribed verbatim from SDG&E's published Total Rates Tables effective 2026-08-01, which also print the component split - so UDC Total + Schedule WF-NBC/DWR-BC ($0.00591) + Schedule EECC re-sums to the published total in every one of the 26 season/period cells of this file (verified programmatically, zero mismatches). HOW THE CCA COLUMNS WERE BUILT. SDG&E's Schedule EECC rate is generation INCLUDING the bundled customer's share of the PCIA - the joint rate comparisons split it, showing TOU-DR1 as generation $0.12181 + PCIA $0.04988 = $0.17169, which is exactly the class-average EECC. A CCA customer does not pay EECC at all: they pay SDG&E's delivery plus their own CCA's generation plus their own CCA's PCIA. So cca_total = (UDC + WF-NBC/DWR-BC) + cca_generation + cca_pcia. Applying that identity to the joint rate comparison's own class averages reproduces its published totals to $0.0001, which is what validates the construction. THE NUMBER THAT LOOKS WRONG AND IS NOT: CEA's TOU-DR1 summer on-peak total is $0.91302/kWh, $0.22 above SDG&E's $0.69135. That is real and it comes straight off CEA's own adopted rate schedule, which prices summer on-peak generation at $0.55397/kWh against SDG&E's $0.35943. CEA's rates are far more TOU-differentiated than SDG&E's in BOTH directions: its winter on-peak generation is $0.19791 against SDG&E's $0.28279, so a CEA customer pays much more in the summer evening and noticeably less all winter. Blended over a year at CEA's own published class-average usage the two land within about 3 cents, matching the +6.8% their joint rate comparison reports. For a solar-plus-battery household this shape is not simply bad news: it makes every kWh shifted out of the 4-9 p.m. summer window worth substantially more. SDCP IS VINTAGE-NEUTRAL, CEA IS NOT. SDCP publishes separate 2021-vintage and 2022-vintage generation sheets that differ by exactly the PCIA difference ($0.00559/kWh), so generation + PCIA is identical for every SDCP customer and the single sdcp column here is correct for all of them. CEA publishes ONE generation schedule but spans three PCIA vintages, because its cities joined in different years: Carlsbad, Del Mar and Solana Beach in 2021 ($0.03348/kWh), Escondido and San Marcos in 2023 ($0.02613), Oceanside and Vista in 2024 ($0.04840). This file uses $0.02613. FLAGGED AS DERIVED: CEA's own 2026-06-01 joint rate comparison shows a single PCIA of $0.02827, and the system-wide PCIA fell $0.00217/kWh between the June and August tables (SDCP's 2021 vintage moved $0.03565 to $0.03348 over the same interval), which puts CEA's August figure at $0.02610 - the 2023 vintage to within $0.00003. A CEA customer in Oceanside or Vista may therefore pay about $0.022/kWh MORE than this file's cea column suggests, and one in Carlsbad, Del Mar or Solana Beach about $0.007 more. Confidence MEDIUM. THE SUPER-OFF-PEAK WINDOW MOVED, AND ONE PLAN IS CONTESTED. Effective 2026-05-01 SDG&E made the weekday 10 a.m.-2 p.m. super-off-peak window YEAR-ROUND; it had previously applied in MARCH AND APRIL ONLY. That change is in the base weekday schedules of TOU-DR1, TOU-ELEC and EV-TOU-5 here. EV-TOU-2 is the exception: SDG&E's own list of affected schedules omits it and its tariff sheet still reads March and April only, so EV-TOU-2 carries the narrow window through plans[].schedule_overrides instead. Both SDCP's and CEA's current rate sheets present the year-round window as applying to every schedule they serve, including EV-TOU-2, so the evidence conflicts. Confidence LOW on EV-TOU-2 specifically; HIGH on the other four. SEASONS. Summer is JUNE 1 - OCTOBER 31, five months, on every plan - a month longer than PG&E's and SCE's four-month June-September summer. Winter is November 1 - May 31. HOLIDAYS. The weekend schedule applies on the eight holidays in Electric Rule 1: New Year's Day, Presidents' Day, Memorial Day, Independence Day, Labor Day, Veterans Day, Thanksgiving and Christmas. SDG&E observes a Sunday holiday on the following Monday. core/tariff.js also observes a Saturday holiday on the preceding Friday, which is the federal convention and which SDG&E's rule does not adopt; the difference affects at most a couple of days a year and always in the customer's favour. PERIOD COVERAGE AND FILLER. period_ids declares all four ids on every plan so that any [season][period] lookup resolves, but SDG&E has NO residential mid-peak or part-peak period at all, so every mid cell in this file is filler carrying the on-peak value. TOU-DR2 has no super-off-peak either, so its super_off cells carry its off-peak value. The 24-hour schedule arrays never emit a filler id, so a correct simulation never reads one. BASELINE. TOU-DR1 and TOU-DR2 carry a $0.10702/kWh credit on usage up to 130% - not 100% - of the daily baseline allocation. TOU-ELEC, EV-TOU-5 and EV-TOU-2 carry none. The rates in this file are PRE-CREDIT, as in the SCE and PG&E files. THE BASELINE ZIP HINTS ARE INFERENCE, NOT TARIFF, AND WEAKER HERE THAN ANYWHERE ELSE IN THE LIBRARY. SDG&E publishes its Coastal / Inland / Mountain / Desert boundaries only as 'Territory Served, Map No. 1' and an interactive ArcGIS map - there is no table, and no ZIP list, at any level. The hints here are ordinary San Diego County geography (Alpine, Julian, Pine Valley and the back-country ZIPs as Mountain; Borrego Springs as Desert; the El Cajon, Escondido, Poway, Santee, San Marcos and Vista valleys as Inland; everything else Coastal) and are LOW confidence. A specific warning: SDG&E ALSO publishes a document called 'Utility Zip Codes by Climate Zones'. That file lists CEC Title 24 BUILDING climate zones 1-16 and has nothing to do with baseline allowances - do not use it for this. SDG&E's own baseline allowance calculator is the authoritative lookup. The allocation values themselves come from Schedule DR Sheet 5, whose sheet was last revised in December 2017; they match every third-party citation found, but their currency is MEDIUM rather than HIGH. Medical Baseline adds 16.5 kWh/day. FIXED CHARGE. $0.79343/day standard - identical to PG&E's to the fifth decimal, because both implement the same CPUC income-graduated fixed charge under AB 205 and D.24-05-028. $0.39688/day for FERA and deed-restricted affordable housing, $0.19713/day for CARE. Effective October 2025. It REPLACED the residential minimum bill, so minimum_charge_per_day is a real 0.00, and it also replaced the $16/month basic service fee that EV-TOU-5 and TOU-ELEC used to carry - SDG&E's own TOU-ELEC plan page still advertises that dead fee. The only residential schedule that still has a minimum bill is Schedule EV-TOU, the separately metered EV service, at $0.413/day; it is not in this file. CHARGES NOT IN THE PER-kWh RATES. Franchise fees are excluded from every column, exactly as SDG&E's own Total Rates Tables exclude them: a CCA customer pays a 1.1% franchise fee surcharge on generation supplied by others, and EVERY customer inside the City of San Diego pays a further 5.78% franchise fee differential as a separate bill line. Add them on top if you are reproducing a bill to the cent; together they are well under 1% of the total for a customer outside the City of San Diego. Note the asymmetry with data/tariffs/pge.json, which DOES include the CCA franchise fee surcharge - in PG&E territory the CCAs publish their comparisons inclusive of it, and each file follows its own utility's published convention. ZIP PREFIXES. 919, 920 and 921 are San Diego County. 926 is southern Orange County - San Clemente, San Juan Capistrano, Dana Point, Laguna Niguel - and OVERLAPS with SCE, which serves the rest of 926xx. utilityForZip() returns both with ambiguous:true and the UI must ask. The 926 entries were derived from a SDG&E document that mixes gas and electric service, so some 926xx ZIPs in it (92649 Huntington Beach, 92697 UC Irvine) are almost certainly SCE for electricity; treat 926xx as needing per-address confirmation. One outlier ZIP, 92536 (Aguanga, Riverside County), is omitted."
+ },
+ "providers": {
+  "sdge": {
+   "name": "SDG&E bundled",
+   "default": true,
+   "note": "San Diego Gas & Electric bundled service: SDG&E supplies both delivery and generation. The sdge_generation diagnostic column is SDG&E's Schedule EECC rate, which already contains the bundled customer's share of the PCIA - that is why a CCA customer's own PCIA is not simply added on top of it."
+  },
+  "sdcp": {
+   "name": "San Diego Community Power - PowerOn (default tier)",
+   "tier": "PowerOn",
+   "service_area": "San Diego, Chula Vista, Encinitas, Imperial Beach, La Mesa (2021 vintage); National City and unincorporated San Diego County (2022 vintage).",
+   "zipPrefixes": [
+    "919",
+    "920",
+    "921"
+   ],
+   "pcia_vintage": "2022 (vintage-neutral)",
+   "note": "PowerOn is 53% renewable plus 2% other carbon-free and is the default. Power100 (100% renewable) adds a flat $0.01000/kWh; PowerBase (45% renewable) is a separate, cheaper schedule roughly 7% below PowerOn on generation. SDCP is VINTAGE-NEUTRAL: its 2021-vintage and 2022-vintage generation rates differ by exactly the PCIA difference ($0.00559/kWh), so generation + PCIA is identical for every SDCP customer and this file's single column is correct for all of them. SDCP is cheaper than SDG&E bundled in every period except TOU-DR1 summer super-off-peak, where its $0.01000/kWh floor plus the 2022 PCIA lands just above SDG&E's own $0.04241 generation."
+  },
+  "cea": {
+   "name": "Clean Energy Alliance - Clean Impact Plus (default tier)",
+   "tier": "Clean Impact Plus",
+   "service_area": "Carlsbad, Del Mar, Solana Beach (joined 2021); Escondido, San Marcos (2023); Oceanside, Vista (2024).",
+   "zipPrefixes": [
+    "920",
+    "921"
+   ],
+   "pcia_vintage": "2023 (see meta.notes - CEA spans 2021, 2023 and 2024 vintages)",
+   "note": "Clean Impact Plus is 55% renewable and 75%+ carbon-free and is the default; it is CEA's posted base generation rate plus $0.00100/kWh. Green Impact Premium (100% renewable) is base + $0.00750; Clean Impact (50% renewable, the opt-down) is base - $0.03871 under CEA's Residential Rate Relief Credit, in force 2026-02-01 to 2026-12-31 and NOT available on the default tier. CEA'S TOU SHAPE IS RADICALLY DIFFERENT FROM SDG&E'S and this is the single most important fact about it: CEA's TOU-DR1 summer on-peak generation is $0.55397/kWh against SDG&E's $0.35943, while its winter on-peak is $0.19791 against SDG&E's $0.28279. A CEA customer therefore pays far more to import during the summer evening peak and noticeably less all winter. For a solar-plus-battery household that INCREASES the value of shifting load out of the 4-9 p.m. summer window, which is exactly what a battery does."
+  }
+ },
+ "plans": [
+  {
+   "id": "TOU-DR1",
+   "name": "TOU-DR1 (Residential Time-of-Use)",
+   "default": true,
+   "eligibility_note": "SDG&E's DEFAULT residential rate - if you are a typical household you are almost certainly on it. Open to everyone, no eligibility test. On-peak 4-9 p.m. every day; weekday super-off-peak midnight-6 a.m. AND 10 a.m.-2 p.m.; weekends and holidays super-off-peak from midnight right through to 2 p.m. Usage up to 130% of the daily baseline allocation earns a $0.10702/kWh credit.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.10702,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sdge": 0.69135,
+      "sdcp": 0.66119,
+      "cea": 0.91302,
+      "delivery": 0.33192,
+      "sdge_generation": 0.35943
+     },
+     "mid": {
+      "sdge": 0.69135,
+      "sdcp": 0.66119,
+      "cea": 0.91302,
+      "delivery": 0.33192,
+      "sdge_generation": 0.35943
+     },
+     "off": {
+      "sdge": 0.46421,
+      "sdcp": 0.45175,
+      "cea": 0.58203,
+      "delivery": 0.33192,
+      "sdge_generation": 0.13229
+     },
+     "super_off": {
+      "sdge": 0.37433,
+      "sdcp": 0.36981,
+      "cea": 0.40819,
+      "delivery": 0.33192,
+      "sdge_generation": 0.04241
+     }
+    },
+    "winter": {
+     "on": {
+      "sdge": 0.61471,
+      "sdcp": 0.59053,
+      "cea": 0.55696,
+      "delivery": 0.33192,
+      "sdge_generation": 0.28279
+     },
+     "mid": {
+      "sdge": 0.61471,
+      "sdcp": 0.59053,
+      "cea": 0.55696,
+      "delivery": 0.33192,
+      "sdge_generation": 0.28279
+     },
+     "off": {
+      "sdge": 0.5306,
+      "sdcp": 0.51298,
+      "cea": 0.44338,
+      "delivery": 0.33192,
+      "sdge_generation": 0.19868
+     },
+     "super_off": {
+      "sdge": 0.43719,
+      "sdcp": 0.42684,
+      "cea": 0.41043,
+      "delivery": 0.33192,
+      "sdge_generation": 0.10527
+     }
+    }
+   }
+  },
+  {
+   "id": "TOU-DR2",
+   "name": "TOU-DR2 (Residential Time-of-Use, two periods)",
+   "eligibility_note": "Open to everyone. The simplest SDG&E plan: on-peak 4-9 p.m. every day, off-peak every other hour, and NO super-off-peak at all. Its off-peak is cheaper than TOU-DR1's but it gives up the midday super-off-peak window, which is exactly the window a solar household wants. Carries the same $0.10702/kWh baseline credit as TOU-DR1.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.10702,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sdge": 0.69597,
+      "sdcp": 0.66581,
+      "cea": 0.90052,
+      "delivery": 0.33654,
+      "sdge_generation": 0.35943
+     },
+     "mid": {
+      "sdge": 0.69597,
+      "sdcp": 0.66581,
+      "cea": 0.90052,
+      "delivery": 0.33654,
+      "sdge_generation": 0.35943
+     },
+     "off": {
+      "sdge": 0.41666,
+      "sdcp": 0.40775,
+      "cea": 0.50364,
+      "delivery": 0.32988,
+      "sdge_generation": 0.08678
+     },
+     "super_off": {
+      "sdge": 0.41666,
+      "sdcp": 0.40775,
+      "cea": 0.50364,
+      "delivery": 0.32988,
+      "sdge_generation": 0.08678
+     }
+    },
+    "winter": {
+     "on": {
+      "sdge": 0.61471,
+      "sdcp": 0.59053,
+      "cea": 0.55085,
+      "delivery": 0.33192,
+      "sdge_generation": 0.28279
+     },
+     "mid": {
+      "sdge": 0.61471,
+      "sdcp": 0.59053,
+      "cea": 0.55085,
+      "delivery": 0.33192,
+      "sdge_generation": 0.28279
+     },
+     "off": {
+      "sdge": 0.47372,
+      "sdcp": 0.46052,
+      "cea": 0.42608,
+      "delivery": 0.33192,
+      "sdge_generation": 0.1418
+     },
+     "super_off": {
+      "sdge": 0.47372,
+      "sdcp": 0.46052,
+      "cea": 0.42608,
+      "delivery": 0.33192,
+      "sdge_generation": 0.1418
+     }
+    }
+   }
+  },
+  {
+   "id": "TOU-ELEC",
+   "name": "TOU-ELEC (Electric Home)",
+   "eligibility_note": "For households with an EV, a battery or an electric heat pump. Same TOU windows as TOU-DR1 but much lower delivery rates (UDC $0.24970/kWh against TOU-DR1's $0.32601) and correspondingly higher generation. NO baseline credit. Note: SDG&E's own TOU-ELEC plan page still advertises a $16/month basic service fee - that fee was replaced by the Base Services Charge in October 2025 and no longer exists.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sdge": 0.72589,
+      "sdcp": 0.6871,
+      "cea": 0.79958,
+      "delivery": 0.25561,
+      "sdge_generation": 0.47028
+     },
+     "mid": {
+      "sdge": 0.72589,
+      "sdcp": 0.6871,
+      "cea": 0.79958,
+      "delivery": 0.25561,
+      "sdge_generation": 0.47028
+     },
+     "off": {
+      "sdge": 0.38885,
+      "sdcp": 0.37631,
+      "cea": 0.44249,
+      "delivery": 0.25561,
+      "sdge_generation": 0.13324
+     },
+     "super_off": {
+      "sdge": 0.3445,
+      "sdcp": 0.33543,
+      "cea": 0.33235,
+      "delivery": 0.25561,
+      "sdge_generation": 0.08889
+     }
+    },
+    "winter": {
+     "on": {
+      "sdge": 0.50584,
+      "sdcp": 0.48419,
+      "cea": 0.52704,
+      "delivery": 0.25561,
+      "sdge_generation": 0.25023
+     },
+     "mid": {
+      "sdge": 0.50584,
+      "sdcp": 0.48419,
+      "cea": 0.52704,
+      "delivery": 0.25561,
+      "sdge_generation": 0.25023
+     },
+     "off": {
+      "sdge": 0.37679,
+      "sdcp": 0.3652,
+      "cea": 0.44056,
+      "delivery": 0.25561,
+      "sdge_generation": 0.12118
+     },
+     "super_off": {
+      "sdge": 0.33646,
+      "sdcp": 0.32801,
+      "cea": 0.33461,
+      "delivery": 0.25561,
+      "sdge_generation": 0.08085
+     }
+    }
+   }
+  },
+  {
+   "id": "EV-TOU-5",
+   "name": "EV-TOU-5 (Electric Vehicle Time-of-Use 5)",
+   "eligibility_note": "Requires a registered EV. Same TOU windows as TOU-DR1, but the super-off-peak is astonishingly cheap - $0.13090/kWh in summer and $0.12332/kWh in winter, against $0.37433 and $0.43719 on TOU-DR1 - because SDG&E charges almost no delivery in that window (UDC $0.04114/kWh against $0.31218 in every other period). The trade is the most expensive summer on-peak of any plan here, $0.80205/kWh. Like TOU-ELEC it lost its $16/month basic service fee to the Base Services Charge in October 2025. NO baseline credit.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "rates": {
+    "summer": {
+     "on": {
+      "sdge": 0.80205,
+      "sdcp": 0.7622,
+      "cea": 0.86206,
+      "delivery": 0.31809,
+      "sdge_generation": 0.48396
+     },
+     "mid": {
+      "sdge": 0.80205,
+      "sdcp": 0.7622,
+      "cea": 0.86206,
+      "delivery": 0.31809,
+      "sdge_generation": 0.48396
+     },
+     "off": {
+      "sdge": 0.49627,
+      "sdcp": 0.48023,
+      "cea": 0.50497,
+      "delivery": 0.31809,
+      "sdge_generation": 0.17818
+     },
+     "super_off": {
+      "sdge": 0.1309,
+      "sdcp": 0.12221,
+      "cea": 0.12379,
+      "delivery": 0.04705,
+      "sdge_generation": 0.08385
+     }
+    },
+    "winter": {
+     "on": {
+      "sdge": 0.52383,
+      "sdcp": 0.50566,
+      "cea": 0.58952,
+      "delivery": 0.31809,
+      "sdge_generation": 0.20574
+     },
+     "mid": {
+      "sdge": 0.52383,
+      "sdcp": 0.50566,
+      "cea": 0.58952,
+      "delivery": 0.31809,
+      "sdge_generation": 0.20574
+     },
+     "off": {
+      "sdge": 0.46566,
+      "sdcp": 0.45201,
+      "cea": 0.50304,
+      "delivery": 0.31809,
+      "sdge_generation": 0.14757
+     },
+     "super_off": {
+      "sdge": 0.12332,
+      "sdcp": 0.11522,
+      "cea": 0.12605,
+      "delivery": 0.04705,
+      "sdge_generation": 0.07627
+     }
+    }
+   }
+  },
+  {
+   "id": "EV-TOU-2",
+   "name": "EV-TOU-2 (Electric Vehicle Time-of-Use 2, legacy whole-home)",
+   "eligibility_note": "Legacy whole-home EV rate; requires an EV registered with the California DMV at the premises. Milder than EV-TOU-5 in both directions: a cheaper summer on-peak ($0.78892 against $0.80205) but a far more expensive super-off-peak ($0.25115 against $0.13090), because its super-off-peak delivery is $0.16139/kWh rather than $0.04114. NO baseline credit. Do not confuse it with Schedule EV-TOU, a SEPARATELY METERED EV service on the same PDF that carries a $0.413/day minimum bill and no Base Services Charge; EV-TOU-2 is the whole-home schedule and is the one in this file. This is also the one plan whose super-off-peak window is contested - see meta.notes and schedule_overrides.",
+   "summer_months": [
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "fixed_charge_per_day": 0.79343,
+   "minimum_charge_per_day": 0.0,
+   "baseline_credit_per_kwh": 0.0,
+   "period_ids": [
+    "on",
+    "mid",
+    "off",
+    "super_off"
+   ],
+   "schedule": {
+    "summer": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    },
+    "winter": {
+     "weekday": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ],
+     "weekend": [
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "super_off",
+      "off",
+      "off",
+      "on",
+      "on",
+      "on",
+      "on",
+      "on",
+      "off",
+      "off",
+      "off"
+     ]
+    }
+   },
+   "schedule_overrides": [
+    {
+     "months": [
+      3,
+      4
+     ],
+     "daytype": "weekday",
+     "hours": [
+      10,
+      11,
+      12,
+      13
+     ],
+     "period": "super_off",
+     "note": "SDG&E's original weekday 10 a.m.-2 p.m. super-off-peak window, which applied in March and April only. SDG&E made that window YEAR-ROUND on 2026-05-01 for TOU-DR1, TOU-DR, TOU-DR-P, TOU-ELEC, EV-TOU-5 and DR-SES - but EV-TOU-2 is absent from SDG&E's own list of affected schedules and its tariff sheet still reads March and April only, so EV-TOU-2 keeps the narrow window here. Both SDCP's and CEA's current rate sheets imply the year-round window applies to EV-TOU-2 as well, so this is the one genuinely contested schedule in the file. Confidence LOW. If SDG&E confirms year-round, delete this override and move the 10-13 hours into the base weekday schedule."
+    }
+   ],
+   "rates": {
+    "summer": {
+     "on": {
+      "sdge": 0.78892,
+      "sdcp": 0.74907,
+      "cea": 0.84893,
+      "delivery": 0.30496,
+      "sdge_generation": 0.48396
+     },
+     "mid": {
+      "sdge": 0.78892,
+      "sdcp": 0.74907,
+      "cea": 0.84893,
+      "delivery": 0.30496,
+      "sdge_generation": 0.48396
+     },
+     "off": {
+      "sdge": 0.48314,
+      "sdcp": 0.4671,
+      "cea": 0.49184,
+      "delivery": 0.30496,
+      "sdge_generation": 0.17818
+     },
+     "super_off": {
+      "sdge": 0.25115,
+      "sdcp": 0.24246,
+      "cea": 0.24404,
+      "delivery": 0.1673,
+      "sdge_generation": 0.08385
+     }
+    },
+    "winter": {
+     "on": {
+      "sdge": 0.5107,
+      "sdcp": 0.49253,
+      "cea": 0.57639,
+      "delivery": 0.30496,
+      "sdge_generation": 0.20574
+     },
+     "mid": {
+      "sdge": 0.5107,
+      "sdcp": 0.49253,
+      "cea": 0.57639,
+      "delivery": 0.30496,
+      "sdge_generation": 0.20574
+     },
+     "off": {
+      "sdge": 0.45253,
+      "sdcp": 0.43888,
+      "cea": 0.48991,
+      "delivery": 0.30496,
+      "sdge_generation": 0.14757
+     },
+     "super_off": {
+      "sdge": 0.24357,
+      "sdcp": 0.23547,
+      "cea": 0.2463,
+      "delivery": 0.1673,
+      "sdge_generation": 0.07627
+     }
+    }
+   }
+  }
+ ],
+ "nbt": {
+  "vintage": "NBT26",
+  "vintage_year": 2026,
+  "lock_in_years": 9,
+  "export_rates": {
+   "note": "$/kWh credit for exported energy, SDG&E's published Solar Billing Plan export prices for the NBT26 vintage, calendar year 2026, from SDG&E's CPUC Resolution E-5301 MIDAS compliance file. [month 0..11][hour 0..23], hour-BEGINNING in Pacific prevailing time. Holidays use the weekend table. Each value is the TOTAL credit, generation component plus delivery component; the split is in data/export/sdge-nbt26.json. SDG&E pays no ACC Plus adder, so unlike PG&E and SCE these values are the whole of the export credit.",
+   "weekday": [
+    [
+     0.08883,
+     0.08671,
+     0.08446,
+     0.08398,
+     0.08604,
+     0.08968,
+     0.08993,
+     0.08516,
+     0.07325,
+     0.06538,
+     0.0637,
+     0.06299,
+     0.06293,
+     0.06023,
+     0.05933,
+     0.06124,
+     0.07808,
+     0.10897,
+     0.09971,
+     0.0902,
+     0.08912,
+     0.08974,
+     0.09345,
+     0.09106
+    ],
+    [
+     0.08803,
+     0.08549,
+     0.08732,
+     0.08746,
+     0.08947,
+     0.08789,
+     0.08434,
+     0.08116,
+     0.06305,
+     0.0521,
+     0.04932,
+     0.0474,
+     0.04404,
+     0.03931,
+     0.03281,
+     0.03094,
+     0.06468,
+     0.10724,
+     0.09199,
+     0.08629,
+     0.08672,
+     0.08383,
+     0.09095,
+     0.08717
+    ],
+    [
+     0.07367,
+     0.07012,
+     0.06621,
+     0.06563,
+     0.06679,
+     0.06991,
+     0.07216,
+     0.06518,
+     0.04637,
+     0.02164,
+     0.01708,
+     0.0159,
+     0.01616,
+     0.01209,
+     0.01052,
+     0.01165,
+     0.02266,
+     0.05623,
+     0.08098,
+     0.0799,
+     0.07497,
+     0.07209,
+     0.06807,
+     0.06968
+    ],
+    [
+     0.07386,
+     0.07175,
+     0.07676,
+     0.07434,
+     0.0733,
+     0.07634,
+     0.06784,
+     0.05457,
+     0.01234,
+     0.00479,
+     0.00793,
+     0.00701,
+     0.00409,
+     0.00146,
+     0.0006,
+     0.00013,
+     0.00076,
+     0.00461,
+     0.07331,
+     0.07309,
+     0.07233,
+     0.07085,
+     0.06824,
+     0.07447
+    ],
+    [
+     0.07683,
+     0.07279,
+     0.07528,
+     0.07965,
+     0.08005,
+     0.07366,
+     0.06557,
+     0.06164,
+     0.02254,
+     0.01192,
+     0.01307,
+     0.00989,
+     0.00941,
+     0.0104,
+     0.00883,
+     0.00842,
+     0.01137,
+     0.0319,
+     0.08005,
+     0.08534,
+     0.07445,
+     0.07288,
+     0.07425,
+     0.07534
+    ],
+    [
+     0.07511,
+     0.07292,
+     0.06986,
+     0.07308,
+     0.07077,
+     0.06976,
+     0.06591,
+     0.06019,
+     0.04179,
+     0.03509,
+     0.03304,
+     0.02851,
+     0.02814,
+     0.02904,
+     0.03309,
+     0.02751,
+     0.0309,
+     0.04387,
+     0.08661,
+     0.0898,
+     0.08491,
+     0.08093,
+     0.07601,
+     0.06997
+    ],
+    [
+     0.07229,
+     0.07299,
+     0.07007,
+     0.07067,
+     0.06764,
+     0.06754,
+     0.07053,
+     0.06717,
+     0.06395,
+     0.0572,
+     0.05831,
+     0.056,
+     0.05184,
+     0.04767,
+     0.04745,
+     0.04967,
+     0.15366,
+     0.27893,
+     0.32392,
+     0.33208,
+     0.20503,
+     0.08483,
+     0.08116,
+     0.07473
+    ],
+    [
+     0.08732,
+     0.08831,
+     0.0851,
+     0.08143,
+     0.0811,
+     0.08152,
+     0.07799,
+     0.06924,
+     0.06274,
+     0.06161,
+     0.06137,
+     0.06079,
+     0.06072,
+     0.06048,
+     0.06076,
+     0.06416,
+     0.0771,
+     0.92495,
+     1.06977,
+     0.90803,
+     0.98482,
+     0.87731,
+     0.86598,
+     0.09004
+    ],
+    [
+     0.0895,
+     0.08738,
+     0.08586,
+     0.08227,
+     0.08107,
+     0.08389,
+     0.08136,
+     0.06822,
+     0.06103,
+     0.05708,
+     0.05509,
+     0.05482,
+     0.05464,
+     0.05609,
+     0.05352,
+     0.05166,
+     0.06833,
+     0.1319,
+     0.45008,
+     0.58179,
+     0.31041,
+     0.1507,
+     0.15015,
+     0.09524
+    ],
+    [
+     0.08611,
+     0.0867,
+     0.08338,
+     0.07929,
+     0.07926,
+     0.0793,
+     0.08352,
+     0.07352,
+     0.06354,
+     0.05783,
+     0.05669,
+     0.05495,
+     0.05426,
+     0.05365,
+     0.05328,
+     0.05301,
+     0.05876,
+     0.18699,
+     0.19228,
+     0.09085,
+     0.08707,
+     0.08127,
+     0.08782,
+     0.08869
+    ],
+    [
+     0.08346,
+     0.08219,
+     0.08058,
+     0.0795,
+     0.08362,
+     0.08531,
+     0.08184,
+     0.072,
+     0.06213,
+     0.05949,
+     0.05727,
+     0.05497,
+     0.05359,
+     0.04752,
+     0.04891,
+     0.06325,
+     0.09005,
+     0.0924,
+     0.08668,
+     0.08465,
+     0.08364,
+     0.08552,
+     0.08659,
+     0.08948
+    ],
+    [
+     0.08573,
+     0.08398,
+     0.08086,
+     0.08149,
+     0.08359,
+     0.08613,
+     0.09598,
+     0.08016,
+     0.07105,
+     0.06689,
+     0.06459,
+     0.06097,
+     0.05717,
+     0.05757,
+     0.05668,
+     0.06727,
+     0.09171,
+     0.09652,
+     0.09579,
+     0.08879,
+     0.08754,
+     0.08713,
+     0.08866,
+     0.08894
+    ]
+   ],
+   "weekend": [
+    [
+     0.08792,
+     0.08852,
+     0.08661,
+     0.08537,
+     0.08426,
+     0.08536,
+     0.08795,
+     0.07957,
+     0.06564,
+     0.05589,
+     0.0543,
+     0.05304,
+     0.05338,
+     0.04837,
+     0.05236,
+     0.05424,
+     0.07901,
+     0.10422,
+     0.09381,
+     0.08672,
+     0.08563,
+     0.08485,
+     0.08829,
+     0.08504
+    ],
+    [
+     0.08448,
+     0.08552,
+     0.08416,
+     0.084,
+     0.08305,
+     0.08286,
+     0.07916,
+     0.06995,
+     0.04777,
+     0.02701,
+     0.02698,
+     0.02471,
+     0.02438,
+     0.02206,
+     0.02163,
+     0.01897,
+     0.0569,
+     0.0978,
+     0.10054,
+     0.08893,
+     0.08595,
+     0.0829,
+     0.08387,
+     0.09055
+    ],
+    [
+     0.06682,
+     0.06807,
+     0.0694,
+     0.07095,
+     0.06993,
+     0.0699,
+     0.06739,
+     0.0609,
+     0.00631,
+     0.00182,
+     0.00461,
+     0.00285,
+     0.00061,
+     0.0006,
+     0.0,
+     0.00379,
+     0.01635,
+     0.03141,
+     0.07065,
+     0.07324,
+     0.07084,
+     0.07038,
+     0.06856,
+     0.06483
+    ],
+    [
+     0.06427,
+     0.06499,
+     0.07209,
+     0.07629,
+     0.07264,
+     0.07376,
+     0.06706,
+     0.0449,
+     0.00154,
+     0.00179,
+     0.00747,
+     0.00441,
+     0.00073,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.00265,
+     0.06835,
+     0.07814,
+     0.06634,
+     0.06723,
+     0.06586,
+     0.06798
+    ],
+    [
+     0.06801,
+     0.06965,
+     0.07952,
+     0.08079,
+     0.07581,
+     0.06927,
+     0.06728,
+     0.03193,
+     0.0019,
+     0.0045,
+     0.00425,
+     0.00496,
+     0.00448,
+     0.00382,
+     0.0,
+     0.0,
+     0.0,
+     0.00064,
+     0.05685,
+     0.08351,
+     0.07637,
+     0.07419,
+     0.07407,
+     0.07553
+    ],
+    [
+     0.071,
+     0.06893,
+     0.06895,
+     0.06932,
+     0.06655,
+     0.08271,
+     0.06881,
+     0.05684,
+     0.0176,
+     0.01304,
+     0.01753,
+     0.01111,
+     0.01211,
+     0.00687,
+     0.00865,
+     0.00881,
+     0.00969,
+     0.02097,
+     0.06995,
+     0.09321,
+     0.08072,
+     0.07659,
+     0.07591,
+     0.07198
+    ],
+    [
+     0.07928,
+     0.07255,
+     0.07013,
+     0.06974,
+     0.06708,
+     0.06781,
+     0.06422,
+     0.06132,
+     0.02456,
+     0.02435,
+     0.02633,
+     0.02213,
+     0.02454,
+     0.02563,
+     0.01982,
+     0.02368,
+     0.0237,
+     0.04326,
+     0.09613,
+     0.11821,
+     0.10281,
+     0.0811,
+     0.07838,
+     0.07501
+    ],
+    [
+     0.08631,
+     0.08445,
+     0.08601,
+     0.07943,
+     0.07644,
+     0.07652,
+     0.07069,
+     0.05979,
+     0.04213,
+     0.03865,
+     0.03821,
+     0.0383,
+     0.03509,
+     0.03474,
+     0.03532,
+     0.04175,
+     0.05662,
+     0.86831,
+     0.92278,
+     0.94579,
+     1.01965,
+     0.93295,
+     0.92497,
+     0.08877
+    ],
+    [
+     0.07913,
+     0.08202,
+     0.08026,
+     0.07646,
+     0.07552,
+     0.07546,
+     0.07337,
+     0.06045,
+     0.03583,
+     0.02334,
+     0.02032,
+     0.0195,
+     0.01662,
+     0.01862,
+     0.0228,
+     0.02548,
+     0.23986,
+     0.53462,
+     0.93239,
+     0.88646,
+     0.54089,
+     0.1627,
+     0.16319,
+     0.09235
+    ],
+    [
+     0.07863,
+     0.07956,
+     0.07611,
+     0.07677,
+     0.07519,
+     0.0744,
+     0.07206,
+     0.06484,
+     0.04318,
+     0.02105,
+     0.02103,
+     0.02032,
+     0.01996,
+     0.01907,
+     0.02061,
+     0.02169,
+     0.03777,
+     0.07915,
+     0.08344,
+     0.08187,
+     0.07902,
+     0.07675,
+     0.08859,
+     0.08296
+    ],
+    [
+     0.07998,
+     0.07661,
+     0.07518,
+     0.07426,
+     0.07499,
+     0.07633,
+     0.07635,
+     0.05605,
+     0.03586,
+     0.02657,
+     0.02414,
+     0.02135,
+     0.02095,
+     0.02048,
+     0.02129,
+     0.03985,
+     0.07732,
+     0.08889,
+     0.08446,
+     0.08098,
+     0.07881,
+     0.07835,
+     0.08267,
+     0.07834
+    ],
+    [
+     0.07965,
+     0.07806,
+     0.07451,
+     0.07076,
+     0.06979,
+     0.07172,
+     0.07476,
+     0.06486,
+     0.04241,
+     0.02213,
+     0.02098,
+     0.0191,
+     0.02033,
+     0.01462,
+     0.01401,
+     0.0405,
+     0.08113,
+     0.08633,
+     0.08419,
+     0.08009,
+     0.07889,
+     0.07424,
+     0.07553,
+     0.07449
+    ]
+   ]
+  },
+  "acc_plus_adder_per_kwh": 0.0,
+  "acc_plus_schedule_residential": {
+   "2023": 0.0,
+   "2024": 0.0,
+   "2025": 0.0,
+   "2026": 0.0,
+   "2027": 0.0,
+   "2028": 0.0
+  },
+  "cca_export_adder_per_kwh": 0.0,
+  "net_surplus_compensation_per_kwh": 0.01702,
+  "nonbypassable_charges_per_kwh": 0.02099,
+  "true_up": "annual",
+  "notes": "WHAT THESE NUMBERS ARE. Under the Net Billing Tariff (SDG&E brands it the Solar Billing Plan; everyone else says NEM 3.0) exported energy is credited at hourly Avoided Cost Calculator values, not at the retail rate. The export_rates matrices are SDG&E's own published export prices for the NBT26 vintage, calendar year 2026, taken from its CPUC Resolution E-5301 machine-readable MIDAS compliance file, which already carries the CPUC-mandated month / day-type / hour aggregation in its ValueName field - 576 distinct cells per component with zero conflicting values, so nothing was interpolated or re-averaged. Hour index is hour-BEGINNING 0-23 in Pacific PREVAILING time, DST aware; the weekend table applies on Saturdays, Sundays and the eight holidays. Each value is the TOTAL credit = generation component + delivery component; a CCA customer receives the delivery component from SDG&E and the generation component from the CCA, and the sum is unchanged. The split is preserved in data/export/sdge-nbt26.json. SHAPE. Peak: August weekday hour 18 (6-7 p.m.) = $1.06977/kWh, hour 20 = $0.98482, hour 17 = $0.92495; August weekend hour 20 = $1.01965. Trough: spring weekend midday reaches $0.00000. The midday mean over hours 9-15 is $0.04202 weekday and $0.02037 weekend, against an unweighted all-hours mean of $0.09274 weekday and $0.08395 weekend. Use the midday figure as the anchor for unpaired solar: the all-hours mean is carried by a handful of extreme August-evening cells a PV array alone never reaches. Exporting a midday kWh earns roughly a tenth of what importing one costs on TOU-DR1, so self-consumption and evening battery discharge carry essentially all of the value. SDG&E's curve tracks PG&E's and SCE's closely - September weekday hour 19 is $0.58179 here against PG&E's $0.59505 - which is expected, since all three derive from the same 2024 ACC under one CPUC methodology. NO ACC PLUS ADDER. This is the single biggest difference between SDG&E and the other two California IOUs for a solar customer, and it is easy to miss. CPUC D.22-12-056 created a glide-path adder paid on top of the ACC export price - PG&E residential gets $0.0088/kWh for a 2026 vintage, SCE gets $0.016 - but the decision granted it ONLY to PG&E and SCE residential customers. SDG&E customers receive NOTHING. acc_plus_adder_per_kwh is therefore a real 0.0, not a placeholder. Confidence MEDIUM rather than HIGH: SDG&E's tariff viewer is a JavaScript application from which the Schedule NBT PDF could not be retrieved, so this rests on the decision text plus the complete absence of any adder provision in SDG&E's own Solar Billing Plan materials. THE NINE-YEAR LOCK-IN FREEZES A TRAJECTORY, NOT A FLAT TABLE. A 2026 vintage locks NBT26 for nine years, but that vintage specifies a different 12x24 matrix for every year: the generation component decays after 2028 while the delivery component grows. This file carries the 2026 matrix only. The direction of the error is documented in detail in data/tariffs/sce.json nbt.notes and is the same here - applying one year's matrix flat OVERSTATES summer-evening battery export revenue in later years while understating overnight and shoulder hours. A future revision should carry all nine years. NETTING AND TRUE-UP. Netting is HOURLY, not monthly: each exported kWh earns that hour's price while each imported kWh in the same hour is charged the full retail TOU rate. They do not cancel. Surplus credit rolls forward and is settled at the annual true-up. NET SURPLUS COMPENSATION. $0.01702/kWh as of September 2026 - the lowest of the three IOUs (PG&E $0.02751, SCE $0.01825 bundled). Computed on the same CAISO day-ahead DLAP basis and recalculated monthly, so it drifts. Confidence MEDIUM-HIGH: single source. Modelling an oversized array's surplus at this rate still understates the penalty, because the true-up debits the surplus kWh at an average retail export compensation rate several times higher before crediting them at the NSC rate. A separate Renewable Attribute Adder exists but SDG&E requires more than 12,000 surplus kWh a year and WREGIS registration to make it worthwhile, which no residential system reaches. NON-BYPASSABLE CHARGES. $0.02099/kWh on every IMPORTED kWh - nearly double PG&E's $0.01230 - made up of Public Purpose Programs $0.01515, Nuclear Decommissioning $0.00000, Competition Transition Charge -$0.00007 (currently negative) and Schedule WF-NBC + DWR-BC $0.00591. DO NOT ADD THIS ON TOP OF THE RATE TABLES - it is already inside them, as line items in each schedule's UDC breakdown. It is recorded separately only to show which part of the import price solar can never escape. With no ACC Plus adder to offset it, an SDG&E solar customer has no route around it at all."
+ },
+ "incentives": {
+  "federal_itc_residential_pct": 0.0,
+  "federal_itc_note": "The Section 25D Residential Clean Energy Credit is TERMINATED for a homeowner-owned system installed in 2026. P.L. 119-21 (One Big Beautiful Bill Act) section 70506, enacted 2025-07-04, amended 26 U.S.C. 25D(h) so that the credit 'shall not apply with respect to any expenditures made after December 31, 2025'. It is an EXPENDITURE test and 25D(e)(8)(A) treats the expenditure as made when the original installation is completed, so prepaying in 2025 does not preserve it if installation finishes in 2026 (IRS FS-2025-05). Model 25D at 0%. The only federal credit still reachable in 2026 is Section 48E at 30%, claimed by a THIRD-PARTY OWNER under a lease or PPA; the homeowner sees it only as lower lease or PPA pricing.",
+  "sgip_residential_per_kwh": 0.0,
+  "sgip_note": "SGIP is closed; model $0. CPUC D.25-12-003 stopped all ratepayer-funded SGIP budgets from accepting applications on 2025-12-30 and cancelled every waitlisted application at 2025-12-31, because Pub. Util. Code 379.6 authorised administration only 'until January 1, 2026'. The only surviving path is RSSE (Residential Solar and Storage Equity), which is income-qualified and heavily oversubscribed.",
+  "other": [
+   {
+    "name": "Federal Section 48E ITC via third-party ownership (lease or PPA)",
+    "value": "30% base, commonly 40-44% realised with adders",
+    "note": "Claimed by the system owner, not the homeowner; reaches the customer only as lower lease or PPA pricing."
+   },
+   {
+    "name": "SDG&E Base Services Charge (a cost, not an incentive)",
+    "value": "$0.79343/day standard; $0.39688/day FERA or deed-restricted affordable housing; $0.19713/day CARE",
+    "note": "Effective October 2025, the CPUC income-graduated fixed charge under AB 205 and D.24-05-028. It replaced both the residential minimum bill and the old $16/month EV-TOU-5 and TOU-ELEC basic service fee. Unavoidable, not offset by solar exports, so it floors the bill at about $24/month before a single kWh."
+   },
+   {
+    "name": "NO ACC Plus export adder in SDG&E territory",
+    "value": "$0.00/kWh",
+    "note": "THE MOST IMPORTANT NEGATIVE FACT IN THIS FILE. PG&E residential exporters get $0.0088/kWh and SCE's get $0.016/kWh on every exported kWh for a 2026 vintage, locked nine years. D.22-12-056 gave SDG&E customers none. An SDG&E solar system therefore earns strictly the ACC price and nothing more, and has no credit that can offset its (unusually high) non-bypassable charges."
+   },
+   {
+    "name": "California Climate Credit",
+    "value": "$49.36 twice a year = $98.72/year",
+    "note": "The largest of the three IOUs' electric credits. Now on the AUGUST and SEPTEMBER bills, moved from April/October by the CPUC. A separate $32.58 gas credit arrives in April 2026 and moves to February from 2027."
+   },
+   {
+    "name": "CEA Clean Impact Residential Rate Relief Credit",
+    "value": "-$0.03871/kWh, 2026-02-01 to 2026-12-31",
+    "note": "Applies ONLY to CEA's opt-down Clean Impact tier (50% renewable), not to the default Clean Impact Plus. It is large enough to flip CEA from about 7% more expensive than SDG&E to about 2% cheaper, so for a CEA customer the tier choice is worth more than most system decisions."
+   },
+   {
+    "name": "SDG&E Franchise Fee Differential, City of San Diego",
+    "value": "+5.78% of the bill",
+    "note": "A separate line item for every customer inside the City of San Diego, bundled and CCA alike. It is NOT in the per-kWh rate tables in this file, because SDG&E's own published Total Rates Tables exclude it. Add it on top when reproducing a City of San Diego bill."
+   }
+  ]
+ }
+}
