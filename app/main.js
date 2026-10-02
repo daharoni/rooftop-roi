@@ -53,7 +53,7 @@ const NGOM_COST_DEFAULT = 600;   // one-time metering charge; overridden from th
 /** Every core module, or null where it could not be loaded. */
 const Core = {
   greenbutton: null, flexload: null, tariff: null, pv: null, weather: null,
-  geocode: null, engine: null, finance: null, optimizer: null,
+  geocode: null, engine: null, finance: null, optimizer: null, sizing: null,
 };
 
 async function loadCore() {
@@ -62,6 +62,7 @@ async function loadCore() {
     tariff: "../core/tariff.js", pv: "../core/pv.js", weather: "../core/weather.js",
     geocode: "../core/geocode.js", engine: "../core/engine.js",
     finance: "../core/finance.js", optimizer: "../core/optimizer.js",
+    sizing: "../core/sizing.js",
   };
   await Promise.all(Object.entries(wanted).map(async ([key, path]) => {
     try { Core[key] = await import(path); }
@@ -370,6 +371,10 @@ function repriceAndRender() {
     };
     ctx.breakEvenPerW = Core.finance.breakEven(sim, finEff(), "costPerW");
     ctx.breakEvenPerKwh = Core.finance.breakEven(sim, finEff(), "costPerKwh");
+    // The same system bought outright, so a loan or lease tile can state the
+    // financing decision as a dollar gap rather than leave it to the IRR/APR hint.
+    ctx.cashNpv = f.financing.mode === "cash" ? null
+      : Core.finance.evaluate(sim, Object.assign({}, finEff(), { financing: Object.assign({}, f.financing, { mode: "cash" }) })).npv;
   }
 
   clearStale();
@@ -668,6 +673,7 @@ const ACTIONS = {
   setPlan: (id) => State.setAt("tariff.planId", id, "sim"),
   setStrategy: (v) => State.setAt("system.strategy", v, "sim"),
   setFinancing: (mode) => State.setAt("fin.financing.mode", mode, "finance"),
+  setMaxPanels: (n) => State.setAt("system.maxPanels", n, "sim"),
   setSite: (site) => State.update((s) => Object.assign(s.site, site), "site"),
   setPlanes: (planes) => State.update((s) => { s.roof.planes = planes; }, "roof"),
   /**
@@ -885,6 +891,8 @@ async function onDemo() {
 /** Everything that happens once there is a LoadSet, however it arrived. */
 async function adoptLoadSet(loadSet, zipHint) {
   ctx.loadSet = loadSet;
+  // What SCE will size against: the metered kWh of the most recent 12 months.
+  ctx.recentAnnualKwh = Core.sizing ? Core.sizing.recentAnnualKwh(loadSet) : null;
   const meta = loadSet.meta || {};
 
   State.update((s) => {
@@ -1141,6 +1149,7 @@ async function boot() {
   const saved = await State.readLoadSet();
   if (saved && saved.ts && saved.ts.length) {
     ctx.loadSet = saved;
+    ctx.recentAnnualKwh = Core.sizing ? Core.sizing.recentAnnualKwh(saved) : null;
     State.update((s) => { s.load = { meta: saved.meta || {} }; }, "silent");
     if (Core.flexload) {
       try {

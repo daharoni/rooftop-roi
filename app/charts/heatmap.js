@@ -48,7 +48,9 @@ function cellLookup(priced) {
   return (p, b) => byKey.get(p + "|" + b);
 }
 
-export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick }) {
+export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick, cap }) {
+  // `cap`, when given, is the panel count at SCE's 150% line; columns beyond it
+  // are drawn faded with a rule at the edge, since SCE would refuse them.
   const host = $(hostId);
   if (!host || !priced || !priced.cells || !priced.cells.length) return;
 
@@ -74,13 +76,16 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
       const v = g(cell);
       const isBest = cell.panels === priced.best.panels && cell.batteries === priced.best.batteries;
       const isSel = selected && cell.panels === selected.panels && cell.batteries === selected.batteries;
-      host.appendChild(el("button.heat-cell", {
+      const over = cap !== null && cap !== undefined && p > cap;
+      const edge = over && !panels.some((q) => q > cap && q < p);
+      host.appendChild(el("button.heat-cell" + (over ? ".over-cap" : "") + (edge ? ".cap-edge" : ""), {
         type: "button",
         style: `background:${colorFor(v)}`,
         "data-p": p, "data-b": b,
         "data-best": isBest ? "1" : null,
         "data-sel": isSel ? "1" : null,
-        title: `${p} panels, ${plural(b, "battery", "batteries")} — NPV ${fmtMoney(cell.npv)}, payback ${fmtYears(cell.payback)}`,
+        title: `${p} panels, ${plural(b, "battery", "batteries")} — NPV ${fmtMoney(cell.npv)}, payback ${fmtYears(cell.payback)}`
+          + (over ? " — above SCE's 150% sizing line" : ""),
         "aria-label": `${p} panels, ${plural(b, "battery", "batteries")}, NPV ${fmtMoney(cell.npv)}`,
         on: { click: () => onPick && onPick(p, b) },
       }));
