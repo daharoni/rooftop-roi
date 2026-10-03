@@ -123,7 +123,7 @@ export function hardware(open = false) {
   return { group: "Hardware", open, items: [
     item.panelW(),
     { path: "system.acFactor", kind: "range", label: "Panel AC rating vs nameplate", min: 0.8, max: 0.95, step: 0.01, pct: 0,
-      reason: "ui",
+      reason: "ui", show: (s) => s.site.utilityId === "sce",
       footnote: () => "PTC rating × inverter efficiency. Only used for the SCE sizing line: SCE counts CEC-AC kW × 1,728 kWh/yr "
         + "against your last 12 months and refuses an application above 150%." },
     { path: "system.battKWh", kind: "range", label: "Battery size, usable", min: 5, max: 20, step: 0.5, unit: " kWh each" },

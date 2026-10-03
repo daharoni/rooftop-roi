@@ -123,38 +123,99 @@ export function memoryCache(map = new Map()) {
   };
 }
 
-const DB_NAME = "rooftop-roi";
+// ---------------------------------------------------------------------------
+// The one IndexedDB opener for the whole app.
+//
+// app/state.js keeps the LoadSet in store `loads`; this module keeps weather in store
+// `weather`.  Both live in database `rooftop-roi`, and IndexedDB only lets
+// `onupgradeneeded` create stores, so the two modules MUST open it through the same
+// function at the same version: two openers at version 1 meant whichever ran first
+// created only its own store and the other one never existed (the weather cache
+// silently missed on every read).  Version 2 forces that upgrade on every browser
+// that already has the broken version-1 database.
+// ---------------------------------------------------------------------------
+
+export const SHARED_DB_NAME = "rooftop-roi";
+export const SHARED_DB_VERSION = 2;
+export const SHARED_DB_STORES = Object.freeze(["loads", "weather"]);
+
+const DB_NAME = SHARED_DB_NAME;
 const DB_STORE = "weather";
+
+const sharedConnections = new Map(); // dbName -> Promise<IDBDatabase>
+
+/**
+ * Open (once per page) the shared database with every store present.  The connection
+ * is cached; it closes itself when another tab upgrades or deletes the database
+ * (`onversionchange`), and the next call opens a fresh one.  Rejects when IndexedDB is
+ * missing or the open is blocked, so callers can fall back to memory.
+ */
+export function openSharedDb({ dbName = SHARED_DB_NAME, idb } = {}) {
+  const factory = idb || (typeof indexedDB !== "undefined" ? indexedDB : null);
+  if (!factory) return Promise.reject(new Error("IndexedDB unavailable"));
+  if (sharedConnections.has(dbName)) return sharedConnections.get(dbName);
+  const p = new Promise((resolve, reject) => {
+    let req;
+    try {
+      req = factory.open(dbName, SHARED_DB_VERSION);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      for (const name of SHARED_DB_STORES) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {
+        // Another tab wants to upgrade or delete ("Forget my data"): get out of its way.
+        try { db.close(); } catch { /* already closed */ }
+        sharedConnections.delete(dbName);
+      };
+      db.onclose = () => sharedConnections.delete(dbName);
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error);
+    // An older tab still holds version 1 open and has not closed it.
+    req.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another open tab"));
+  });
+  sharedConnections.set(dbName, p);
+  p.catch(() => sharedConnections.delete(dbName));
+  return p;
+}
+
+/** Close and forget the cached connection (before deleteDatabase). */
+export async function closeSharedDb(dbName = SHARED_DB_NAME) {
+  const p = sharedConnections.get(dbName);
+  sharedConnections.delete(dbName);
+  if (!p) return;
+  try { (await p).close(); } catch { /* never opened */ }
+}
 
 /** IndexedDB-backed cache (browsers). Falls back to memory if IndexedDB is unusable. */
 export function indexedDbCache({ dbName = DB_NAME, storeName = DB_STORE } = {}) {
-  let dbPromise = null;
-  const open = () => {
-    if (dbPromise) return dbPromise;
-    dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(dbName, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(storeName)) db.createObjectStore(storeName);
-        // The `loads` store belongs to app/state.js; create it only if we are making the
-        // database from scratch so the two modules can share one database version.
-        if (!db.objectStoreNames.contains("loads")) db.createObjectStore("loads");
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-      req.onblocked = () => reject(new Error("IndexedDB blocked"));
-    });
-    return dbPromise;
-  };
-  const tx = async (mode, fn) => {
+  const open = () => openSharedDb({ dbName });
+  const tx = async (mode, fn, retry = true) => {
     const db = await open();
-    return new Promise((resolve, reject) => {
-      const t = db.transaction(storeName, mode);
-      const req = fn(t.objectStore(storeName));
-      t.onabort = t.onerror = () => reject(t.error);
-      if (req) req.onsuccess = () => resolve(req.result);
-      else t.oncomplete = () => resolve(undefined);
-    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const t = db.transaction(storeName, mode);
+        const req = fn(t.objectStore(storeName));
+        t.onabort = t.onerror = () => reject(t.error);
+        if (req) req.onsuccess = () => resolve(req.result);
+        else t.oncomplete = () => resolve(undefined);
+      });
+    } catch (err) {
+      // The cached connection was closed under us (another tab upgraded): reopen once.
+      if (retry && err && err.name === "InvalidStateError") {
+        sharedConnections.delete(dbName);
+        return tx(mode, fn, false);
+      }
+      throw err;
+    }
   };
   return {
     kind: "indexeddb",
@@ -666,6 +727,11 @@ export default {
   fetchYears,
   fileCache,
   indexedDbCache,
+  openSharedDb,
+  closeSharedDb,
+  SHARED_DB_NAME,
+  SHARED_DB_VERSION,
+  SHARED_DB_STORES,
   latestCompleteYear,
   memoryCache,
   offsetFromLongitude,

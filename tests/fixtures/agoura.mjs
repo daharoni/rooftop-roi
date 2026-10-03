@@ -27,6 +27,10 @@ const read = (p) => JSON.parse(fs.readFileSync(path.join(ROOT, p), "utf8"));
 export const RAW_LOAD = read("tests/fixtures/load-agoura-hills.json");
 export const SOLAR = read("tests/fixtures/solar-agoura-hills.json");
 export const TARIFF = read("data/tariffs/sce.json");
+// Frozen copy of sce.json at the 2026-06-01 rates the prototype's reference numbers were
+// computed on.  SCE repriced every residential TOU plan on 2026-10-01, so anything pinned
+// to REFERENCE must use this, not the live file.
+export const TARIFF_FROZEN = read("tests/fixtures/sce-2026-06-01.json");
 
 /** LoadSet per docs/ARCHITECTURE.md - the whole-house series, EV included in it. */
 export function loadSet() {

@@ -4,16 +4,37 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 9 * * *"   # nightly, live network tests
 
+# Actions are pinned by major tag (not SHA); consider pinning to SHAs later.
 jobs:
   test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      SKIP_LIVE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run tests
+        run: npm test
+      - name: Validate tariff library (strict)
+        run: npm run validate
+      - name: Worker bundle is committed and current
+        run: |
+          npm run bundle
+          git diff --exit-code app/worker-bundle.js
+
+  live:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Run engine, parser, solar and finance tests
-        run: node --test
-      - name: Validate tariff library
-        run: node tests/validate-tariffs.mjs
+      - name: Live network tests
+        run: npm run test:live

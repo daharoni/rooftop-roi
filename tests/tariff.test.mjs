@@ -5,8 +5,11 @@
  *
  * The load-bearing assertion in this file is the SCE bill replay: data/tariffs/sce.json
  * was calibrated against a real customer bill, and a pure-tariff calculation
- * (kWh by period x rates + fixed + surcharges - climate credit) must still land on
- * $749.41 against the actual $749.37.  If a rate edit breaks that, the edit is wrong.
+ * (kWh by period x rates + fixed + surcharges - climate credit) must land on $749.41
+ * against the actual $749.37.  The bill's own printed prices are applied as an explicit
+ * calibration override (meta.bill_validation.bill_rates via tariff.fromBill), because
+ * the plan itself now carries SCE's later rates.  Golden rates (tests/golden-rates.json)
+ * pin individual published values, so any rate edit is a deliberate golden update.
  * ========================================================================== */
 
 import { test } from "node:test";
@@ -408,10 +411,20 @@ test("fromBill round-trips the user's own numbers", () => {
 
 /* --------------------------------------------------------------- SCE bill replay */
 
+/** The SCE tariff with the reference bill's own printed prices substituted. */
+function sceAsBilled() {
+  const bv = utilities.sce.meta.bill_validation;
+  const br = bv.bill_rates;
+  assert.ok(br, "sce.json lost meta.bill_validation.bill_rates (the calibration override)");
+  return T.fromBill({ utilityId: "sce", planId: bv.plan, providerId: br.provider,
+                      periods: br.rates, fixedPerDay: br.fixed_charge_per_day,
+                      label: "reference bill replay" }, lib);
+}
+
 test("SCE bill replay: pure-tariff calculation reproduces $749.41", () => {
-  const t = utilities.sce;
-  const bv = t.meta.bill_validation;
+  const bv = utilities.sce.meta.bill_validation;
   assert.ok(bv, "sce.json lost meta.bill_validation");
+  const t = sceAsBilled();
 
   const p = T.plan(t, bv.plan);
   const prov = bv.provider;
@@ -436,17 +449,44 @@ test("SCE bill replay: pure-tariff calculation reproduces $749.41", () => {
   close(total, bv.total_new_charges, 0.05, "actual bill");
   close(total, 749.41, 0.01, "the headline number");
 
-  // The individual rates the bill printed must still be in the file verbatim.
+  // The prices the bill printed, as the override carries them.
   close(p.rates.summer.on[prov], 0.66603, 1e-9, "summer on");
   close(p.rates.summer.mid[prov], 0.43183, 1e-9, "summer mid");
   close(p.rates.summer.off[prov], 0.28907, 1e-9, "summer off");
-  close(T.fixedChargePerDay(t, p), 0.76862, 1e-9, "base services charge");
+  close(T.fixedChargePerDay(t, p), 0.76862, 1e-9, "base services charge on the bill");
+
+  // The shipped plan is NOT the bill: it carries SCE's published fixed charge.
+  const shipped = T.plan(utilities.sce, bv.plan);
+  close(T.fixedChargePerDay(utilities.sce, shipped), 0.79343, 1e-9,
+        "shipped plan uses the published $24.15/mo Base Services Charge");
 
   // And the period lookup agrees with how the bill was read: a summer weekday
   // at 5 p.m. is on-peak, at noon off-peak, a summer Sunday at 5 p.m. mid-peak.
   assert.equal(T.periodAt(p, "2026-07-29", 17).period, "on");     // Wednesday
   assert.equal(T.periodAt(p, "2026-07-29", 12).period, "off");
   assert.equal(T.periodAt(p, "2026-08-02", 17).period, "mid");    // Sunday
+});
+
+/* ---------------------------------------------------------------- golden rates */
+
+test("golden rates: every spot-checked published value is in the files verbatim", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const golden = JSON.parse(await readFile(join(HERE, "golden-rates.json"), "utf8"));
+  assert.ok(golden.rates.length >= 30, "golden set shrank to " + golden.rates.length);
+  for (const g of golden.rates) {
+    const t = utilities[g.utility];
+    assert.ok(t, "golden: unknown utility " + g.utility);
+    assert.ok(g.source && g.effective, "golden row lacks source/effective: " + JSON.stringify(g));
+    const p = T.plan(t, g.plan);
+    assert.ok(p, "golden: unknown plan " + g.utility + "/" + g.plan);
+    const tag = g.utility + "/" + g.plan + " " + g.field;
+    let v;
+    if (g.field === "fixed_charge_per_day") v = p.fixed_charge_per_day;
+    else if (g.field === "baseline_credit_per_kwh") v = p.baseline_credit_per_kwh;
+    else v = p.rates[g.season][g.period][g.provider];
+    assert.equal(v, g.value, "golden " + tag + " " + (g.season || "") + "." + (g.period || "") +
+      "." + (g.provider || "") + " (" + g.source + ", eff. " + g.effective + ")");
+  }
 });
 
 /* -------------------------------------------------------------------- describe */
@@ -495,4 +535,41 @@ test("every file records provenance", () => {
     assert.ok(t.meta.confidence, id + " has no meta.confidence");
     assert.ok(t.meta.notes && t.meta.notes.length > 400, id + " meta.notes is too thin");
   }
+});
+
+test("per-utility NBT terms: ACC Plus, ARECR, true-up month, baseline regions and credit %", () => {
+  const want = { sce: 0.016, pge: 0.0088, sdge: 0 };
+  for (const id of T.UTILITY_IDS) {
+    const t = utilities[id];
+    assert.equal(typeof t.nbt.acc_plus_adder_per_kwh, "number", id + " carries acc_plus_adder_per_kwh");
+    assert.equal(T.accPlusAdder(t), want[id], id + " ACC Plus adder");
+    assert.ok(T.arecr(t) > 0.03 && T.arecr(t) < 0.5, id + " ARECR");
+    assert.ok(["high", "medium", "low"].includes(t.nbt.eec_adjustment_source._confidence), id + " ARECR confidence");
+    assert.equal(T.trueUpMonth(t), 4, id + " default true-up month");
+    const regions = T.baselineRegionList(t);
+    assert.ok(regions.length > 0 && regions.filter((r) => r.isDefault).length === 1, id + " one default region");
+    const def = T.defaultBaselineRegion(t);
+    assert.deepEqual([T.baselineAllocation(t, def).summer, T.baselineAllocation(t, def).winter],
+                     [t.meta.baseline_kwh_per_day.summer, t.meta.baseline_kwh_per_day.winter],
+                     id + " default region matches meta.baseline_kwh_per_day");
+    for (const p of t.plans) {
+      const pct = id === "sdge" && (p.id === "TOU-DR1" || p.id === "TOU-DR2") ? 1.3 : 1.0;
+      assert.equal(T.baselineCreditPct(t, p), pct, id + " " + p.id + " baseline_credit_pct");
+    }
+  }
+  assert.equal(T.arecr(utilities.sce), 0.05981, "SCE EEC Adjustment, September 2026");
+  assert.equal(T.arecr(utilities.sdge), 0.11001, "SDG&E EEC Adjustment, September 2026");
+});
+
+test("validate() makes the NBT terms errors, not warnings", () => {
+  for (const [path, bad] of [["acc_plus_adder_per_kwh", undefined], ["eec_adjustment_per_kwh", undefined],
+                             ["eec_adjustment_per_kwh", 0], ["true_up_month", 13], ["true_up_month", undefined]]) {
+    const t = JSON.parse(JSON.stringify(utilities.pge));
+    if (bad === undefined) delete t.nbt[path]; else t.nbt[path] = bad;
+    const r = T.validate(t);
+    assert.ok(!r.ok && r.errors.some((e) => e.includes(path)), path + "=" + bad + " is an error");
+  }
+  const t = JSON.parse(JSON.stringify(utilities.sdge));
+  delete t.plans[0].baseline_credit_pct;
+  assert.ok(T.validate(t).errors.some((e) => e.includes("baseline_credit_pct")), "baseline_credit_pct required");
 });

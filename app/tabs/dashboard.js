@@ -17,7 +17,7 @@ import { OBJ_LABEL, renderHeatmap } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
 import { renderCashflow } from "../charts/money.js";
 import * as K from "../ui/knobs.js";
-import { sceCap } from "../../core/sizing.js";
+import { sizingCapFor } from "../../core/sizing.js";
 
 export const id = "dashboard";
 export const label = "Dashboard";
@@ -309,10 +309,9 @@ function outlayTile(mode, fin, f, cell, ctx) {
     d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr${vsCash}` };
 }
 
-/** SCE's sizing lines for this household, or null before any meter data is loaded. */
+/** SCE's sizing lines for this household; null for other utilities or before any meter data is loaded. */
 function capFor(state, ctx) {
-  if (!ctx.recentAnnualKwh) return null;
-  return sceCap({ annualKwh: ctx.recentAnnualKwh, panelW: state.system.panelW, acFactor: state.system.acFactor });
+  return sizingCapFor(state.site.utilityId, ctx.recentAnnualKwh, { panelW: state.system.panelW, acFactor: state.system.acFactor });
 }
 
 function renderCapLine(state, ctx, cap) {

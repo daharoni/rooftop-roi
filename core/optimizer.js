@@ -105,6 +105,10 @@ export function allocationOrder(scn, p, maxPanelsTotal, caps, batteries, cells) 
   return order;
 }
 
+/** Hard caps on the search grid, whatever the caller asks for. */
+export const MAX_SEARCH_PANELS = 200;
+export const MAX_SEARCH_BATTERIES = 20;
+
 /**
  * Sweep total panels x batteries, allocating panels across planes greedily.
  * opts = { maxPanelsTotal, maxBatteries, planeCaps, step, greedyBatteries, onProgress }
@@ -115,7 +119,20 @@ export function searchGrid(ctx, params, opts) {
   let maxPanelsTotal = opts.maxPanelsTotal;
   if (maxPanelsTotal === undefined) maxPanelsTotal = opts.maxPanels;   // older spelling
   if (maxPanelsTotal === undefined) maxPanelsTotal = 60;
-  const maxBatteries = opts.maxBatteries === undefined ? 6 : opts.maxBatteries;
+  let maxBatteries = opts.maxBatteries === undefined ? 6 : opts.maxBatteries;
+  // A crafted share link (`#maxb=100000`) must not hang the worker: the sweep is
+  // (panels + 1) x (batteries + 1) full-year simulations, so both axes are capped.
+  const capAxis = (v, cap, d, name) => {
+    let n = Math.floor(Number(v));
+    if (!Number.isFinite(n) || n < 0) n = d;
+    if (n > cap) {
+      if (typeof console !== "undefined") console.warn(`searchGrid: ${name} ${n} clamped to ${cap}`);
+      n = cap;
+    }
+    return n;
+  };
+  maxPanelsTotal = capAxis(maxPanelsTotal, MAX_SEARCH_PANELS, 60, "maxPanelsTotal");
+  maxBatteries = capAxis(maxBatteries, MAX_SEARCH_BATTERIES, 6, "maxBatteries");
   const step = opts.step || 1;
   const gb = Math.max(0, Math.min(maxBatteries, opts.greedyBatteries === undefined ? 0 : opts.greedyBatteries));
 
@@ -159,7 +176,7 @@ export function searchGrid(ctx, params, opts) {
     baselineSameFlex: b.sameFlex, baselineAsRecorded: b.asRecorded,
     flexShiftOnlySavings: b.asRecorded.bill - b.sameFlex.bill,
     weatherKey: scn.weatherKey,
-    years: ctx.nDays / 365, hours: ctx.N,
+    years: ctx.years !== undefined ? ctx.years : ctx.nDays / 365, hours: ctx.N,
   };
 }
 

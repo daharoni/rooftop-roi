@@ -9,18 +9,21 @@ import assert from "node:assert/strict";
 import { cacheKey } from "../core/weather.js";
 
 import {
-  AMBIGUOUS_ZIP_PREFIXES,
   ATTRIBUTION,
   GeocodeError,
-  IOU_ZIP_PREFIXES,
   PRIVACY_NOTE,
   elevationFor,
   extractZip,
   geocode,
-  utilityForZip,
-  utilityForZipDetailed,
   zipCentroid,
 } from "../core/geocode.js";
+import { coverageForZip } from "../core/coverage.js";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import T from "../core/tariff.js";
+
+const TARIFF_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "data", "tariffs");
+const tariffLib = await T.loadLibrary(TARIFF_DIR);
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -36,49 +39,8 @@ test("extractZip finds a 5-digit ZIP anywhere, ZIP+4 included", () => {
   assert.equal(extractZip("1234"), null);
 });
 
-test("utilityForZip maps the three California IOUs", () => {
-  assert.equal(utilityForZip("91301"), "sce"); // Agoura Hills
-  assert.equal(utilityForZip("90210"), "sce"); // Beverly Hills
-  assert.equal(utilityForZip("92101"), "sdge"); // San Diego
-  assert.equal(utilityForZip("94301"), "pge"); // Palo Alto
-  assert.equal(utilityForZip("93701"), "pge"); // Fresno
-  assert.equal(utilityForZip("95814"), "pge"); // Sacramento
-  assert.equal(utilityForZip("123 Main St, San Diego, CA 92101"), "sdge");
-  assert.equal(utilityForZip("10001"), null, "out of state -> null, never a guess");
-  assert.equal(utilityForZip("not a zip"), null);
-  assert.equal(utilityForZip(null), null);
-});
-
-test("the IOU prefix tables do not overlap and cover the California range", () => {
-  const seen = new Set();
-  for (const [id, prefixes] of Object.entries(IOU_ZIP_PREFIXES))
-    for (const p of prefixes) {
-      assert.match(p, /^\d{3}$/, `${id} prefix ${p} must be three digits`);
-      assert.ok(!seen.has(p), `prefix ${p} is claimed twice`);
-      seen.add(p);
-      assert.ok(p >= "900" && p <= "961", `${p} is outside California's ZIP range`);
-    }
-  assert.ok(seen.size > 50);
-});
-
-test("ambiguous prefixes are flagged rather than silently guessed", () => {
-  const clean = utilityForZipDetailed("91301");
-  assert.equal(clean.utilityId, "sce");
-  assert.equal(clean.confident, true);
-  assert.equal(clean.note, null);
-
-  const messy = utilityForZipDetailed("92672"); // San Clemente: SDG&E inside an SCE prefix
-  assert.equal(messy.utilityId, "sce");
-  assert.equal(messy.confident, false);
-  assert.match(messy.note, /SDG&E/);
-
-  for (const p of Object.keys(AMBIGUOUS_ZIP_PREFIXES))
-    assert.ok(utilityForZip(p + "01"), `${p} should still resolve to some IOU`);
-
-  assert.deepEqual(utilityForZipDetailed("10001"), {
-    utilityId: null, zip: "10001", confident: false, note: null,
-  });
-});
+// Utility routing moved to core/coverage.js (tests/coverage.test.mjs); the old ZIP-prefix
+// map that lived here sent Palo Alto and Sacramento to PG&E, which is exactly the bug.
 
 test("the privacy note names the service and the opt-out, and promises nothing else", () => {
   assert.match(PRIVACY_NOTE, /Nominatim/);
@@ -231,7 +193,7 @@ test("elevationFor puts no finer coordinate on the wire than the weather request
 // Live — skipped offline
 // ---------------------------------------------------------------------------
 
-test("live: the reference address resolves near 34.15 N, -118.75 W", async (t) => {
+test("live: the reference address resolves near 34.15 N, -118.75 W", { skip: process.env.SKIP_LIVE ? "SKIP_LIVE set" : false }, async (t) => {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
@@ -239,7 +201,9 @@ test("live: the reference address resolves near 34.15 N, -118.75 W", async (t) =
     t.diagnostic(`${r.source}: ${r.lat}, ${r.lon} — ${r.label}`);
     assert.ok(Math.abs(r.lat - 34.15) < 0.2, `lat ${r.lat}`);
     assert.ok(Math.abs(r.lon + 118.75) < 0.2, `lon ${r.lon}`);
-    assert.equal(utilityForZip(r.zip || "91301"), "sce");
+    const cov = coverageForZip(r.zip || "91301", tariffLib);
+    assert.equal(cov.kind, "iou");
+    assert.equal(cov.utilityId, "sce");
   } catch (err) {
     assert.ok(err instanceof GeocodeError, "network failures must be typed");
     t.skip(`geocoding unreachable (${err.code}); offline tests still cover the logic`);
@@ -248,7 +212,7 @@ test("live: the reference address resolves near 34.15 N, -118.75 W", async (t) =
   }
 });
 
-test("live: elevation for the reference site is a few hundred metres", async (t) => {
+test("live: elevation for the reference site is a few hundred metres", { skip: process.env.SKIP_LIVE ? "SKIP_LIVE set" : false }, async (t) => {
   const e = await elevationFor(34.15, -118.75);
   if (e == null) {
     t.skip("elevation API unreachable");

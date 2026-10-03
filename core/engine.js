@@ -33,8 +33,9 @@
  * ASSUMPTIONS BEYOND THE CONTRACT (all surfaced in the UI's method panel)
  * -----------------------------------------------------------------------------
  * 1. rates[season][period][providerId] is the FULL bundled $/kWh for that provider
- *    (delivery + that provider's generation).  If a provider key is missing we fall
- *    back to rates[...].delivery + rates[...].sce_generation.
+ *    (delivery + that provider's generation).  An unknown provider id falls back to
+ *    the SAME utility's default provider (result.tariffTerms.providerFallback = true),
+ *    then to delivery + `<utilityId>_generation`; anything else throws.
  * 2. nbt.nonbypassable_charges_per_kwh is treated as ALREADY INSIDE the retail
  *    import rates (that is how SCE publishes them), so it is not added on top.
  *    Set params.applyNbc = true if your tariff file lists NBC-exclusive rates.
@@ -127,8 +128,11 @@ function isDST(y, mo, d, h) {
  * One-time decode of a LoadSet + tariff into typed arrays and calendar indices.
  * Everything here is independent of every user control, so it happens once.
  */
-export function prepare(data) {
+export const MIN_USABLE_DAYS = 300;
+
+export function prepare(data, opts) {
   const load = data.load, tariffs = data.tariffs;
+  const minUsableDays = opts && opts.minUsableDays !== undefined ? +opts.minUsableDays : MIN_USABLE_DAYS;
   const ts = load.ts, N = ts.length;
   const month = new Uint8Array(N);        // 1-12
   const hourA = new Int8Array(N);         // 0-23 wall clock
@@ -137,11 +141,16 @@ export function prepare(data) {
   const dayIdx = new Int32Array(N);
   const monthIdx = new Int32Array(N);
 
+  // Unfilled gaps (non-finite readings) are NOT priced as zero-usage hours: they are
+  // masked out of the simulation entirely (`valid[i] = 0`), and every annualised total
+  // divides by the USABLE days, so a 60-day outage no longer reads as a 16% smaller
+  // household.  `recorded` still holds 0 there so nothing downstream sees a NaN.
   const recorded = new Float64Array(N);
+  const valid = new Uint8Array(N);
   let nanHours = 0;
   for (let i = 0; i < N; i++) {
-    const v = +load.kwh[i];
-    if (isFinite(v)) recorded[i] = v; else nanHours++;      // unfilled gaps price as 0
+    const v = load.kwh[i] === null ? NaN : +load.kwh[i];
+    if (isFinite(v)) { recorded[i] = v; valid[i] = 1; } else nanHours++;
   }
   const exportKwh = load.exportKwh ? Float64Array.from(load.exportKwh, (v) => (isFinite(v) ? v : 0)) : null;
 
@@ -150,6 +159,7 @@ export function prepare(data) {
   const hol = holidaySet(Array.from(years));
 
   const dayStart = [], dayLen = [], dayDow = [], monthDays = [], monthKey = [];
+  const dayValid = [], monthValidHours = [], monthHours = [];
   let prevDay = "", prevMonth = "", d = -1, m = -1, prevTs = "";
   let cachedDayType = 0;
 
@@ -158,14 +168,14 @@ export function prepare(data) {
     const y = +s.slice(0, 4), mo = +s.slice(5, 7), dd = +s.slice(8, 10), h = +s.slice(11, 13);
     const dkey = s.slice(0, 10), mkey = s.slice(0, 7);
     if (dkey !== prevDay) {
-      prevDay = dkey; d++; dayStart.push(i); dayLen.push(0);
+      prevDay = dkey; d++; dayStart.push(i); dayLen.push(0); dayValid.push(0);
       const dow = new Date(Date.UTC(y, mo - 1, dd)).getUTCDay();
       dayDow.push(dow);
       cachedDayType = (dow === 0 || dow === 6 || hol.has(y + "-" + mo + "-" + dd)) ? 1 : 0;
       if (mkey !== prevMonth) { prevMonth = mkey; m++; monthDays.push(0); monthKey.push(mkey); }
       monthDays[m]++;
     }
-    dayLen[d]++;
+    dayLen[d]++; dayValid[d] += valid[i];
     dayIdx[i] = d; monthIdx[i] = m; month[i] = mo; hourA[i] = h; dayType[i] = cachedDayType;
 
     // Repeated wall-clock hour on fall-back day: the 2nd copy is standard time.
@@ -178,6 +188,23 @@ export function prepare(data) {
   }
 
   const nDays = d + 1;
+  // Usable days: each day counts by the share of its slots that carry a reading, so a
+  // fixed charge, a baseline allowance and the annualisation all see the same days.
+  const monthUsableDays = new Float64Array(m + 1);
+  let usableDays = 0;
+  for (let k = 0; k < nDays; k++) {
+    const frac = dayLen[k] > 0 ? dayValid[k] / dayLen[k] : 0;
+    usableDays += frac;
+    monthUsableDays[monthIdx[dayStart[k]]] += frac;
+  }
+  if (!(usableDays >= minUsableDays)) {
+    const err = new Error("Your meter data has only " + Math.floor(usableDays) + " usable days of readings (out of " +
+      nDays + " calendar days). At least " + minUsableDays + " days are needed to estimate a year of bills. " +
+      "Download a longer history (12 months or more of hourly or 15-minute data) from your utility and try again.");
+    err.code = "INSUFFICIENT_DATA";
+    err.usableDays = usableDays; err.days = nDays; err.minUsableDays = minUsableDays;
+    throw err;
+  }
   const ctx = {
     load, tariffs, N, nDays, nMonths: m + 1,
     month, hour: hourA, dayType, solarIdx, dayIdx, monthIdx,
@@ -185,8 +212,12 @@ export function prepare(data) {
     dayDow: Int8Array.from(dayDow),
     monthDays: Int32Array.from(monthDays), monthKey,
     monthNum: monthKey.map((k) => +k.slice(5, 7)),
-    recorded, exportKwh,
-    years: nDays / 365,
+    monthUsableDays,
+    recorded, exportKwh, valid, gapHours: nanHours,
+    usableDays,
+    // Annualisation divides by USABLE days / 365 (equal to elapsed days / 365 when the
+    // record has no unfilled gaps).
+    years: usableDays / 365,
     // The calendar slice core/flexload.js is given.  Same typed arrays, no copies.
     cal: { N, ts, dayIdx, dayDow: Int8Array.from(dayDow), hourA, nDays },
   };
@@ -201,11 +232,12 @@ function dataQuality(ctx, nanHours) {
   let sum = 0;
   for (let i = 0; i < ctx.N; i++) sum += ctx.recorded[i];
   return {
-    hours: ctx.N, days: ctx.nDays, years: ctx.nDays / 365,
+    hours: ctx.N, days: ctx.nDays, years: ctx.years,
+    usableDays: ctx.usableDays, usableHours: ctx.N - nanHours,
     start: lm.start || ctx.load.ts[0], end: lm.end || ctx.load.ts[ctx.N - 1],
     tz: lm.tz || null, source: lm.source || lm.source_files || null,
     totalKwh: totalKwh !== undefined ? totalKwh : sum,
-    annualKwh: sum / (ctx.nDays / 365),
+    annualKwh: sum / ctx.years,
     intervalMinutes: lm.intervalMinutes || null,
     gapsFilled: lm.gapsFilled || lm.gaps_filled || [],
     unfilledHours: nanHours,
@@ -293,7 +325,7 @@ function fallbackReshape(flex, cal, solarShape) {
   const scale = (flex.scale === undefined || flex.scale === null) ? 1 : +flex.scale;
   const src = flex.kwhByHour || null;
 
-  if ((sch.mode || "spread") === "asRecorded" && src) {
+  if ((sch.mode || "asRecorded") === "asRecorded" && src) {
     for (let i = 0; i < N; i++) out[i] = src[i] * scale;
     return out;
   }
@@ -391,20 +423,125 @@ export function planById(tariffs, id) {
   for (let i = 0; i < tariffs.plans.length; i++) if (tariffs.plans[i].id === id) return tariffs.plans[i];
   return tariffs.plans[0];
 }
-function rateFor(rates, provider) {
-  if (rates == null) return 0;
-  if (typeof rates[provider] === "number") return rates[provider];
-  return (rates.delivery || 0) + (rates.sce_generation || 0);
+/**
+ * The provider the utility's customers are on unless they opted out: the provider
+ * marked `default: true`, else the one keyed by `utility.id`, else the first listed.
+ * Mirrors core/tariff.js defaultProvider() (the worker bundle cannot import tariff.js).
+ */
+function tariffDefaultProvider(t) {
+  const provs = (t && t.providers) || {};
+  const marked = Object.keys(provs).find((id) => provs[id] && provs[id].default === true);
+  if (marked) return marked;
+  const uid = t && t.utility && t.utility.id;
+  if (uid && provs[uid]) return uid;
+  return Object.keys(provs)[0] || null;
 }
 
-/** Per-hour import/export prices + period codes for one (plan, provider). */
-export function buildRates(ctx, planId, providerId, applyNbc, climate, accPlus, capExport) {
+/**
+ * Which provider column actually prices this run.  A provider the tariff does not know
+ * (a stale id from another utility, a typo) falls back to THIS utility's default
+ * provider - never to another utility's generation column.  `fallback` says so.
+ */
+export function resolveProvider(t, providerId) {
+  const provs = (t && t.providers) || {};
+  if (providerId && provs[providerId]) return { id: providerId, requested: providerId, fallback: false };
+  const def = tariffDefaultProvider(t);
+  const uid = (t && t.utility && t.utility.id) || null;
+  if (!def && !uid) {
+    throw new Error("tariff has no providers and no utility.id: cannot price provider '" + providerId + "'");
+  }
+  return { id: def || uid, requested: providerId == null ? null : providerId, fallback: providerId != null };
+}
+
+/**
+ * Full retail $/kWh for one rate cell.  The resolved provider's column if present, else
+ * the utility's default provider's column, else delivery + `<utilityId>_generation`.
+ * Anything else is a hole in the tariff file and throws: a miss is a bug, not a zero.
+ */
+function rateFor(rates, provider, t, where) {
+  if (rates == null) throw new Error("tariff: no rate cell for " + where);
+  if (typeof rates[provider] === "number") return rates[provider];
+  const def = tariffDefaultProvider(t);
+  if (def && typeof rates[def] === "number") return rates[def];
+  const uid = t && t.utility && t.utility.id;
+  const genKey = uid ? uid + "_generation" : null;
+  if (genKey && typeof rates.delivery === "number" && typeof rates[genKey] === "number") {
+    return rates.delivery + rates[genKey];
+  }
+  throw new Error("tariff: " + where + " prices neither provider '" + provider + "' nor the utility default");
+}
+
+/** ACC Plus adder from the tariff file ($/kWh); mirrors core/tariff.js accPlusAdder(). */
+export function tariffAccPlus(t) {
+  const n = (t && t.nbt) || {};
+  if (typeof n.acc_plus_adder_per_kwh === "number" && isFinite(n.acc_plus_adder_per_kwh)) return n.acc_plus_adder_per_kwh;
+  throw new Error("tariff " + ((t && t.utility && t.utility.id) || "?") + " has no nbt.acc_plus_adder_per_kwh");
+}
+
+/** Average Retail Export Compensation Rate (SCE: "EEC Adjustment"), $/kWh, from the file. */
+export function tariffArecr(t) {
+  const n = (t && t.nbt) || {};
+  if (typeof n.eec_adjustment_per_kwh === "number" && isFinite(n.eec_adjustment_per_kwh)) return n.eec_adjustment_per_kwh;
+  throw new Error("tariff " + ((t && t.utility && t.utility.id) || "?") + " has no nbt.eec_adjustment_per_kwh");
+}
+
+/**
+ * Baseline allocation (kWh/day, { summer, winter }) for a region of utility.baselineRegions,
+ * falling back to the file's default region (meta.baseline_region) and then to
+ * meta.baseline_kwh_per_day.  Mirrors core/tariff.js baselineAllocation().
+ */
+export function resolveBaseline(t, region) {
+  const br = (t && t.utility && t.utility.baselineRegions) || null;
+  const alloc = (br && br.allocations) || {};
+  const meta = (t && t.meta) || {};
+  const def = meta.baseline_region != null && alloc[String(meta.baseline_region)]
+    ? String(meta.baseline_region) : (Object.keys(alloc)[0] || null);
+  const want = region == null || region === "" ? null : String(region);
+  let id = null, fallback = false;
+  if (want && alloc[want]) id = want;
+  else { id = def; fallback = !!want; }
+  const a = id ? alloc[id] : (meta.baseline_kwh_per_day || null);
+  return {
+    region: id, requested: want, fallback,
+    summer: a ? +a.summer || 0 : 0, winter: a ? +a.winter || 0 : 0,
+    summerMonths: (br && Array.isArray(br.summer_months)) ? br.summer_months : null,
+  };
+}
+
+/** True-up month 1-12: params override, else nbt.true_up_month, else April. */
+export const DEFAULT_TRUE_UP_MONTH = 4;
+function resolveTrueUpMonth(t, override) {
+  const ok = (v) => Number.isInteger(+v) && +v >= 1 && +v <= 12;
+  if (override != null && override !== "" && ok(override)) return +override;
+  const f = t && t.nbt && t.nbt.true_up_month;
+  return ok(f) ? +f : DEFAULT_TRUE_UP_MONTH;
+}
+
+/**
+ * Per-hour import/export prices + period codes for one (plan, provider).
+ *
+ * accPlus     undefined / null = the tariff file's nbt.acc_plus_adder_per_kwh;
+ *             a number is an explicit override.
+ * opts        { baselineRegion, trueUpMonth } - both optional, see DEFAULTS.
+ */
+export function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capExport, opts) {
   const t = ctx.tariffs, plan = planById(t, planId);
+  const o = opts || {};
+  const prov = resolveProvider(t, providerIdIn);
+  const providerId = prov.id;
   const N = ctx.N;
   const imp = new Float64Array(N), exp = new Float64Array(N);
   const per = new Uint8Array(N), summer = new Uint8Array(N);
   const nbc = applyNbc ? (t.nbt.nonbypassable_charges_per_kwh || 0) : 0;
-  const adder = /^cpa/.test(providerId) ? (t.nbt.cpa_export_adder_per_kwh || 0) : 0;
+  const accPlusUsed = (accPlus === undefined || accPlus === null) ? tariffAccPlus(t) : +accPlus;
+  const arecr = tariffArecr(t);
+  const baseline = resolveBaseline(t, o.baselineRegion);
+  const baselinePct = (typeof plan.baseline_credit_pct === "number" && plan.baseline_credit_pct > 0)
+    ? plan.baseline_credit_pct : 1;
+  // CCA export adder: one key in all three utility files, applied to any non-bundled
+  // provider (provider id differs from utility.id).
+  const uidForAdder = t.utility && t.utility.id;
+  const adder = (uidForAdder && providerId !== uidForAdder) ? (t.nbt.cca_export_adder_per_kwh || 0) : 0;
   // Two bill lines deliberately kept out of the rate tables (sce.json meta.notes):
   // Agoura Hills' generation municipal surcharge, levied on the GENERATION component
   // only, and CPA's flat per-kWh energy surcharge.  Folding both into the hourly
@@ -426,7 +563,7 @@ export function buildRates(ctx, planId, providerId, applyNbc, climate, accPlus, 
       const season = su ? "summer" : "winter";
       const pid = plan.schedule[season][dt ? "weekend" : "weekday"][h];
       const tbl = plan.rates[season][pid];
-      const full = rateFor(tbl, providerId);
+      const full = rateFor(tbl, providerId, t, plan.id + " " + season + "." + pid);
       // The municipal surcharge is levied on GENERATION only.  For a CCA customer the
       // gap between the bundled price and delivery also contains the CCA surcharge
       // stack (PCIA + wildfire + CTC + fixed recovery), which is not generation - back
@@ -445,13 +582,27 @@ export function buildRates(ctx, planId, providerId, applyNbc, climate, accPlus, 
     exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
   }
   return { plan, imp, exp, period: per, summer,
-           accPlus, arecr: (t.nbt.eec_adjustment_per_kwh || 0.05981),
+           providerId, providerRequested: prov.requested, providerFallback: prov.fallback,
+           accPlus: accPlusUsed, arecr,
            capExport, munFactor, cpaSurcharge,
            baselineCredit: plan.baseline_credit_per_kwh || 0,
-           baselineAllow: t.meta.baseline_kwh_per_day,
+           baselineAllow: { summer: baseline.summer, winter: baseline.winter },
+           baselineSummerMonths: baseline.summerMonths || plan.summer_months,
+           baselineRegion: baseline.region, baselineRegionFallback: baseline.fallback,
+           baselineCreditPct: baselinePct,
            fixed: plan.fixed_charge_per_day, min: plan.minimum_charge_per_day,
            nsc: t.nbt.net_surplus_compensation_per_kwh, climate: climate || null,
-           trueUpMonth: t.nbt.true_up_month || ctx.monthNum[0] };
+           trueUpMonth: resolveTrueUpMonth(t, o.trueUpMonth) };
+}
+
+/** The tariff terms a run actually used, for the method panel and for tests. */
+function tariffTerms(r) {
+  return { providerId: r.providerId, providerFallback: r.providerFallback,
+           accPlusAdder: r.accPlus, arecr: r.arecr, nsc: r.nsc,
+           baselineRegion: r.baselineRegion, baselineRegionFallback: r.baselineRegionFallback,
+           baselineKwhPerDay: { summer: r.baselineAllow.summer, winter: r.baselineAllow.winter },
+           baselineCreditPct: r.baselineCreditPct, baselineCreditPerKwh: r.baselineCredit,
+           trueUpMonth: r.trueUpMonth };
 }
 
 // ---------------------------------------------------------------- scenario
@@ -487,7 +638,13 @@ export function buildScenario(ctx, params, opts) {
     const prof = pl.profile;
     const keep = shadingFactors(pl.shading);
     const per = new Float64Array(N);
-    if (prof) for (let i = 0; i < N; i++) per[i] = prof[ctx.solarIdx[i]] * kwPerPanel * keep[ctx.month[i] - 1];
+    // Gap hours (no meter reading) are outside the simulation: no PV there either, so
+    // production, export and load are all counted over the same usable hours.
+    const valid = ctx.valid;
+    if (prof) for (let i = 0; i < N; i++) {
+      if (valid && !valid[i]) continue;
+      per[i] = prof[ctx.solarIdx[i]] * kwPerPanel * keep[ctx.month[i] - 1];
+    }
     return { id: pl.id === undefined ? "p" + (k + 1) : pl.id, name: pl.name || null,
              panels: Math.max(0, Math.round(pl.panels || 0)),
              maxPanels: pl.maxPanels === undefined ? null : pl.maxPanels,
@@ -514,7 +671,20 @@ export function buildScenario(ctx, params, opts) {
   }
 
   // Base load = recorded minus every DETECTED flexible load, then rescaled.
-  const flexList = (p.flex || []).filter(Boolean);
+  // A non-finite hour in a detected series is treated as 0 kWh and counted, so one bad
+  // sample cannot turn the whole bill into NaN.
+  let flexNanHours = 0;
+  const flexList = (p.flex || []).filter(Boolean).map(function (f) {
+    if (!f.kwhByHour) return f;
+    const src = f.kwhByHour;
+    let bad = 0;
+    for (let i = 0; i < N; i++) if (!isFinite(src[i])) bad++;
+    if (!bad) return f;
+    flexNanHours += bad;
+    const clean = new Float64Array(N);
+    for (let i = 0; i < N; i++) { const v = src[i]; clean[i] = isFinite(v) ? v : 0; }
+    return Object.assign({}, f, { kwhByHour: clean });
+  });
   const base = new Float64Array(N);
   base.set(ctx.recorded);
   for (const f of flexList) {
@@ -540,17 +710,23 @@ export function buildScenario(ctx, params, opts) {
     } else {
       s = reshapeFlex(f, ctx.cal, solarShape);
     }
+    for (let i = 0; i < N; i++) if (!isFinite(s[i])) { s[i] = 0; flexNanHours++; }
     flexSeries.push({ id: f.id, kind: f.kind || "custom", name: f.name || f.id, series: s });
     for (let i = 0; i < N; i++) flexTotal[i] += s[i];
   }
   for (let i = 0; i < N; i++) load[i] = base[i] + flexTotal[i];
+  if (ctx.valid && ctx.gapHours) {
+    // Gap hours are skipped by runHours; zero them here so every load total agrees.
+    for (let i = 0; i < N; i++) if (!ctx.valid[i]) { load[i] = 0; base[i] = 0; flexTotal[i] = 0; }
+  }
 
   return {
     ctx, planes, panelW: p.panelW, load, baseLoad: base, flex: flexTotal, flexSeries,
     solarShape, flexMode: asRecorded ? "asRecorded" : "scheduled",
-    baseClampedKwh: clampedKwh,
+    baseClampedKwh: clampedKwh, flexNanHours,
     rates: buildRates(ctx, p.planId, p.providerId, p.applyNbc, climateCredit(ctx, p),
-                      p.accPlusAdder, !p.ngom),
+                      p.accPlusAdder, !p.ngom,
+                      { baselineRegion: p.baselineRegion, trueUpMonth: p.trueUpMonth }),
     weatherKey: p.weatherKey,
     _pv: null,
   };
@@ -603,8 +779,19 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
   const M = ctx.nMonths;
   let bal$ = 0, balKwh = 0, total = 0, forfeitedTotal = 0, exportValue = 0;
   const rows = detail ? [] : null;
+  // The first relevant period runs at least 12 billing months: a record that starts
+  // shortly before the true-up month does not settle a two-month stub on its own (that
+  // made year-1 savings depend on the download date).  After the first settlement, every
+  // true-up month settles; the last month of the record always settles what is left.
+  let lastSettle = -1;
+  const blSummer = r.baselineSummerMonths || r.plan.summer_months;
+  const blPct = r.baselineCreditPct || 1;
   for (let m = 0; m < M; m++) {
-    const days = ctx.monthDays[m];
+    // Usable days: a month with unfilled gaps is billed (fixed charge, minimum charge,
+    // baseline allowance, climate credit) only for the share of it the simulation saw.
+    const calDays = ctx.monthDays[m];
+    const days = ctx.monthUsableDays ? ctx.monthUsableDays[m] : calDays;
+    const share = calDays > 0 ? days / calDays : 0;
     // Paired storage under 10 kW without a Net Generation Output Meter: creditable
     // export in a month is capped at SCE's estimate of what the PV produced, and the
     // forfeited kWh are DEEMED to have happened in the highest-priced hours.  We use
@@ -625,8 +812,10 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
       expKwh -= forfeitKwh; expCred -= forfeit$; forfeitedTotal += forfeit$;
     }
     const fixed = r.fixed * days;
-    const allow = (r.plan.summer_months.indexOf(ctx.monthNum[m]) >= 0
-                   ? r.baselineAllow.summer : r.baselineAllow.winter) * days;
+    // Baseline credit applies up to baseline_credit_pct of the allocation (SDG&E
+    // TOU-DR1/DR2: 130%; everyone else 100%), on the baseline season's calendar.
+    const allow = (blSummer.indexOf(ctx.monthNum[m]) >= 0
+                   ? r.baselineAllow.summer : r.baselineAllow.winter) * days * blPct;
     const credit = r.baselineCredit * Math.min(mImpKwh[m], allow);
     const energy = mImpCost[m];
     const floor = Math.max(r.min * days, fixed);
@@ -647,7 +836,7 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
     if (r.climate && r.climate.amount && r.climate.months.indexOf(ctx.monthNum[m]) >= 0) {
       // The CA Climate Credit is a flat bill credit, not an energy charge: it lands
       // after the export offset and CAN push the bill below the fixed charge.
-      climate = r.climate.amount;
+      climate = r.climate.amount * share;
       bill -= climate;
     }
 
@@ -655,7 +844,10 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
     exportValue += used + accPlus;                // dollars sourced from exported kWh
 
     let trueUp = 0, forfeitCredit = 0;
-    if (ctx.monthNum[m] === r.trueUpMonth || m === M - 1) {
+    const settleNow = m === M - 1
+      || (ctx.monthNum[m] === r.trueUpMonth && (lastSettle >= 0 || m >= 11));
+    if (settleNow) {
+      lastSettle = m;
       // Schedule NBT SC 4.e.i, in order: the credit bank is first reduced by the
       // "Average Retail Export Compensation Rate" applied to net surplus kWh, THEN the
       // net surplus kWh are paid at Net Surplus Compensation.  The ARECR is about three
@@ -672,10 +864,10 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
       balKwh = 0;
     }
     total += bill;
-    if (rows) rows.push({ key: ctx.monthKey[m], days, fixed, energy,
+    if (rows) rows.push({ key: ctx.monthKey[m], days, calendarDays: calDays, fixed, energy,
                           baselineCredit: -credit, minimumAdj: minApplied,
                           exportCreditUsed: -used, accPlus: -accPlus,
-                          climateCredit: -climate, trueUp: -trueUp, bill,
+                          climateCredit: -climate, trueUp: -trueUp, settled: settleNow, bill,
                           importKwh: mImpKwh[m], exportKwh: expKwh,
                           forfeitedKwh: forfeitKwh, forfeitedCredit: forfeit$ + forfeitCredit,
                           creditBalance: bal$ });
@@ -720,7 +912,9 @@ export function runHours(scn, params, detail) {
   const peakNeed = new Float64Array(nD);     // net load inside on/mid hours
   const peakStart = new Uint8Array(nD);
   for (let d = 0; d < nD; d++) peakStart[d] = 24;
+  const valid = ctx.gapHours ? ctx.valid : null;
   for (let i = 0; i < N; i++) {
+    if (valid && !valid[i]) continue;
     const dd = ctx.dayIdx[i], net = load[i] - pv[i];
     if (net < 0) surplusDay[dd] -= net;
     else if (r.period[i] <= 1) { peakNeed[dd] += net; if (ctx.hour[i] < peakStart[dd]) peakStart[dd] = ctx.hour[i]; }
@@ -752,6 +946,11 @@ export function runHours(scn, params, detail) {
   const expLimit = (p.exportLimitKW && p.exportLimitKW > 0) ? p.exportLimitKW : Infinity;
 
   for (let i = 0; i < N; i++) {
+    if (valid && !valid[i]) {
+      // No meter reading: the hour is outside the simulation.  The pack sits idle.
+      if (detail) hourly.soc[i] = soc;
+      continue;
+    }
     const L = load[i], P = pv[i];
     const m = ctx.monthIdx[i], day = ctx.dayIdx[i], hr = ctx.hour[i], pc = r.period[i];
     tPv += P; tLoad += L; tBase += baseLoad[i];
@@ -829,7 +1028,7 @@ export function runHours(scn, params, detail) {
     }
   }
 
-  const years = ctx.nDays / 365;
+  const years = ctx.years;
   const billing = settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mBandKwh, mBandCred);
   const out = {
     panels: pvInfo.panels, panelsByPlane: alloc.slice(), batteries,
@@ -850,6 +1049,7 @@ export function runHours(scn, params, detail) {
     selfSufficiency: tLoad > 0 ? 1 - tImp / tLoad : 0,
     solarFraction: tPv > 0 ? tSelf / tPv : 0,
     weatherKey: scn.weatherKey,
+    tariffTerms: tariffTerms(r),
   };
   if (detail) {
     out.monthly = billing.months;
@@ -891,7 +1091,12 @@ export const DEFAULTS = {
   planId: "TOU-D-PRIME", providerId: "cpa_green", applyNbc: false,
   weatherKey: "tmy",
   climateCredit: null, climateCreditMonths: null, climateCreditOff: false,
-  accPlusAdder: 0.016, ngom: false,
+  // undefined = use the tariff file (nbt.acc_plus_adder_per_kwh); a number overrides it.
+  accPlusAdder: undefined, ngom: false,
+  // utility.baselineRegions.allocations key; null = the file's meta.baseline_region.
+  baselineRegion: null,
+  // Settlement month 1-12 (the PTO anniversary); null = the file's nbt.true_up_month.
+  trueUpMonth: null,
   strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5,
   exportLimitKW: 0,
 };
@@ -915,13 +1120,14 @@ export function billPeriod(ctx, params, startDate, endDate) {
                      off: { kwh: 0, cost: 0 }, super_off: { kwh: 0, cost: 0 } };
   const days = {};
   let total = 0, allowance = 0;
+  const blSummer = r.baselineSummerMonths || plan.summer_months;
   for (let i = 0; i < ctx.N; i++) {
     const d = ctx.load.ts[i].slice(0, 10);
     if (d < startDate || d > endDate) continue;
     if (!days[d]) {
       days[d] = 1;
-      allowance += (plan.summer_months.indexOf(ctx.month[i]) >= 0
-                    ? r.baselineAllow.summer : r.baselineAllow.winter);
+      allowance += (blSummer.indexOf(ctx.month[i]) >= 0
+                    ? r.baselineAllow.summer : r.baselineAllow.winter) * r.baselineCreditPct;
     }
     const k = scn.load[i], pid = PERIOD_IDS[r.period[i]];
     byPeriod[pid].kwh += k; byPeriod[pid].cost += k * r.imp[i]; total += k;
@@ -981,7 +1187,9 @@ export function simulate(ctx, params, opts) {
   res.baselineAsRecorded = b.asRecorded;
   attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
   res.flexShiftOnlySavings = b.asRecorded.bill - b.sameFlex.bill;
-  res.years = ctx.nDays / 365;
+  res.years = ctx.years;
+  res.usableDays = ctx.usableDays;
+  res.flexNanHours = b.scnSame.flexNanHours || 0;
   return res;
 }
 
@@ -1021,6 +1229,8 @@ export const _internal = { holidaySet, isDST, spread, fallbackReshape, dayBounds
 const SolarEngine = {
   prepare, buildScenario, runHours, simulate, billPeriod, billOnAllPlans, billOnAllProviders,
   baselines, attachSavings, buildRates, settle, planById, profileFor, pvFor, climateCredit,
+  resolveProvider, resolveBaseline, tariffAccPlus, tariffArecr,
+  MIN_USABLE_DAYS, DEFAULT_TRUE_UP_MONTH,
   reshapeFlex, setFlexReshape, flexReshapeSource,
   withDefaults, DEFAULTS, _internal,
 };

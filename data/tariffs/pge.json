@@ -263,6 +263,11 @@
   "rates_effective": "2026-06-01",
   "sources": [
    {
+    "title": "PG&E Energy Export Credit values index (pge.com/eecvalues -> PGE-Solar-Billing-Plan-Export-Rates.zip), opened 2026-10-03",
+    "url": "https://www.pge.com/eecvalues",
+    "used_for": "Where PG&E publishes EEC values: hourly EEC XML per vintage (2023-2026 and floating) plus 'Summary Rates for PDF.xlsx'. Contains NO average retail export compensation rate, so nbt.eec_adjustment_per_kwh is still SCE's $0.05981 placeholder, confidence low (nbt.eec_adjustment_source lists everything checked)."
+   },
+   {
     "title": "PG&E Electric Schedule E-TOU-C (tariff book PDF), rates effective 2026-06-01, Advice 7921-E / D.26-04-036",
     "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-TOU-C.pdf",
     "used_for": "E-TOU-C total $/kWh by season and period, the $0.08140/kWh baseline credit, the Conservation Incentive Adjustment split, the unbundled generation/distribution components, TOU period hours and the 4-month summer season, and the Base Services Charge"
@@ -541,6 +546,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0814,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -765,6 +771,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -989,6 +996,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -1213,6 +1221,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -1439,6 +1448,7 @@
    "fixed_charge_per_day": 0.04928,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -2307,6 +2317,13 @@
   "net_surplus_compensation_per_kwh": 0.02751,
   "nonbypassable_charges_per_kwh": 0.0123,
   "true_up": "annual",
+  "true_up_month": 4,
+  "eec_adjustment_per_kwh": 0.05981,
+  "eec_adjustment_source": {
+   "month": null,
+   "_confidence": "low",
+   "note": "PLACEHOLDER, re-checked 2026-10-03 and still unpublished: PG&E does not publish a dollar figure for the 'average real-world retail export compensation rate' that Electric Schedule NBT SC 5.d debits net surplus kWh at before paying NSC. Checked: the current Schedule NBT sheet (https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_NBT.pdf - methodology only, no value); the pge.com/eecvalues ZIP (https://www.pge.com/assets/pge/docs/vanities/PGE-Solar-Billing-Plan-Export-Rates.zip - hourly EEC XML by vintage plus a summary workbook, no average); the AB 920 NSC table (https://www.pge.com/assets/pge/docs/clean-energy/solar/AB920-RateTable.pdf - NSC only, Oct 2026 $0.02740); the Solar Billing Plan guide and the Solar Bill / Net Surplus Compensation pages (approximate NSC range only); and extended web searches for 'average retail export compensation', 'EEC adjustment', 'Annual True-Up Adjustment' and 'export credit adjustment' on pge.com and cpuc.ca.gov. The value used is SCE's September 2026 EEC Adjustment ($0.05981/kWh = delivery $0.01163 + generation $0.04818), on the reasoning that all three IOUs compute it from the same CPUC ACC methodology; SDG&E's equivalent for the same month is $0.11001, so the true PG&E figure could plausibly sit anywhere in roughly $0.05-0.11. Replace with PG&E's published figure if one appears."
+  },
   "notes": "WHAT THESE NUMBERS ARE. Under the Net Billing Tariff (PG&E brands it the Solar Billing Plan, everyone else calls it NEM 3.0) exported energy is credited at hourly Avoided Cost Calculator values, not at the retail rate. The export_rates matrices are PG&E's own published Energy Export Credit prices for the NBT26 vintage, calendar year 2026, taken from its CPUC Resolution E-5301 machine-readable MIDAS compliance file. The file already carries the CPUC-mandated month / day-type / hour aggregation in its ValueName field ('Aug Weekday HS19'), so these are tariff values verbatim - 576 distinct cells per component with zero conflicting values, nothing interpolated or re-averaged. Cross-checked against PG&E's own PDF price sheet: 1,149 of 1,152 cells identical, the three exceptions differing by at most $0.0005 in the November DST fall-back hours. The underlying model is the 2024 ACC (Resolution E-5328). Hour index is hour-BEGINNING 0-23 in Pacific PREVAILING time, DST aware; the weekend table applies on Saturdays, Sundays and the eight holidays, which is how PG&E defines the day types (254 weekday / 111 weekend-holiday days in 2026). Each value is the TOTAL credit = generation component + delivery component; a CCA customer receives the delivery component from PG&E and the generation component from the CCA, and the sum is unchanged, which is why switching provider does not change export value. The split is preserved in data/export/pge-nbt26.json. SHAPE - THIS, NOT THE ANNUAL AVERAGE, DRIVES BATTERY ECONOMICS. Peak: August weekday hour 19 (7-8 p.m.) = $1.15441/kWh, hour 18 = $1.13014, hour 20 = $1.08038; August WEEKEND hour 19 = $1.19289, the highest cell in the table. Trough: spring weekend midday runs to $0.00001/kWh - effectively zero. The midday mean over hours 9-15 is $0.04664 weekday and $0.02407 weekend, against an unweighted all-hours mean of $0.10187 weekday and $0.08396 weekend. The all-hours mean is misleading: it is carried by a handful of extreme August-evening cells that a PV array alone never reaches. THE PRACTICAL CONSEQUENCE: exporting a midday kWh earns roughly a tenth of what importing one costs, so self-consumption and evening battery discharge carry essentially all of the value, and sizing to annual kWh offset is the wrong objective. ACC PLUS ADDER - ON TOP OF THE MATRIX, AND PG&E'S IS ABOUT HALF SCE'S. CPUC D.22-12-056 pays residential exporters a per-kWh adder above the ACC price, by the vintage year of the interconnection application, declining by 20% of the first-year value each year: PG&E residential non-equity 2023 $0.0220, 2024 $0.0176, 2025 $0.0132, 2026 $0.0088, 2027 $0.0044, 2028 and later $0.0000. The low-income/equity figures are $0.090 / $0.072 / $0.054 / $0.036 / $0.018 / $0.000. A 2026 PTO therefore earns $0.0088/kWh on every exported kWh, locked for the same nine years - roughly half SCE's $0.016 for the same vintage, and SDG&E gets nothing at all. This adder is NOT inside the matrices; add it. It is also the ONLY export credit that may offset non-bypassable charges. THE NINE-YEAR LOCK-IN FREEZES A TRAJECTORY, NOT A FLAT TABLE. A 2026 vintage locks NBT26 for nine years, but that vintage specifies a different 12x24 matrix for every year: the generation component decays after 2028 while the delivery component grows. This file carries the 2026 matrix only. SCE's file documents the same effect in detail and the direction is identical - applying a single year's matrix flat OVERSTATES summer-evening battery export revenue in later years while understating overnight and shoulder hours. PG&E publishes each vintage year's sheets in the ZIP at pge.com/energyexportcredit; a future revision of this file should carry all nine years. NETTING AND TRUE-UP. Netting is HOURLY, not monthly: each exported kWh earns that hour's EEC price while each imported kWh in the same hour is charged the full retail TOU rate. They do not cancel. Surplus credit rolls forward month to month and is settled at the annual true-up. TRUE-UP CLAWBACK - IT PENALISES OVERSIZING AND PG&E DOES NOT PUBLISH THE NUMBER. Schedule NBT Special Condition 5.d debits net surplus kWh at 'the utility's average real-world retail export compensation rates for all NBT customers in their service territory over the past 12 months' BEFORE crediting them at the far lower Net Surplus Compensation rate of $0.02751/kWh. SCE publishes its equivalent (EEC Adjustment Pricing, about $0.060/kWh in September 2026, roughly three times its NSC). PG&E publishes only the input - the hourly EEC price sheets - and no standalone average. UNRESOLVED: this file therefore cannot state PG&E's clawback rate. Do not model surplus at the NSC rate alone; that understates the penalty for an oversized array. Size to self-consumption plus battery. NET SURPLUS COMPENSATION. $0.02751/kWh, the September 2026 figure from PG&E's AB 920 rate table. The table is indexed by TRUE-UP MONTH, not by the month of export: the rate posted for a month applies to any customer whose 12-month Relevant Period completes in it. Computed under D.11-06-016 as a simple average of PG&E DLAP day-ahead prices for hours 7 a.m.-5 p.m. over the year ending on the 20th of the prior month, so it drifts: the 2026 range was $0.02684 (August) to $0.03116 (January). A separate Renewable Adjustment Amount is paid only if the customer certifies ownership of the renewable energy credits. NON-BYPASSABLE CHARGES. $0.01230/kWh on every IMPORTED kWh, per Schedule NBT Special Condition 2.f, which names exactly four: Public Purpose Programs $0.00614, Nuclear Decommissioning -$0.00002 (currently negative), Competition Transition Charge $0.00027, Wildfire Fund Charge $0.00591. DO NOT ADD THIS ON TOP OF THE RATE TABLES - it is already inside them. It is recorded separately only to show which part of the import price solar can never escape. Two cautions: the Wildfire Hardening charge ($0.00391) and the Recovery Bond charge/credit (+/-$0.00857, which cancel) are NOT non-bypassable and are commonly miscounted; and CARE and Medical Baseline customers are exempt from the Wildfire Fund Charge, giving them $0.00639/kWh."
  },
  "incentives": {

@@ -9,7 +9,7 @@
  * ========================================================================== */
 
 import { el, clear, $ } from "./dom.js";
-import { CLAIM, EXPLANATION, CALLS, STORAGE_NOTE, adoptGeocodeNote } from "../privacy.js";
+import { CLAIM, EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote } from "../privacy.js";
 
 /* Averaged summer weekday from data/demo/*.csv, and the TMY profile for 15 July
    at 20° tilt / 180° azimuth scaled to 6 kW DC. Real numbers, not a sketch. */
@@ -54,15 +54,14 @@ export function renderLanding(root, handlers) {
   }));
 
   root.appendChild(el("footer.landing-foot", {}, [
-    el("span", {}, [el("a", { href: "https://github.com/", target: "_blank", rel: "noopener", text: "Source on GitHub" })]),
+    el("span", {}, [el("a", { href: "https://github.com/daharoni/rooftop-roi", target: "_blank", rel: "noopener", text: "Source on GitHub" })]),
     el("span", { text: "MIT licence" }),
     el("span", { text: "No accounts, no cookies, no tracking" }),
   ]));
 
-  adoptGeocodeNote().then(() => {
+  adoptGeocodeNote().then((note) => {
     const node = $("geocode-disclosure");
-    const call = CALLS.find((c) => c.who === "OpenStreetMap");
-    if (node && call) node.textContent = call.what;
+    if (node && note) node.textContent = note;
   });
 }
 
@@ -169,6 +168,7 @@ function startPanel(handlers) {
     el("p.panel-sub", { text: "Two things: your meter readings, and where the roof is." }),
     zone,
     el("p.note", { id: "landing-error", hidden: true }),
+    el("div", { id: "landing-notice", hidden: true }),
 
     el("div.or-rule", { text: "and the location" }),
 
@@ -179,9 +179,7 @@ function startPanel(handlers) {
           address,
           el("button.btn", { type: "button", text: "Find", on: { click: () => handlers.onAddress(address.value) } }),
         ]),
-        el("p.ctl-note", { id: "geocode-disclosure", style: "margin-top:5px",
-          text: "Typing an address sends it to OpenStreetMap's Nominatim geocoder to get coordinates back. "
-            + "Click the map or enter a ZIP code instead and nothing you typed is sent anywhere." }),
+        el("p.ctl-note", { id: "geocode-disclosure", style: "margin-top:5px", text: GEOCODE_NOTE }),
       ]),
       el("div", {}, [
         el("label.field-lab", { htmlFor: "zip-input", text: "…or just a ZIP code" }),
@@ -190,12 +188,14 @@ function startPanel(handlers) {
           el("button.btn", { type: "button", text: "Use this ZIP", on: { click: () => handlers.onZip(zip.value) } }),
         ]),
         el("p.ctl-note", { style: "margin-top:5px",
-          text: "Enough to pick your utility and the right patch of sky. Sent nowhere." }),
+          text: "Enough to pick your utility and the right patch of sky. The ZIP is sent to Open-Meteo's "
+            + "place search to find its centre; the street address is not needed." }),
       ]),
       el("div", {}, [
         el("button.btn", { type: "button", text: "Pick it on the map instead", on: { click: () => handlers.onMap() } }),
         el("p.ctl-note", { style: "margin-top:5px",
-          text: "Opens satellite imagery from Esri. Clicking your roof sends nothing but tile coordinates." }),
+          text: "Opens satellite imagery from Esri. The tile requests show Esri roughly which block you "
+            + "are looking at (about 75 m), along with your IP address; nothing you typed is sent." }),
       ]),
     ]),
 
@@ -269,7 +269,7 @@ function privacyPanel() {
 
 const STEPS = [
   { title: "Your meter file", body: "Green Button XML or CSV, parsed in this browser into one hourly series.", glyph: "file" },
-  { title: "Flexible loads", body: "The detector finds the car charger and the pool pump inside the whole-house total.", glyph: "pulse" },
+  { title: "Flexible loads", body: "The detector looks for a car charger and a pool pump inside the whole-house total. Anything it finds stays at the hours it was recorded until you choose to move it.", glyph: "pulse" },
   { title: "Your roof", body: "Each face gets a tilt, a direction and eleven years of real sunlight.", glyph: "roof" },
   { title: "8,760 hours", body: "Every hour dispatched and billed under Net Billing, for every system size.", glyph: "grid" },
   { title: "Money", body: "Savings against the same cash in the market: NPV, IRR, payback, wealth.", glyph: "money" },
@@ -302,6 +302,35 @@ function glyph(kind) {
   return node;
 }
 
+/**
+ * A blocking notice in the start panel: a message plus explicit choices.
+ *   landingNotice({ tone: "bad"|"warn", text, actions: [{ label, primary, onClick }] })
+ * landingNotice(null) hides it.
+ */
+export function landingNotice(spec) {
+  const node = $("landing-notice");
+  if (!node) return;
+  clear(node);
+  node.hidden = !spec;
+  if (!spec) return;
+  node.className = "note banner" + (spec.tone === "bad" ? " banner-bad" : "");
+  node.setAttribute("role", "alert");
+  node.style.marginTop = "10px";
+  node.appendChild(el("p", { style: "margin:0 0 8px", text: spec.text }));
+  if (spec.actions && spec.actions.length) {
+    node.appendChild(el("div", { style: "display:flex;flex-wrap:wrap;gap:8px" }, spec.actions.map((a) =>
+      el("button.btn" + (a.primary ? ".btn-primary" : ""), { type: "button", text: a.label, on: { click: a.onClick } }))));
+  }
+  if (typeof node.scrollIntoView === "function") node.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/** Prefer an error's own user-facing wording (GeocodeError, parser errors) over its technical message. */
+export function userMessageOf(err, fallback) {
+  if (err && typeof err.userMessage === "string" && err.userMessage) return err.userMessage;
+  if (err && typeof err.message === "string" && err.message) return err.message;
+  return fallback;
+}
+
 export function landingError(message) {
   const node = $("landing-error");
   if (!node) return;
@@ -310,4 +339,4 @@ export function landingError(message) {
   node.className = "note banner banner-bad";
 }
 
-export default { renderLanding, landingError };
+export default { renderLanding, landingError, landingNotice, userMessageOf };

@@ -28,6 +28,8 @@ One pass over `load.ts` builds the index arrays every later step reads:
 | `dayIdx`, `monthIdx`, `dayStart`, `dayLen`, `dayDow` | day and month boundaries; days are **not** assumed to be 24 hours long |
 | `solarIdx` | index into an 8760 profile, in local **standard** time |
 | `recorded` | `load.kwh` as a `Float64Array`; non-finite values become 0 and are counted in `quality.unfilledHours` |
+| `valid` | `Uint8Array`, 1 where the hour has a reading. Gap hours (0) are skipped by the simulation |
+| `usableDays`, `monthUsableDays` | days (and per-month days) weighted by the share of their slots that carry a reading |
 | `cal` | `{ N, ts, dayIdx, dayDow, hourA, nDays }` — exactly the slice `core/flexload.js` is given |
 
 **Clock time vs standard time.** Meter data and tariff periods are local *clock* time, so
@@ -39,7 +41,16 @@ Feb 28, so the profile is always 365 × 24.
 **DST days.** A spring-forward day has 23 slots and a fall-back day 24 (the duplicated
 wall-clock hour is summed into one slot by `core/greenbutton.js`). On a fall-back day the
 *second* occurrence of the repeated stamp is standard time, which is how `solarIdx` reads
-it. Annualisation is always `nDays / 365`, never `N / 8760`.
+it. Annualisation is always `usableDays / 365` (= `nDays / 365` with no gaps), never `N / 8760`.
+
+**Gaps.** An hour with no reading is outside the simulation: no load, no PV, no battery
+movement, no grid charging. Fixed charges, the minimum charge, baseline allowances and the
+climate credit are billed on each month's *usable* days, and every annualised total divides
+by `usableDays / 365`, so a 60-day outage no longer reads as a smaller household.
+`quality.usableDays` reports the figure. `prepare()` **throws** (`err.code =
+"INSUFFICIENT_DATA"`, `err.usableDays`, a message written for the UI) when fewer than
+`MIN_USABLE_DAYS` (300) days are usable — a daily-interval file read as hourly lands here.
+`prepare(data, { minUsableDays })` lowers the bar for hand-built test fixtures.
 
 **Holidays** use the weekend schedule: New Year's, Presidents', Memorial, Independence,
 Labor, Veterans, Thanksgiving, Christmas — on the actual date, not the observed one,
@@ -59,7 +70,7 @@ import $/kWh = rates[season][period][providerId]          full bundled retail pr
              + generation × generation municipal surcharge factor
              + CCA energy surcharge                         CCA providers only
 export $/kWh = nbt.export_rates[dayType][month][hour]       the ACC vintage matrix
-             + nbt.cpa_export_adder_per_kwh                 CCA providers only
+             + nbt.cca_export_adder_per_kwh                 CCA providers only
 ```
 
 Two subtleties the tariff file documents and the engine implements:
@@ -73,8 +84,29 @@ Two subtleties the tariff file documents and the engine implements:
   (that is how SCE publishes them). A tariff that lists NBC-exclusive rates needs
   `params.applyNbc = true`.
 
-If a provider key is missing from a rate row, the engine falls back to
-`delivery + sce_generation`.
+**Provider fallback.** A `providerId` the tariff does not list (a stale id from another
+utility, a typo) is priced as **that utility's** default provider (`default: true`, else
+`utility.id`), and `result.tariffTerms.providerFallback` is `true`. A rate cell missing the
+provider column falls back to the default provider's column, then to `delivery +
+<utilityId>_generation`; anything else throws.
+
+**Tariff terms, from the file, per utility.** Nothing below is an SCE constant any more:
+
+| term | source | param override |
+|---|---|---|
+| ACC Plus adder | `nbt.acc_plus_adder_per_kwh` | `accPlusAdder` (undefined/null = file) |
+| ARECR clawback at true-up | `nbt.eec_adjustment_per_kwh` | — |
+| baseline allocation | `utility.baselineRegions.allocations[region]`, default `meta.baseline_region` | `baselineRegion` |
+| baseline credit cap | `plans[].baseline_credit_pct` × allocation (SDG&E TOU-DR1/DR2: 1.30) | — |
+| true-up month | `nbt.true_up_month` | `trueUpMonth` (1-12, the PTO anniversary month) |
+
+A missing `acc_plus_adder_per_kwh` or `eec_adjustment_per_kwh` throws; an unknown
+`baselineRegion` falls back to the default region and sets `tariffTerms.baselineRegionFallback`.
+Every result carries `tariffTerms` — `{ providerId, providerFallback, accPlusAdder, arecr,
+nsc, baselineRegion, baselineRegionFallback, baselineKwhPerDay, baselineCreditPct,
+baselineCreditPerKwh, trueUpMonth }` — so the method panel can show what was used. The
+engine mirrors the small `core/tariff.js` helpers it needs instead of importing them,
+because `tariff.js` is not in the worker bundle.
 
 ---
 
@@ -196,20 +228,28 @@ Monthly, in this order:
    SC 5.c.vii deems them to have happened in the customer's *highest-priced* hours — so
    every exported kWh is filed into one of ten price bands during the hourly loop and the
    settlement strips credit from the top band down. `params.ngom = true` removes the cap.
-2. `subtotal = fixed × days + energy − baseline credit`, floored at
+2. `subtotal = fixed × days + energy − baseline credit`, where the baseline credit is
+   `baseline_credit_per_kwh × min(import, allocation × days × baseline_credit_pct)` on the
+   baseline region's summer months, and `days` is the month's usable days; floored at
    `max(minimum_charge_per_day, fixed_charge_per_day) × days` so the fixed charge always
    survives an export offset.
 3. **Export credits** roll in a bank and offset the subtotal down to — never below — that
    floor. The bank tracks both dollars and the kWh that produced them.
-4. **ACC Plus adder** (`accPlusAdder × creditable kWh`) is settled *outside* the bank: it is
+4. **ACC Plus adder** (the file's `acc_plus_adder_per_kwh` × creditable kWh; PG&E 0.0088,
+   SCE 0.016, SDG&E 0) is settled *outside* the bank: it is
    the one export credit that may offset fixed and non-bypassable charges, so it can take a
    monthly bill below the floor.
 5. **CA Climate Credit** — a flat credit in the months the tariff file names, applied after
    the export offset, and it too can push the bill below the floor. Taken from
    `tariff.meta.climate_credit`; a tariff that does not publish one gets none.
-6. **True-up**, in the true-up month (or the last month of the record): SC 4.e.i first
-   reduces the bank by the Average Retail Export Compensation Rate × surplus kWh
-   (~$0.0598), *then* pays Net Surplus Compensation on those kWh (~$0.02). The ARECR is
+6. **True-up**, in the true-up month (`trueUpMonth`, else `nbt.true_up_month`) or the last
+   month of the record. The first relevant period runs **at least 12 months**: a record
+   that starts shortly before the true-up month does not settle that stub on its own (it
+   made year-1 savings depend on the download date); the first settlement is the first
+   true-up month at or after the 12th billing month, and every true-up month after it.
+   SC 4.e.i first reduces the bank by the Average Retail Export Compensation Rate
+   (`nbt.eec_adjustment_per_kwh`: SCE $0.05981, SDG&E $0.11001) × surplus kWh, *then*
+   pays Net Surplus Compensation on those kWh (~$0.02). The ARECR is
    about three times NSC, so a bank built from cheap midday exports is wiped out and the
    customer keeps only the NSC payment. That is the penalty for sizing an array to annual
    kWh offset instead of to self-consumption, and `forfeitedCredit` reports it.
@@ -374,10 +414,12 @@ an unknown one.
 5. **One-day lookahead**, using the actual next day. A real forecast is worse.
 6. **No demand charges, no tier-based rates, no net metering legacy tariffs.** NBT only.
 7. **Baseline credits** are applied on the lesser of monthly import and the baseline
-   allowance; the allowance is a flat kWh/day from the tariff file, not a climate-zone
-   calculation.
-8. **Unfilled gaps price as zero** (they are reported in `quality.unfilledHours`), so a
-   record with long gaps understates both the bill and the savings.
+   allowance × `baseline_credit_pct`; the allowance is the chosen region's basic kWh/day
+   from the tariff file (the all-electric allocations and medical baseline are not modelled).
+8. **Unfilled gaps are skipped**, not priced as zero, and annualisation uses usable days
+   (§1). The year is assumed to look like the days we have, so a gap concentrated in one
+   season biases the annual figures toward the other seasons. A NaN in a flexible load's
+   `kwhByHour` is treated as 0 and counted in `result.flexNanHours`.
 9. **Round-trip efficiency is split symmetrically** (√RTE in, √RTE out) and inverter
    clipping is modelled only through `exportLimitKW`; the DC/AC ratio lives in `core/pv.js`.
 

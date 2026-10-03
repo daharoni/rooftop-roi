@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import Engine from "../core/engine.js";
+import { readFileSync } from "node:fs";
 import { loadSet, evFlex, poolFlex, plane, refParams,
          RAW_LOAD, SOLAR, TARIFF, REFERENCE } from "./fixtures/agoura.mjs";
 
@@ -19,6 +20,29 @@ const sum = (a) => { let t = 0; for (let i = 0; i < a.length; i++) t += a[i]; re
 
 const LOAD = loadSet();
 const ctx = Engine.prepare({ load: LOAD, tariffs: TARIFF });
+// The prototype-parity numbers below were calibrated on SCE's 2026-06-01 rates; they run
+// on a frozen copy of that file so a later (correct) rate update cannot move them.
+const TARIFF_2026_06 = JSON.parse(readFileSync(new URL("./fixtures/sce-2026-06-01.json", import.meta.url), "utf8"));
+const ctxFrozen = Engine.prepare({ load: LOAD, tariffs: TARIFF_2026_06 });
+// The reference bill replayed at the prices printed on it (calibration override,
+// meta.bill_validation.bill_rates): shift every column of the TOU-D-PRIME summer cells
+// except sce_generation by (printed delivery - shipped delivery) and use the printed
+// Base Services Charge.  That restores the as-billed cells exactly, including the
+// generation share the municipal surcharge is levied on.
+const BR = TARIFF.meta.bill_validation.bill_rates;
+const TARIFF_AS_BILLED = (() => {
+  const t = JSON.parse(JSON.stringify(TARIFF));
+  const p = t.plans.find((x) => x.id === TARIFF.meta.bill_validation.plan);
+  p.fixed_charge_per_day = BR.fixed_charge_per_day;
+  for (const pid of ["on", "mid", "off", "super_off"]) {
+    const src = pid === "super_off" ? "off" : pid;
+    const cell = p.rates.summer[pid];
+    const shift = BR.delivery.summer[src] - cell.delivery;
+    for (const k of Object.keys(cell)) if (k !== "sce_generation") cell[k] = +(cell[k] + shift).toFixed(6);
+  }
+  return t;
+})();
+const ctxBilled = Engine.prepare({ load: LOAD, tariffs: TARIFF_AS_BILLED });
 const P = (over = {}) => Engine.withDefaults(refParams(over.panels === undefined ? 20 : over.panels,
                                                        over.batteries === undefined ? 1 : over.batteries,
                                                        over));
@@ -55,12 +79,14 @@ function miniData(opts = {}) {
                winter: { on: rate(0.5), mid: rate(0.4), off: rate(0.30), super_off: rate(0.2) } },
     }],
     nbt: { export_rates: { weekday: flat(opts.exportRate ?? 0.10), weekend: flat(opts.exportRate ?? 0.10) },
-           cpa_export_adder_per_kwh: 0, net_surplus_compensation_per_kwh: 0.05,
-           nonbypassable_charges_per_kwh: 0.02, true_up_month: 7 },
+           cca_export_adder_per_kwh: 0, net_surplus_compensation_per_kwh: 0.05,
+           nonbypassable_charges_per_kwh: 0.02, true_up_month: 7,
+           acc_plus_adder_per_kwh: 0, eec_adjustment_per_kwh: 0.05981 },
     incentives: { federal_itc_residential_pct: 0, sgip_residential_per_kwh: 0 },
   };
   return {
-    ctx: Engine.prepare({ load: { meta: {}, ts, kwh: Float64Array.from(kwh), exportKwh: null }, tariffs }),
+    ctx: Engine.prepare({ load: { meta: {}, ts, kwh: Float64Array.from(kwh), exportKwh: null }, tariffs },
+                        { minUsableDays: 0 }),
     profile, ev: Float64Array.from(ev),
   };
 }
@@ -112,7 +138,7 @@ test("tariff period lookup - seasons, weekday/weekend, holidays", () => {
   assert.notEqual(rc.imp[idSummerWeekdayPeak], r.imp[idSummerWeekdayPeak],
                   "CPA Green prices differ from SCE bundled");
   near(rc.exp[idSummerWeekdayPeak] - r.exp[idSummerWeekdayPeak],
-       TARIFF.nbt.cpa_export_adder_per_kwh, 1e-9, "CPA export adder applied to export price");
+       TARIFF.nbt.cca_export_adder_per_kwh, 1e-9, "CCA export adder applied to export price");
   assert.ok(ctx.solarIdx.every((v) => v >= 0 && v < 8760),
             "every hour maps into an 8760 solar profile index");
 });
@@ -549,7 +575,13 @@ test("the CA Climate Credit lands in both arms and cancels out of savings", () =
 
 test("the reference SCE bill replays to $749.41 against the paper $749.37", () => {
   const R = REFERENCE.billReplay;
-  const v = Engine.billPeriod(ctx, { planId: "TOU-D-PRIME", providerId: "cpa_green" }, R.start, R.end);
+  // The plan now carries SCE's 2026-10-01 rates; replay at the bill's own printed prices
+  // and fixed charge (meta.bill_validation.bill_rates), not by re-blessing the plan.
+  const asBilled = TARIFF_AS_BILLED.plans.find((x) => x.id === "TOU-D-PRIME").rates.summer;
+  for (const pid of ["on", "mid", "off"]) {
+    near(asBilled[pid].cpa_green, BR.rates.summer[pid], 1e-9, "override restores the printed " + pid + " rate");
+  }
+  const v = Engine.billPeriod(ctxBilled, { planId: "TOU-D-PRIME", providerId: "cpa_green" }, R.start, R.end);
   assert.equal(v.days, R.days, "billing period is 29 days");
   near(v.byPeriod.on.kwh, R.kwh.on, 1.5, "on-peak kWh matches the paper bill");
   near(v.byPeriod.mid.kwh, R.kwh.mid, 1.5, "mid-peak kWh matches the paper bill");
@@ -560,19 +592,19 @@ test("the reference SCE bill replays to $749.41 against the paper $749.37", () =
   assert.ok(Math.abs(v.total - R.actual) / R.actual < 0.06,
             `modelled charges $${v.total.toFixed(2)} within 6% of the actual $${R.actual}`);
   // The replay uses the RECORDED load: flexible-load rescheduling must not touch it.
-  const v2 = Engine.billPeriod(ctx, refParams(40, 3), R.start, R.end);
+  const v2 = Engine.billPeriod(ctxBilled, refParams(40, 3), R.start, R.end);
   near(v2.totalKwh, v.totalKwh, 1e-9, "panels, batteries and flex schedules never move the replay");
 });
 
 // ================================================================== 9. fallback parity
 test("the engine's fallback reshape reproduces the prototype's spreadEV exactly", async () => {
   const p = P({ panels: 27, batteries: 1 });
-  const withFlexload = Engine.simulate(ctx, p, {});
+  const withFlexload = Engine.simulate(ctxFrozen, p, {});
   const src = Engine.flexReshapeSource();
   try {
     Engine.setFlexReshape(null);
     assert.equal(Engine.flexReshapeSource(), "engine-fallback", "the fallback can be forced");
-    const fallback = Engine.simulate(ctx, p, {});
+    const fallback = Engine.simulate(ctxFrozen, p, {});
     // The prototype's numbers, to the cent.
     near(fallback.bill, 686.21198, 0.005, "prototype bill for 27 panels + 1 battery");
     near(fallback.baselineSameFlex.bill, 5469.59251, 0.01, "prototype same-flex baseline bill");
@@ -596,4 +628,192 @@ test("prepare() survives unfilled gaps and reports them", () => {
   assert.equal(c.quality.unfilledHours, 2, "unfilled hours are counted");
   assert.equal(c.recorded[100], 0, "and priced as zero rather than poisoning the bill");
   assert.ok(isFinite(Engine.simulate(c, P({ panels: 10, batteries: 0 }), {}).bill), "the bill stays finite");
+});
+
+// ================================================================== 10. other utilities
+// No engine test touched pge.json or sdge.json before, which is how an SCE-only ACC Plus
+// adder, ARECR and baseline allowance went unnoticed (review 2026-10-02, P0 #2 and #9).
+import fs from "node:fs";
+import Tariff from "../core/tariff.js";
+
+const readTariff = (id) => JSON.parse(fs.readFileSync(new URL(`../data/tariffs/${id}.json`, import.meta.url), "utf8"));
+
+/** Every number reachable from `v` (objects, arrays, typed arrays) must be finite. */
+function assertAllFinite(v, path = "result", seen = new Set()) {
+  if (typeof v === "number") { assert.ok(Number.isFinite(v), `${path} is ${v}`); return; }
+  if (!v || typeof v !== "object" || seen.has(v)) return;
+  seen.add(v);
+  if (ArrayBuffer.isView(v)) {
+    for (let i = 0; i < v.length; i++) if (!Number.isFinite(v[i])) assert.fail(`${path}[${i}] is ${v[i]}`);
+    return;
+  }
+  for (const k of Object.keys(v)) assertAllFinite(v[k], `${path}.${k}`, seen);
+}
+
+for (const id of ["pge", "sdge"]) {
+  test(`${id}.json runs end to end on the reference household with its own tariff terms`, () => {
+    const t = readTariff(id);
+    const c = Engine.prepare({ load: loadSet(), tariffs: t });
+    const plan = Tariff.defaultPlan(t), prov = Tariff.defaultProvider(t);
+    for (const [panels, batteries] of [[0, 0], [20, 1], [40, 2]]) {
+      const p = Engine.withDefaults(refParams(panels, batteries, { planId: plan.id, providerId: prov }));
+      const res = Engine.simulate(c, p, { detail: true });
+      assertAllFinite(res, `${id} ${panels}p/${batteries}b`);
+      const terms = res.tariffTerms;
+      assert.equal(terms.providerId, prov, "the requested provider prices the run");
+      assert.equal(terms.providerFallback, false, "no provider fallback for a known provider");
+      assert.equal(terms.accPlusAdder, t.nbt.acc_plus_adder_per_kwh, "ACC Plus adder comes from the file");
+      assert.equal(terms.accPlusAdder, Tariff.accPlusAdder(t), "...and agrees with core/tariff.js");
+      assert.equal(terms.arecr, t.nbt.eec_adjustment_per_kwh, "ARECR comes from the file");
+      assert.equal(terms.arecr, Tariff.arecr(t), "...and agrees with core/tariff.js");
+      assert.equal(terms.trueUpMonth, t.nbt.true_up_month, "true-up month comes from the file");
+      assert.equal(terms.baselineRegion, Tariff.defaultBaselineRegion(t), "default baseline region");
+      const accLines = res.monthly.reduce((a, m) => a - m.accPlus, 0);
+      const accWant = res.monthly.reduce((a, m) => a + m.exportKwh, 0) * t.nbt.acc_plus_adder_per_kwh;
+      near(accLines, accWant, 1e-6, "every ACC Plus bill line is the file's adder x creditable export");
+    }
+    // An explicit override still wins over the file.
+    const over = Engine.simulate(c, Engine.withDefaults(refParams(30, 1,
+      { planId: plan.id, providerId: prov, accPlusAdder: 0.05 })), {});
+    assert.equal(over.tariffTerms.accPlusAdder, 0.05, "accPlusAdder param overrides the file");
+  });
+}
+
+test("SDG&E TOU-DR1 baseline credit runs to 130% of the region's allocation", () => {
+  const t = readTariff("sdge");
+  const c = Engine.prepare({ load: loadSet(), tariffs: t });
+  const br = t.utility.baselineRegions;
+  const run = (over) => Engine.simulate(c, Engine.withDefaults(refParams(0, 0,
+    { planId: "TOU-DR1", providerId: "sdge", ...over })), { detail: true }).baselineAsRecorded;
+  // baselineAsRecorded with detail carries no monthly rows; use runHours directly instead.
+  const rows = (over) => {
+    const p = Engine.withDefaults(refParams(0, 0, { planId: "TOU-DR1", providerId: "sdge", ...over }));
+    return Engine.runHours(Engine.buildScenario(c, p), p, true);
+  };
+  for (const region of ["coastal", "desert"]) {
+    const out = rows({ baselineRegion: region });
+    assert.equal(out.tariffTerms.baselineRegion, region, "the requested region is used");
+    assert.equal(out.tariffTerms.baselineCreditPct, 1.3, "TOU-DR1 credits 130% of baseline");
+    const a = br.allocations[region];
+    let beyond100 = 0;
+    for (const m of out.monthly) {
+      const daily = br.summer_months.includes(+m.key.slice(5, 7)) ? a.summer : a.winter;
+      const want = 0.10702 * Math.min(m.importKwh, daily * m.days * 1.3);
+      near(-m.baselineCredit, want, 1e-6, `${region} ${m.key} baseline credit`);
+      if (m.importKwh > daily * m.days * 1.0 + 1) beyond100++;
+    }
+    assert.ok(beyond100 > 0, `${region}: some months import more than 100% of baseline, so 130% bites`);
+  }
+  const coastal = rows({ baselineRegion: "coastal" }), desert = rows({ baselineRegion: "desert" });
+  assert.ok(desert.bill < coastal.bill, "a larger desert allocation means a larger credit and a lower bill");
+  assert.equal(rows({ planId: "TOU-ELEC" }).tariffTerms.baselineCreditPerKwh, 0, "TOU-ELEC has no credit");
+  const bogus = rows({ baselineRegion: "nowhere" });
+  assert.equal(bogus.tariffTerms.baselineRegion, Tariff.defaultBaselineRegion(t), "unknown region -> default");
+  assert.equal(bogus.tariffTerms.baselineRegionFallback, true, "...and the fallback is flagged");
+  assert.ok(run({}).bill > 0, "the no-system arm prices too");
+});
+
+test("PG&E E-TOU-C baseline follows the chosen territory", () => {
+  const t = readTariff("pge");
+  const c = Engine.prepare({ load: loadSet(), tariffs: t });
+  const bill = (region) => {
+    const p = Engine.withDefaults(refParams(0, 0, { planId: "E-TOU-C", providerId: "pge", baselineRegion: region }));
+    return Engine.runHours(Engine.buildScenario(c, p), p, false);
+  };
+  const x = bill("X"), w = bill("W");
+  assert.equal(x.tariffTerms.baselineCreditPct, 1, "PG&E credits 100% of baseline");
+  assert.deepEqual(w.tariffTerms.baselineKwhPerDay,
+                   { summer: t.utility.baselineRegions.allocations.W.summer,
+                     winter: t.utility.baselineRegions.allocations.W.winter }, "territory W allocation");
+  assert.notEqual(x.bill, w.bill, "the territory moves the bill");
+});
+
+// ================================================================== 11. gaps
+test("gap hours are excluded from annualisation, not priced as zero usage", () => {
+  const full = Engine.prepare({ load: loadSet(), tariffs: TARIFF });
+  const holed = loadSet();
+  holed.kwh = Float64Array.from(holed.kwh);
+  // Blank 60 whole days spread through the record (every 12th day).
+  let blanked = 0;
+  for (let d = 5; d < full.nDays && blanked < 60; d += 12, blanked++) {
+    const s0 = full.dayStart[d];
+    for (let k = s0; k < s0 + full.dayLen[d]; k++) holed.kwh[k] = NaN;
+  }
+  assert.equal(blanked, 60, "60 days blanked");
+  const c = Engine.prepare({ load: holed, tariffs: TARIFF });
+  near(c.quality.usableDays, full.nDays - 60, 1e-9, "quality.usableDays excludes the blank days");
+  near(c.years, (full.nDays - 60) / 365, 1e-12, "years counts usable days only");
+  near(c.quality.annualKwh, full.quality.annualKwh, full.quality.annualKwh * 0.01,
+       "annual kWh within 1% of the ungapped record");
+  const p = Engine.withDefaults(refParams(20, 1, { flex: [] }));
+  const a = Engine.simulate(full, p, {}), b = Engine.simulate(c, p, {});
+  assertAllFinite(b, "gapped result");
+  near(b.loadKwh, a.loadKwh, a.loadKwh * 0.01, "simulated annual load within 1%");
+  near(b.pvKwh, a.pvKwh, a.pvKwh * 0.02, "PV is counted over the same usable hours");
+  near(b.baselineSameFlex.bill, a.baselineSameFlex.bill, a.baselineSameFlex.bill * 0.03,
+       "the no-system bill is not understated by the gap");
+});
+
+test("fewer than 300 usable days is refused with a message for the UI", () => {
+  const short = loadSet();
+  const n = 24 * 200;
+  short.ts = short.ts.slice(0, n); short.kwh = short.kwh.slice(0, n);
+  assert.throws(() => Engine.prepare({ load: short, tariffs: TARIFF }),
+                (e) => e.code === "INSUFFICIENT_DATA" && /usable days/.test(e.message) && e.usableDays < 300);
+  // Mostly-NaN data (a daily-interval file read as hourly) is refused the same way.
+  const sparse = loadSet();
+  sparse.kwh = Float64Array.from(sparse.kwh, (v, i) => (i % 24 === 0 ? v : NaN));
+  assert.throws(() => Engine.prepare({ load: sparse, tariffs: TARIFF }), /usable days/);
+});
+
+test("a NaN inside a flexible load's kwhByHour is treated as 0 and counted", () => {
+  const ev = evFlex();
+  ev.kwhByHour = Float64Array.from(ev.kwhByHour);
+  ev.kwhByHour[500] = NaN; ev.kwhByHour[501] = Infinity;
+  const res = Engine.simulate(ctx, P({ flex: [ev, poolFlex()] }), {});
+  assert.ok(Number.isFinite(res.bill), "the bill stays finite");
+  assert.ok(res.flexNanHours >= 2, `bad flex hours are counted (${res.flexNanHours})`);
+});
+
+// ================================================================== 12. provider fallback
+test("an unknown provider falls back to the utility's own default, never to SCE generation", () => {
+  const known = Engine.runHours(Engine.buildScenario(ctx, P({ providerId: "sce" })), P({ providerId: "sce" }), false);
+  const stale = P({ providerId: "mce" });                 // a PG&E CCA id on an SCE tariff
+  const out = Engine.runHours(Engine.buildScenario(ctx, stale), stale, false);
+  assert.equal(out.tariffTerms.providerId, "sce", "falls back to SCE bundled");
+  assert.equal(out.tariffTerms.providerFallback, true, "...and says so");
+  near(out.bill, known.bill, 1e-9, "priced exactly as SCE bundled");
+
+  const pge = readTariff("pge");
+  const cp = Engine.prepare({ load: loadSet(), tariffs: pge });
+  const q = Engine.withDefaults(refParams(0, 0, { planId: "E-TOU-C", providerId: "cpa_green" }));
+  const r = Engine.runHours(Engine.buildScenario(cp, q), q, false);
+  const qp = Engine.withDefaults(refParams(0, 0, { planId: "E-TOU-C", providerId: "pge" }));
+  const rp = Engine.runHours(Engine.buildScenario(cp, qp), qp, false);
+  assert.equal(r.tariffTerms.providerId, "pge", "PG&E falls back to PG&E bundled");
+  near(r.bill, rp.bill, 1e-9, "with generation charges intact (not delivery + sce_generation)");
+
+  const orphan = JSON.parse(JSON.stringify(TARIFF));
+  orphan.providers = {}; delete orphan.utility;
+  const co = Engine.prepare({ load: loadSet(), tariffs: orphan });
+  assert.throws(() => Engine.buildScenario(co, P({ providerId: "nobody" })), /provider/);
+});
+
+// ================================================================== 13. true-up month
+test("true-up month: file default, override, and no stub settlement at record start", () => {
+  // The record starts 2024-09.  A September true-up must not settle September 2024 alone.
+  const out9 = Engine.runHours(Engine.buildScenario(ctx, P({ trueUpMonth: 9 })), P({ trueUpMonth: 9 }), true);
+  const settled9 = out9.monthly.filter((m) => m.settled).map((m) => m.key);
+  assert.equal(out9.tariffTerms.trueUpMonth, 9, "the override is used");
+  assert.ok(!settled9.includes(ctx.monthKey[0]), `no settlement in the first month (${settled9})`);
+  assert.equal(settled9[0], "2025-09", "the first relevant period runs 12 months");
+  const outDef = Engine.runHours(Engine.buildScenario(ctx, P()), P(), true);
+  assert.equal(outDef.tariffTerms.trueUpMonth, TARIFF.nbt.true_up_month, "default comes from the file");
+  const settled = outDef.monthly.filter((m) => m.settled).map((m) => m.key);
+  assert.equal(settled[0].slice(5), String(TARIFF.nbt.true_up_month).padStart(2, "0"), "settles in that month");
+  assert.equal(settled[settled.length - 1], ctx.monthKey[ctx.nMonths - 1], "the record's last month always settles");
+  for (let i = 1; i < settled.length - 1; i++) {
+    assert.ok(ctx.monthKey.indexOf(settled[i]) - ctx.monthKey.indexOf(settled[i - 1]) === 12,
+              "later relevant periods are exactly 12 months");
+  }
 });

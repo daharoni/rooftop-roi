@@ -40,18 +40,6 @@
 /** Utilities the library ships, in the order the UI should offer them. */
 export const UTILITY_IDS = ["sce", "pge", "sdge"];
 
-/**
- * ACC Plus adder fallback, $/kWh on every exported kWh, by utility, for the
- * CURRENT (2026) NBT vintage.
- *
- * Normally this lives in the tariff file as `nbt.acc_plus_adder_per_kwh`.
- * data/tariffs/sce.json predates that field and is frozen (its rate values were
- * calibrated against a real bill and must not be edited), so SCE's value - which
- * its own nbt.notes states in prose - is carried here instead.  validate() emits a
- * warning for any file missing the field so this map does not quietly grow.
- */
-const ACC_PLUS_FALLBACK = { sce: 0.016 };
-
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -262,6 +250,42 @@ export function baselineAllocation(t, region) {
   return (t && t.meta && t.meta.baseline_kwh_per_day) || null;
 }
 
+/**
+ * The baseline region a site gets when the user has not picked one: `meta.baseline_region`
+ * when it names a real allocation, else the first allocation, else null.
+ */
+export function defaultBaselineRegion(t) {
+  const br = t && t.utility && t.utility.baselineRegions;
+  const alloc = (br && br.allocations) || {};
+  const m = t && t.meta && t.meta.baseline_region;
+  if (m != null && alloc[String(m)]) return String(m);
+  return Object.keys(alloc)[0] || null;
+}
+
+/**
+ * Every baseline region of a utility, for a picker:
+ * [{ id, label, summer, winter, summerAllElectric, winterAllElectric, isDefault }].
+ * Empty when the file has no baselineRegions.
+ */
+export function baselineRegionList(t) {
+  const br = t && t.utility && t.utility.baselineRegions;
+  const alloc = (br && br.allocations) || {};
+  const def = defaultBaselineRegion(t);
+  return Object.keys(alloc).map((id) => {
+    const a = alloc[id] || {};
+    return { id, label: a.label || ("Region " + id), summer: a.summer, winter: a.winter,
+             summerAllElectric: a.summer_all_electric == null ? null : a.summer_all_electric,
+             winterAllElectric: a.winter_all_electric == null ? null : a.winter_all_electric,
+             isDefault: id === def };
+  });
+}
+
+/** Share of the baseline allocation the baseline credit covers (1.0, or 1.3 on SDG&E TOU-DR1/DR2). */
+export function baselineCreditPct(t, p) {
+  const pl = asPlan(t, p);
+  return (pl && typeof pl.baseline_credit_pct === "number" && pl.baseline_credit_pct > 0) ? pl.baseline_credit_pct : 1;
+}
+
 /** A plan by id (case-insensitive, tolerant of the "TOU-D-4-9PM" / "TOU-D-4-9" split). */
 export function plan(t, id) {
   if (!t || !t.plans) return null;
@@ -384,9 +408,23 @@ export function rateDetailAt(t, p, providerId, date, hour) {
 /** The ACC Plus adder, $/kWh, paid on top of the export matrix for this vintage. */
 export function accPlusAdder(t) {
   const n = (t && t.nbt) || {};
-  if (typeof n.acc_plus_adder_per_kwh === "number") return n.acc_plus_adder_per_kwh;
-  const id = t && t.utility && t.utility.id;
-  return (id && ACC_PLUS_FALLBACK[id]) || 0;
+  return typeof n.acc_plus_adder_per_kwh === "number" ? n.acc_plus_adder_per_kwh : 0;
+}
+
+/**
+ * Average Retail Export Compensation Rate ("EEC Adjustment"), $/kWh: the rate at which
+ * the credit bank is debited for net surplus kWh at true-up, before NSC is paid.
+ * Null when the file does not carry it (validate() makes that an error).
+ */
+export function arecr(t) {
+  const n = (t && t.nbt) || {};
+  return typeof n.eec_adjustment_per_kwh === "number" ? n.eec_adjustment_per_kwh : null;
+}
+
+/** Default true-up (settlement) month 1-12 when the user has not given a PTO month. */
+export function trueUpMonth(t) {
+  const v = t && t.nbt && t.nbt.true_up_month;
+  return Number.isInteger(v) && v >= 1 && v <= 12 ? v : 4;
 }
 
 /**
@@ -562,6 +600,10 @@ export function validate(t) {
     if (!isFiniteNonNeg(p.fixed_charge_per_day)) E(tag + " fixed_charge_per_day must be a number >= 0");
     if (!isFiniteNonNeg(p.minimum_charge_per_day)) E(tag + " minimum_charge_per_day must be a number >= 0");
     if (!isFiniteNonNeg(p.baseline_credit_per_kwh)) E(tag + " baseline_credit_per_kwh must be a number >= 0");
+    if (typeof p.baseline_credit_pct !== "number" || !isFinite(p.baseline_credit_pct)
+        || p.baseline_credit_pct < 1 || p.baseline_credit_pct > 2) {
+      E(tag + " baseline_credit_pct must be a number in [1, 2] (1.0 = 100% of the allocation)");
+    }
 
     /* schedules: 24 entries, every emitted id known and priced */
     const emitted = {};
@@ -659,8 +701,30 @@ export function validate(t) {
     });
     if (!isFiniteNonNeg(n.net_surplus_compensation_per_kwh)) E("nbt.net_surplus_compensation_per_kwh must be a number >= 0");
     if (!isFiniteNonNeg(n.nonbypassable_charges_per_kwh)) E("nbt.nonbypassable_charges_per_kwh must be a number >= 0");
-    if (typeof n.acc_plus_adder_per_kwh !== "number") {
-      W("nbt.acc_plus_adder_per_kwh missing - falling back to the value hard-coded in core/tariff.js");
+    if (!isFiniteNonNeg(n.acc_plus_adder_per_kwh)) {
+      E("nbt.acc_plus_adder_per_kwh must be a number >= 0 (0 is a real value, e.g. SDG&E)");
+    }
+    if (!isFinitePositive(n.eec_adjustment_per_kwh)) {
+      E("nbt.eec_adjustment_per_kwh (true-up ARECR clawback rate) must be a number > 0");
+    } else if (n.eec_adjustment_per_kwh > 0.5) {
+      W("nbt.eec_adjustment_per_kwh = $" + n.eec_adjustment_per_kwh + "/kWh looks implausibly high");
+    }
+    /* the CCA export adder: one key for every utility; required once the file
+       declares any non-bundled provider (engine applies it to provider != utility.id) */
+    if (n.cpa_export_adder_per_kwh !== undefined) {
+      E("nbt.cpa_export_adder_per_kwh was renamed nbt.cca_export_adder_per_kwh");
+    }
+    const uidN = t.utility && t.utility.id;
+    const hasCca = Object.keys(t.providers || {}).some((k) => k !== uidN);
+    if (hasCca && !isFiniteNonNeg(n.cca_export_adder_per_kwh)) {
+      E("nbt.cca_export_adder_per_kwh must be a number >= 0 (0 is a real value) when non-bundled providers are listed");
+    }
+    if (!(Number.isInteger(n.true_up_month) && n.true_up_month >= 1 && n.true_up_month <= 12)) {
+      E("nbt.true_up_month must be an integer month 1-12");
+    }
+    const es = n.eec_adjustment_source;
+    if (es && es._confidence && ["high", "medium", "low"].indexOf(es._confidence) < 0) {
+      E("nbt.eec_adjustment_source._confidence must be high|medium|low");
     }
   }
 
@@ -884,6 +948,7 @@ const Tariff = {
   UTILITY_IDS,
   loadLibrary,
   utilityForZip, baselineRegionForZip, baselineAllocation,
+  defaultBaselineRegion, baselineRegionList, baselineCreditPct, arecr, trueUpMonth,
   plan, defaultPlan, providersOf, defaultProvider,
   seasonOf, periodAt, rateAt, rateDetailAt,
   exportRateAt, exportMatrix, accPlusAdder,

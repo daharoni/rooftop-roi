@@ -180,6 +180,7 @@
   "as_of": "2026-09-16",
   "rates_effective": "2026-08-01",
   "sources": [
+   {"title": "SDG&E - Understanding Your Solar Bill: EEC Adjustment Pricing table (retrieved 2026-10-03)", "url": "https://www.sdge.com/solar/solar-billing-plan/UnderstandingYourSolarBill", "used_for": "nbt.eec_adjustment_per_kwh: September 2026 EEC Adjustment, generation $0.08672 + delivery $0.02329 = $0.11001/kWh"},
    {
     "title": "SDG&E Schedule TOU-DR1 Total Rates Table, effective 2026-08-01",
     "url": "https://www.sdge.com/sites/default/files/regulatory/8-1-26%20Schedule%20TOU-DR1%20Total%20Rates%20Table.pdf",
@@ -393,6 +394,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.10702,
+   "baseline_credit_pct": 1.3,
    "period_ids": [
     "on",
     "mid",
@@ -586,6 +588,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.10702,
+   "baseline_credit_pct": 1.3,
    "period_ids": [
     "on",
     "mid",
@@ -779,6 +782,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -972,6 +976,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -1165,6 +1170,7 @@
    "fixed_charge_per_day": 0.79343,
    "minimum_charge_per_day": 0.0,
    "baseline_credit_per_kwh": 0.0,
+   "baseline_credit_pct": 1.0,
    "period_ids": [
     "on",
     "mid",
@@ -2010,6 +2016,9 @@
   "net_surplus_compensation_per_kwh": 0.01702,
   "nonbypassable_charges_per_kwh": 0.02099,
   "true_up": "annual",
+  "true_up_month": 4,
+  "eec_adjustment_per_kwh": 0.11001,
+  "eec_adjustment_source": {"month": "2026-09", "_confidence": "medium", "note": "SDG&E 'EEC Adjustment Pricing' (the Annual True-Up Adjustment rate) for September 2026: generation $0.08672 + delivery $0.02329 = $0.11001/kWh, published as negative charges on the Understanding Your Solar Bill page. Published monthly and falling through 2026 (January was $0.14820); the value applies by true-up month."},
   "notes": "WHAT THESE NUMBERS ARE. Under the Net Billing Tariff (SDG&E brands it the Solar Billing Plan; everyone else says NEM 3.0) exported energy is credited at hourly Avoided Cost Calculator values, not at the retail rate. The export_rates matrices are SDG&E's own published export prices for the NBT26 vintage, calendar year 2026, taken from its CPUC Resolution E-5301 machine-readable MIDAS compliance file, which already carries the CPUC-mandated month / day-type / hour aggregation in its ValueName field - 576 distinct cells per component with zero conflicting values, so nothing was interpolated or re-averaged. Hour index is hour-BEGINNING 0-23 in Pacific PREVAILING time, DST aware; the weekend table applies on Saturdays, Sundays and the eight holidays. Each value is the TOTAL credit = generation component + delivery component; a CCA customer receives the delivery component from SDG&E and the generation component from the CCA, and the sum is unchanged. The split is preserved in data/export/sdge-nbt26.json. SHAPE. Peak: August weekday hour 18 (6-7 p.m.) = $1.06977/kWh, hour 20 = $0.98482, hour 17 = $0.92495; August weekend hour 20 = $1.01965. Trough: spring weekend midday reaches $0.00000. The midday mean over hours 9-15 is $0.04202 weekday and $0.02037 weekend, against an unweighted all-hours mean of $0.09274 weekday and $0.08395 weekend. Use the midday figure as the anchor for unpaired solar: the all-hours mean is carried by a handful of extreme August-evening cells a PV array alone never reaches. Exporting a midday kWh earns roughly a tenth of what importing one costs on TOU-DR1, so self-consumption and evening battery discharge carry essentially all of the value. SDG&E's curve tracks PG&E's and SCE's closely - September weekday hour 19 is $0.58179 here against PG&E's $0.59505 - which is expected, since all three derive from the same 2024 ACC under one CPUC methodology. NO ACC PLUS ADDER. This is the single biggest difference between SDG&E and the other two California IOUs for a solar customer, and it is easy to miss. CPUC D.22-12-056 created a glide-path adder paid on top of the ACC export price - PG&E residential gets $0.0088/kWh for a 2026 vintage, SCE gets $0.016 - but the decision granted it ONLY to PG&E and SCE residential customers. SDG&E customers receive NOTHING. acc_plus_adder_per_kwh is therefore a real 0.0, not a placeholder. Confidence MEDIUM rather than HIGH: SDG&E's tariff viewer is a JavaScript application from which the Schedule NBT PDF could not be retrieved, so this rests on the decision text plus the complete absence of any adder provision in SDG&E's own Solar Billing Plan materials. THE NINE-YEAR LOCK-IN FREEZES A TRAJECTORY, NOT A FLAT TABLE. A 2026 vintage locks NBT26 for nine years, but that vintage specifies a different 12x24 matrix for every year: the generation component decays after 2028 while the delivery component grows. This file carries the 2026 matrix only. The direction of the error is documented in detail in data/tariffs/sce.json nbt.notes and is the same here - applying one year's matrix flat OVERSTATES summer-evening battery export revenue in later years while understating overnight and shoulder hours. A future revision should carry all nine years. NETTING AND TRUE-UP. Netting is HOURLY, not monthly: each exported kWh earns that hour's price while each imported kWh in the same hour is charged the full retail TOU rate. They do not cancel. Surplus credit rolls forward and is settled at the annual true-up. NET SURPLUS COMPENSATION. $0.01702/kWh as of September 2026 - the lowest of the three IOUs (PG&E $0.02751, SCE $0.01825 bundled). Computed on the same CAISO day-ahead DLAP basis and recalculated monthly, so it drifts. Confidence MEDIUM-HIGH: single source. Modelling an oversized array's surplus at this rate still understates the penalty, because the true-up debits the surplus kWh at an average retail export compensation rate several times higher before crediting them at the NSC rate. A separate Renewable Attribute Adder exists but SDG&E requires more than 12,000 surplus kWh a year and WREGIS registration to make it worthwhile, which no residential system reaches. NON-BYPASSABLE CHARGES. $0.02099/kWh on every IMPORTED kWh - nearly double PG&E's $0.01230 - made up of Public Purpose Programs $0.01515, Nuclear Decommissioning $0.00000, Competition Transition Charge -$0.00007 (currently negative) and Schedule WF-NBC + DWR-BC $0.00591. DO NOT ADD THIS ON TOP OF THE RATE TABLES - it is already inside them, as line items in each schedule's UDC breakdown. It is recorded separately only to show which part of the import price solar can never escape. With no ACC Plus adder to offset it, an SDG&E solar customer has no route around it at all."
  },
  "incentives": {

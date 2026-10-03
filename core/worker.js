@@ -145,8 +145,11 @@
       if (m.type !== "init" && !ctx) throw new Error("worker received '" + m.type + "' before 'init'");
       h(m);
     } catch (err) {
-      post({ type: "error", id: m.id, message: (err && err.message) || String(err),
-             stack: err && err.stack });
+      // `code`, `usableDays` and `phase` let the page tell "your file is too short"
+      // (E.prepare throws INSUFFICIENT_DATA) apart from a bug.
+      post({ type: "error", id: m.id, phase: m.type, message: (err && err.message) || String(err),
+             userMessage: err && err.userMessage, code: err && err.code,
+             usableDays: err && err.usableDays, stack: err && err.stack });
     }
   };
 })(typeof self !== "undefined" ? self : this);

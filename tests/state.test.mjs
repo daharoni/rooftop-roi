@@ -91,7 +91,7 @@ test("the hash carries only what differs from the defaults", () => {
   const s = freshState();
   s.fin.costPerW = 2.5;
   const h = toHash(s);
-  assert.equal(h, "cw=2.5");
+  assert.equal(h, "v=1&cw=2.5", "a versioned hash: v first, then only what differs");
   assert.ok(!h.includes("hz="), "an untouched horizon must not appear");
 });
 
@@ -277,4 +277,114 @@ test("share links and storage never carry coordinates finer than ~1 km", async (
   const h = S.toHash(s);
   assert.ok(h.includes("lat=34.15") && h.includes("lon=-118.76"), `hash rounds the site: ${h.slice(0, 40)}`);
   assert.ok(!h.includes("34.1456"), "and the precise point never appears");
+});
+
+// ------------------------------------------------------- hardening (P0 #10)
+
+test("a malformed percent sequence never throws and is reported", () => {
+  const report = {};
+  let s;
+  assert.doesNotThrow(() => { s = fromHash("#lat=%E0%A4%A&cw=2.5", freshState(), report); });
+  assert.equal(s.site.lat, null, "the damaged key falls back to its default");
+  assert.equal(s.fin.costPerW, 2.5, "the readable keys still apply");
+  assert.equal(report.damaged, true);
+  assert.deepEqual(report.keys, ["lat"]);
+});
+
+test("damaged plane and flex fields fall back without losing the token", () => {
+  const report = {};
+  const s = fromHash("roof=p1:25:%ZZ:10:0:0:Good%20name;p2:30:200:8:0:0:%E0%A4", freshState(), report);
+  assert.equal(s.roof.planes.length, 2);
+  assert.equal(s.roof.planes[0].azimuth, 180, "unreadable azimuth -> default");
+  assert.equal(s.roof.planes[0].name, "Good name");
+  assert.equal(s.roof.planes[1].name, "Roof face", "unreadable name -> default name");
+  assert.equal(report.damaged, true);
+});
+
+test("plane and flex names with ; : % & , = round-trip exactly once-decoded", () => {
+  const nasty = "A;b:c%d&e,f=g %20 x";
+  const s = freshState();
+  s.roof.planes = [{ id: "p1", name: nasty, tilt: 22, azimuth: 190, maxPanels: 12,
+    shading: { annual: 0.1 }, costAdder: 0, polygon: null, gutterEdge: null }];
+  s.flex = [{ id: "ev1", kind: "ev", name: nasty, source: "manual", annualKwh: 3000, kwhByHour: null,
+    detection: null, schedule: { mode: "asRecorded", daysPerWeek: 5, window: [8, 15],
+      daylightFraction: 0.9, overnightWindow: [1, 5], maxKW: 8, followSolar: true }, scale: 1 }];
+  const h = toHash(s);
+  const back = fromHash(h, freshState());
+  assert.equal(back.roof.planes[0].name, nasty);
+  assert.equal(back.roof.planes[0].azimuth, 190);
+  assert.equal(back.flex[0].name, nasty);
+  assert.equal(toHash(back), h, "and re-encoding is stable");
+});
+
+test("names are capped at 40 characters", () => {
+  const s = freshState();
+  s.roof.planes = [{ id: "p1", name: "x".repeat(200), tilt: 20, azimuth: 180, maxPanels: 10,
+    shading: { annual: 0 }, costAdder: 0 }];
+  assert.equal(fromHash(toHash(s), freshState()).roof.planes[0].name.length, 40);
+});
+
+test("out-of-range, unparseable and off-enum scalars become the default, never null", () => {
+  const report = {};
+  const s = fromHash("maxb=100000&maxp=5000&panelW=x&pw=null&strat=foo&hz=2.5&lapr=abc&obj=bogus&gcharge=maybe",
+    freshState(), report);
+  assert.equal(s.system.maxBatteries, DEFAULTS.system.maxBatteries);
+  assert.equal(s.system.maxPanels, DEFAULTS.system.maxPanels);
+  assert.equal(s.system.panelW, 460);
+  assert.equal(s.system.strategy, "tou_arbitrage");
+  assert.equal(s.fin.horizon, 25, "an integer key refuses 2.5");
+  assert.equal(s.fin.financing.loan.apr, DEFAULTS.fin.financing.loan.apr);
+  assert.equal(s.ui.objective, "npv");
+  assert.equal(s.system.gridCharge, false);
+  assert.equal(report.damaged, true);
+});
+
+test("in-range values pass the schema untouched", () => {
+  const s = fromHash("maxb=12&pw=400&strat=self_consumption&tum=4&breg=10", freshState());
+  assert.equal(s.system.maxBatteries, 12);
+  assert.equal(s.system.panelW, 400);
+  assert.equal(s.system.strategy, "self_consumption");
+  assert.equal(s.fin.trueUpMonth, 4);
+  assert.equal(s.site.baselineRegion, "10");
+});
+
+test("storage values pass the same schema", () => {
+  const s = fromStorage({ v: 1, pw: null, maxb: 1e6, strat: "foo", cw: 2.2 }, freshState());
+  assert.equal(s.system.panelW, 460);
+  assert.equal(s.system.maxBatteries, 6);
+  assert.equal(s.system.strategy, "tou_arbitrage");
+  assert.equal(s.fin.costPerW, 2.2);
+});
+
+test("storage from a newer build is ignored; unversioned storage reads as v1", () => {
+  assert.deepEqual(fromStorage({ v: 99, cw: 2.2 }, freshState()), freshState());
+  assert.equal(fromStorage({ cw: 2.2 }, freshState()).fin.costPerW, 2.2);
+});
+
+test("the new engine fields round-trip through both codecs", () => {
+  const s = freshState();
+  s.site.baselineRegion = "9";
+  s.fin.trueUpMonth = 7;
+  const h = fromHash(toHash(s), freshState());
+  assert.equal(h.site.baselineRegion, "9");
+  assert.equal(h.fin.trueUpMonth, 7);
+  const st = fromStorage(JSON.parse(JSON.stringify(toStorage(s))), freshState());
+  assert.equal(st.site.baselineRegion, "9");
+  assert.equal(st.fin.trueUpMonth, 7);
+  const out = fromHash("tum=13", freshState());
+  assert.equal(out.fin.trueUpMonth, null, "month 13 -> default (null = engine decides)");
+});
+
+test("the existing-solar acknowledgement lives in storage, never in a link", () => {
+  const s = freshState();
+  s.ui.existingSolarAck = true;
+  assert.equal(toHash(s), "");
+  assert.equal(fromStorage(toStorage(s), freshState()).ui.existingSolarAck, true);
+});
+
+test("legacy unversioned links still parse", () => {
+  const s = fromHash("cw=2.1&roof=p1:20:169:30:0.05:0:South%20face", freshState());
+  assert.equal(s.fin.costPerW, 2.1);
+  assert.equal(s.roof.planes[0].name, "South face");
+  assert.equal(s.roof.planes[0].azimuth, 169);
 });

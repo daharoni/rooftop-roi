@@ -6,7 +6,7 @@
  *
  * Two halves:
  *
- *   detectEV(loadSet, opts) -> FlexLoad     split EV charging out of the whole-house
+ *   detectEV(loadSet, opts) -> FlexLoad|null   split EV charging out of the whole-house
  *   detectPool(loadSet, opts) -> FlexLoad|null   ... and a pool pump, if there is one
  *
  *   reshape(flex, cal, solarShape) -> Float64Array(N)
@@ -47,6 +47,23 @@ export const EV_TUNING = {
   dayFlatness: 1.0,             // max (max-min) excess inside a daytime plateau
   dayLevelLo: 0.70,             // daytime plateau must sit in [lo,hi] x charger kW
   dayLevelHi: 1.20,
+  // ---- generalisation beyond the reference household (review 2026-10-02, P0 #4/#5) ----
+  // The two thresholds above are CEILINGS.  For a smaller charger they scale down to
+  // `thresholdFrac` / `coreFrac` x the inferred charger kW, but never below a floor tied
+  // to the house itself (`houseFloorMult` x the median hourly load, at least
+  // `minExcessFloor`), so ordinary appliance noise cannot pass for charging.  With an
+  // 8 kW charger the ceilings win and the reference numbers are reproduced exactly.
+  thresholdFrac: 0.5,
+  coreFrac: 0.8,
+  houseFloorMult: 1.5,
+  minExcessFloor: 1.0,
+  minChargerKW: 2.8,            // a plateau lower than this is not a Level-2 charger
+  // Below this a detection is not adopted (see `detectEV`).
+  minConfidence: 0.5,
+  // Plausibility: share of EV energy in Jun-Sep, and in the 18:00-22:59 evening block,
+  // above which the "EV" is far more likely to be air-conditioning.
+  maxSummerShare: 0.75,
+  maxEveningShare: 0.9,
 };
 
 // ------------------------------------------------------------------- helpers
@@ -158,6 +175,33 @@ function dayBounds(cal) {
  *
  * NaN hours (a gap the parser could not fill) are treated as absent: they never
  * enter a baseline and never carry EV energy.
+ *
+ * Generalised beyond the reference household (review 2026-10-02, P0 #4 and #5):
+ *   - the charger kW is first estimated from the record's flat plateaus, overnight
+ *     AND daytime (`estimateChargerKW`), replacing the old fixed 8 kW fallback; the
+ *     2.0 / 4.0 kWh thresholds become ceilings that scale down to 0.5x / 0.8x that kW
+ *     for a small charger, floored at 1.5x the house's median hourly load;
+ *   - the result is returned as **null** (nothing adopted) when there are no
+ *     sessions, when confidence < `minConfidence` (0.5), or when the pattern fails
+ *     the plausibility test (summer-only, or evening-only = air-conditioning);
+ *   - a detected EV is scheduled "asRecorded": nothing is moved into solar hours
+ *     until the visitor opts in.
+ *
+ * Why 0.5: `evConfidence` scores four sanity checks out of 0.9.  Passing all four
+ * scores 0.9; one failure 0.73-0.75; two failures 0.56-0.60; three 0.41-0.43.  0.5
+ * therefore adopts a split that passes at least two of the four checks on a complete
+ * record, and rejects one that fails three, or fails one on a record with less than
+ * ~70% coverage.  The plausibility test, not the score, is what catches AC.
+ *
+ * opts:
+ *   chargerKW     the visitor's stated charger size (kW).  Used as-is for the
+ *                 thresholds and the per-hour cap, and it waives the evening-only
+ *                 test (the visitor has told us there is a car).
+ *   keepRejected  return the FlexLoad even when it is rejected, with
+ *                 `detection.accepted: false` and `detection.rejectReason` (for the
+ *                 Loads tab's "we looked, here is why not" line, and for tests).
+ *   any EV_TUNING key overrides that constant; an explicit excessThreshold or
+ *   coreExcess is used as given (not scaled).
  */
 export function detectEV(loadSet, opts = {}) {
   const T = { ...EV_TUNING, ...opts };
@@ -190,26 +234,61 @@ export function detectEV(loadSet, opts = {}) {
     if (Number.isFinite(kwhIn[i])) { val[cell] = kwhIn[i]; present[cell] = 1; nUsable++; }
   }
 
-  // ---- two-pass baseline ---------------------------------------------------
+  // ---- house scale, charger estimate, relative thresholds ----------------
+  const userKW = opts.chargerKW > 0 ? +opts.chargerKW : null;
+  const houseVals = [];
+  for (let c = 0; c < val.length; c++) if (present[c]) houseVals.push(val[c]);
+  houseVals.sort((a, b) => a - b);
+  const medianLoad = medianOf(houseVals);
+  const floor = Math.max(T.minExcessFloor, T.houseFloorMult * medianLoad);
+
   const base0 = buildBaseline(val, present, nDates, null, false, T);
-  let chargerKW = opts.chargerKW || inferChargerKW(val, present, N, sCell, sHour, base0, NIGHT, T);
+  const estKW = estimateChargerKW(N, sCell, sNaive, val, present, base0, floor);
+  const plateauKW = userKW || (estKW >= T.minChargerKW ? estKW : null);
+  if (plateauKW) {
+    // An explicit threshold in opts is the caller's to keep; otherwise scale to the charger.
+    if (!("excessThreshold" in opts)) {
+      T.excessThreshold = Math.min(EV_TUNING.excessThreshold, Math.max(floor, T.thresholdFrac * plateauKW));
+    }
+    if (!("coreExcess" in opts)) {
+      T.coreExcess = Math.min(EV_TUNING.coreExcess,
+        Math.max(T.excessThreshold + 0.5, T.coreFrac * plateauKW));
+    }
+  }
+
+  // ---- two-pass baseline ---------------------------------------------------
+  // The reference estimate (top decile of overnight excess) is kept because it
+  // reproduces the prototype; but on a small charger that decile is mostly house noise
+  // stacked on the charger, so it is held to within 15% of the plateau estimate.
+  const fallbackKW = plateauKW || 8.0;
+  const pickKW = (base) => {
+    if (userKW) return userKW;
+    const top = inferChargerKW(val, present, N, sCell, sHour, base, NIGHT, T, fallbackKW);
+    return plateauKW && top > 1.15 * plateauKW ? plateauKW : top;
+  };
+  let chargerKW = pickKW(base0);
   const ev0 = detectRuns(N, sCell, sHour, sNaive, val, present, base0, chargerKW, NIGHT, T);
 
   const exclude = new Uint8Array(nDates * 24);
   for (const i of ev0.keys()) exclude[sCell[i]] = 1;
   const base1 = buildBaseline(val, present, nDates, exclude, true, T);
-  chargerKW = opts.chargerKW || inferChargerKW(val, present, N, sCell, sHour, base1, NIGHT, T);
+  chargerKW = pickKW(base1);
   const ev1 = detectRuns(N, sCell, sHour, sNaive, val, present, base1, chargerKW, NIGHT, T);
 
   // ---- emit ----------------------------------------------------------------
   const kwhByHour = new Float64Array(N);
-  let evTotal = 0, total = 0, dayEv = 0;
+  let evTotal = 0, total = 0, dayEv = 0, summerEv = 0, eveningEv = 0;
+  let nonSummerHours = 0;
   for (let i = 0; i < N; i++) {
     const metered = present[sCell[i]] ? val[sCell[i]] : 0;
     const e = round3(Math.min(ev1.get(i) || 0, metered));
     kwhByHour[i] = e;
     evTotal += e; total += metered;
     if (!NIGHT[sHour[i]]) dayEv += e;
+    const mo = +ts[i].slice(5, 7);
+    if (mo >= 6 && mo <= 9) summerEv += e;
+    else if (present[sCell[i]]) nonSummerHours++;
+    if (sHour[i] >= 18 && sHour[i] <= 22) eveningEv += e;
   }
 
   const sessions = sessionsFrom(N, sHour, sNaive, ts, ev1);
@@ -225,13 +304,17 @@ export function detectEV(loadSet, opts = {}) {
     `+/-${T.baselineHalfWindowDays} day window. Pass 2: the baseline is recomputed as the ` +
     `median of the same-hour samples with pass-1 EV hours removed. Excess = metered kWh - ` +
     `baseline. Overnight window (8PM-9:59AM): contiguous runs with excess > ` +
-    `${T.excessThreshold} kWh are attributed to the EV provided the run peaks above ` +
-    `${T.coreExcess} kWh. Daytime window (10AM-7:59PM): only runs of >=2 consecutive hours ` +
+    `${round2(T.excessThreshold)} kWh are attributed to the EV provided the run peaks above ` +
+    `${round2(T.coreExcess)} kWh. Daytime window (10AM-7:59PM): only runs of >=2 consecutive hours ` +
     `whose excess is flat (range < ${T.dayFlatness} kWh) and sits between ` +
     `${T.dayLevelLo.toFixed(2)}x and ${T.dayLevelHi.toFixed(2)}x the inferred charger power ` +
     `are attributed to the EV; this separates charging plateaus from air-conditioning, which ` +
-    `ramps. Per-hour EV is capped at the inferred charger power of ${chargerKW} kW (median of ` +
-    `the top decile of overnight excess). Detected daytime charging = ${dayEv.toFixed(0)} kWh ` +
+    `ramps. Per-hour EV is capped at the ${userKW ? "stated" : "inferred"} charger power of ` +
+    `${chargerKW} kW${userKW ? "" : " (median of the top decile of overnight excess)"}. ` +
+    `Thresholds scale with the charger (${T.thresholdFrac}x / ${T.coreFrac}x its kW, capped at ` +
+    `${EV_TUNING.excessThreshold} / ${EV_TUNING.coreExcess} kWh) but never drop below ` +
+    `${round2(floor)} kWh (${T.houseFloorMult}x the house's median hourly load). Detected daytime ` +
+    `charging = ${dayEv.toFixed(0)} kWh ` +
     `(${evTotal > 0 ? (100 * dayEv / evTotal).toFixed(1) : "0.0"}% of EV energy).`;
 
   const confidence = evConfidence({
@@ -239,6 +322,28 @@ export function detectEV(loadSet, opts = {}) {
     share: total > 0 ? evTotal / total : 0, medianSessionKwh,
     coverage: nUsable / N,
   });
+
+  // ---- plausibility: is this a car, or the air conditioner? -----------------
+  // A car is driven all year.  Air-conditioning shows up as an "EV" that only charges
+  // in Jun-Sep, or only in the 18:00-23:00 evening block (the hours after a hot day
+  // when the house is occupied and the compressor runs flat out).  Either pattern is
+  // rejected.  The summer test needs at least ~60 days outside Jun-Sep to judge; the
+  // evening test is skipped when the caller states a charger size, because then the
+  // visitor has told us there IS a car.
+  const summerShare = evTotal > 0 ? summerEv / evTotal : 0;
+  const eveningShare = evTotal > 0 ? eveningEv / evTotal : 0;
+  let rejectReason = null;
+  if (!sessions.length) rejectReason = "no charging sessions found";
+  else if (nonSummerHours >= 60 * 24 && summerShare > T.maxSummerShare) {
+    rejectReason = `${Math.round(summerShare * 100)}% of the candidate energy is in Jun-Sep; ` +
+      `that is air-conditioning, not a car`;
+  } else if (!userKW && eveningShare > T.maxEveningShare) {
+    rejectReason = `${Math.round(eveningShare * 100)}% of the candidate energy is between 18:00 ` +
+      `and 23:00 with no overnight or daytime sessions; that looks like air-conditioning`;
+  } else if (confidence < T.minConfidence) {
+    rejectReason = `confidence ${round2(confidence)} is below ${T.minConfidence}`;
+  }
+  if (rejectReason && !opts.keepRejected) return null;
 
   return {
     id: "ev1",
@@ -254,9 +359,18 @@ export function detectEV(loadSet, opts = {}) {
       totalKwh: round3(evTotal),
       daytimeKwh: round3(dayEv),
       confidence: round2(confidence),
+      chargerSource: userKW ? "stated" : "inferred",
+      thresholds: { excessKwh: round2(T.excessThreshold), coreKwh: round2(T.coreExcess),
+                    floorKwh: round2(floor), medianHourlyKwh: round3(medianLoad),
+                    plateauKW: estKW },
+      plausibility: { summerShare: round2(summerShare), eveningShare: round2(eveningShare) },
+      accepted: !rejectReason,
+      rejectReason,
     },
+    // Never move load the visitor has not agreed to move: a detected EV stays exactly
+    // where the meter recorded it until the Loads tab switches it to "spread".
     schedule: {
-      mode: "spread",
+      mode: "asRecorded",
       daysPerWeek: 5,
       window: [8, 15],
       daylightFraction: 0.9,
@@ -267,6 +381,60 @@ export function detectEV(loadSet, opts = {}) {
     },
     scale: 1.0,
   };
+}
+
+/**
+ * Charger power from the record's flat plateaus, overnight AND daytime: every run of
+ * >= 2 consecutive hours whose excess over the pass-1 baseline stays above `floor` and
+ * is flat (range <= max(1 kWh, 25% of its level)) contributes its median level,
+ * weighted by its energy.  The answer is the median of the levels in the heaviest
+ * 0.5 kW-wide cluster.  Returns null when the record has no such plateau.
+ *
+ * This replaces the reference detector's fixed 8 kW fallback and lets the thresholds
+ * scale to a 3.3 kW Level-2 or an 11.5 kW daytime charger.  Charging at a constant
+ * current is the flattest thing a house does; AC cycles and ramps, so it rarely
+ * forms a heavy cluster.
+ */
+function estimateChargerKW(N, sCell, sNaive, val, present, base, floor) {
+  const ex = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    const c = sCell[i];
+    ex[i] = present[c] ? val[c] - base[c] : -Infinity;
+  }
+  const levels = [];   // [level, weight]
+  let i = 0;
+  while (i < N) {
+    if (!(ex[i] > floor)) { i++; continue; }
+    let j = i;
+    while (j + 1 < N && ex[j + 1] > floor && sNaive[j + 1] - sNaive[j] <= 1) j++;
+    if (j > i) {
+      const run = Array.from(ex.subarray(i, j + 1));
+      // drop a partial first/last hour (a session rarely starts on the hour)
+      const core = run.length > 3 ? run.slice(1, -1) : run;
+      core.sort((a, b) => a - b);
+      const lvl = medianOf(core);
+      if (core[core.length - 1] - core[0] <= Math.max(1.0, 0.25 * lvl)) {
+        levels.push([lvl, lvl * core.length]);
+      }
+    }
+    i = j + 1;
+  }
+  if (!levels.length) return null;
+  const BIN = 0.5;
+  const bins = new Map();
+  for (const [l, w] of levels) {
+    const b = Math.floor(l / BIN);
+    bins.set(b, (bins.get(b) || 0) + w);
+  }
+  // weight of a bin = itself plus its neighbours, so a level on a bin edge is not split
+  let best = null, bestW = -1;
+  for (const b of bins.keys()) {
+    const w = (bins.get(b - 1) || 0) + bins.get(b) + (bins.get(b + 1) || 0);
+    if (w > bestW) { bestW = w; best = b; }
+  }
+  const lo = (best - 1) * BIN, hi = (best + 2) * BIN;
+  const inCluster = levels.filter(([l]) => l >= lo && l < hi).map(([l]) => l).sort((a, b) => a - b);
+  return round2(medianOf(inCluster));
 }
 
 /**
@@ -306,7 +474,7 @@ function buildBaseline(val, present, nDates, exclude, useMedian, T) {
 }
 
 /** Charger power = median of the top decile of overnight excess. */
-function inferChargerKW(val, present, N, sCell, sHour, base, NIGHT, T) {
+function inferChargerKW(val, present, N, sCell, sHour, base, NIGHT, T, fallbackKW = 8.0) {
   const vals = [];
   for (let i = 0; i < N; i++) {
     if (!NIGHT[sHour[i]]) continue;
@@ -315,7 +483,7 @@ function inferChargerKW(val, present, N, sCell, sHour, base, NIGHT, T) {
     const e = val[c] - base[c];
     if (e > T.coreExcess) vals.push(e);
   }
-  if (!vals.length) return 8.0;
+  if (!vals.length) return fallbackKW;
   vals.sort((a, b) => a - b);
   const top = vals.slice(Math.floor(0.90 * vals.length));
   return round2(medianOf(top));
@@ -556,8 +724,10 @@ export function detectPool(loadSet, opts = {}) {
       dayShare: round2(dayShare),
       confidence,
     },
+    // As for the EV: a detected load stays where it was recorded until the visitor
+    // opts in to moving it.
     schedule: {
-      mode: "spread", daysPerWeek: 7,
+      mode: "asRecorded", daysPerWeek: 7,
       window: [domHour, Math.min(24, domHour + hoursPerDay)],
       daylightFraction: 1.0, overnightWindow: [1, 5],
       maxKW: Math.max(kw, 0.1), followSolar: false, hoursPerDay,
@@ -567,8 +737,10 @@ export function detectPool(loadSet, opts = {}) {
 }
 
 // ------------------------------------------------------------------- reshape
+// mode "asRecorded": a FlexLoad that arrives without a mode is never silently moved
+// into solar hours.  Manual templates (`presets()`) opt in to "spread" explicitly.
 export const DEFAULT_SCHEDULE = {
-  mode: "spread",
+  mode: "asRecorded",
   daysPerWeek: 5,
   window: [8, 15],
   daylightFraction: 0.9,

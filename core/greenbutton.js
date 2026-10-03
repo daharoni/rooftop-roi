@@ -17,7 +17,7 @@
  * -----------------------------------------------------------------------------
  *   { meta: { source, tz, start, end, nHours, totalKwh, intervalMinutes,
  *             gapsFilled: [...], notes: [...], zip, utilityHint,
- *             quality: { hours, days, years, missing, filled } },
+ *             quality: { hours, days, years, missing, filled, partialHours } },
  *     ts:  string[],             // "YYYY-MM-DDTHH:00" LOCAL CLOCK time, hour start
  *     kwh: Float64Array,         // delivered (import) kWh in that hour
  *     exportKwh: Float64Array | null }   // received kWh, null when the meter never exports
@@ -40,6 +40,60 @@
 const NBSP = /[   ﻿]/g;
 const MAX_FILL_RUN = 3;               // hours; longer gaps stay NaN
 const HOURS_PER_YEAR = 8766;          // 365.25 * 24
+
+// ------------------------------------------------------------------- errors
+/**
+ * A file we understood but cannot use.  Same convention as `GeocodeError`
+ * (core/geocode.js): `message` is for logs, `userMessage` is a sentence the UI can
+ * show as-is, `code` is machine-readable ("coarse-interval").
+ */
+export class LoadFileError extends Error {
+  constructor(message, { code = "unusable", userMessage, cause } = {}) {
+    super(message, cause ? { cause } : undefined);
+    this.name = "LoadFileError";
+    this.code = code;
+    this.userMessage = userMessage ||
+      "This file could not be used. Download your hourly or 15-minute interval data and try again.";
+  }
+}
+
+/** Where each utility hides the interval-granularity choice in its Green Button download. */
+const REDOWNLOAD_HINTS = {
+  sce: "On sce.com, open Data Sharing & Download (Green Button \"Download My Data\"), choose " +
+       "the 15-minute or hourly interval usage option rather than daily or billing-period " +
+       "totals, pick a date range of up to a year, and download as CSV.",
+  pge: "On pge.com, open Energy Usage Details > Green Button \"Download My Data\", choose " +
+       "\"Export usage for a range of days\" (that file is 15-minute or hourly) rather than the " +
+       "bill-period export, and download as CSV.",
+  sdge: "On sdge.com, open My Energy Center > Green Button \"Download My Data\", choose the " +
+        "15-minute or hourly interval option rather than daily, and download as CSV.",
+};
+const GENERIC_HINT = "In your utility's Green Button \"Download My Data\" page, choose the " +
+  "15-minute or hourly interval option (not daily, monthly or billing-period totals) and " +
+  "download again.";
+
+function utilityOf(hint) {
+  const h = String(hint || "").toLowerCase();
+  if (h.startsWith("sce")) return "sce";
+  if (h.startsWith("pge") || h.startsWith("pg&e")) return "pge";
+  if (h.startsWith("sdge") || h.startsWith("sdg&e")) return "sdge";
+  return null;
+}
+
+/** The error for a file whose readings are coarser than an hour (daily, monthly...). */
+function coarseIntervalError(minutes, utilityHint) {
+  const u = utilityOf(utilityHint);
+  const what = minutes >= 1440 * 27 ? "monthly" : minutes >= 1440 ? "daily" : `${minutes}-minute`;
+  return new LoadFileError(
+    `interval data is ${minutes}-minute (${what}); hourly or finer is required`,
+    {
+      code: "coarse-interval",
+      userMessage:
+        `This file has ${what} readings. Rooftop ROI needs hourly or 15-minute interval data, ` +
+        `because solar, batteries and time-of-use prices all change hour by hour. ` +
+        (u ? REDOWNLOAD_HINTS[u] : GENERIC_HINT),
+    });
+}
 
 // --------------------------------------------------------------- tiny utils
 const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
@@ -209,28 +263,43 @@ export function parseDateParts(s) {
 /** "1:00PM", "01:00 PM", "13:00", "13:00:00", "2400" -> {h, mi}. */
 export function parseTimeParts(s) {
   const t = clean(s).toUpperCase();
-  let m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/.exec(t);
+  let m = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?\s*(AM|PM)$/.exec(t);
   if (m) {
     let h = +m[1] % 12;
     if (m[4] === "PM") h += 12;
     return { h, mi: +m[2] };
   }
-  m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(t);
+  m = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?$/.exec(t);
   if (m) return { h: +m[1], mi: +m[2] };
   m = /^(\d{1,2})\s*(AM|PM)$/.exec(t);
   if (m) { let h = +m[1] % 12; if (m[2] === "PM") h += 12; return { h, mi: 0 }; }
   return null;
 }
 
-/** A single combined field, e.g. "09/01/2025 12:00AM" or "2025-09-01T00:15:00". */
+/**
+ * A single combined field, e.g. "09/01/2025 12:00AM", "2025-09-01T00:15:00" or
+ * "2025-09-01T07:15:00.000Z".  A trailing "Z" or "+hh:mm" / "-hhmm" offset is
+ * returned as `off` (minutes east of UTC) for the caller to convert; the clock
+ * fields are always the ones printed.
+ */
 export function parseStamp(s) {
   const t = clean(s);
   if (!t) return null;
   const m = /^(\S+)[T\s]+(.+)$/.exec(t);
   if (m) {
     const d = parseDateParts(m[1]);
-    const tm = parseTimeParts(m[2].replace(/\s*(Z|[+-]\d{2}:?\d{2})$/i, ""));
-    if (d && tm) return { y: d.y, mo: d.mo, d: d.d, h: tm.h, mi: tm.mi };
+    let rest = m[2], off = null;
+    const om = /\s*(?:(Z)|([+-])(\d{2}):?(\d{2}))$/i.exec(rest);
+    if (om && /\d/.test(rest.slice(0, om.index))) {
+      off = om[1] ? 0 : (om[2] === "-" ? -1 : 1) * (+om[3] * 60 + +om[4]);
+      rest = rest.slice(0, om.index);
+    }
+    const tm = parseTimeParts(rest);
+    if (d && tm) {
+      const p = { y: d.y, mo: d.mo, d: d.d, h: tm.h, mi: tm.mi };
+      if (off != null) p.off = off;
+      return p;
+    }
     return null;
   }
   const d = parseDateParts(t);
@@ -325,10 +394,22 @@ export function toHourly(intervals, opts = {}) {
     const e = iv.exportKwh || 0;
     if (e) anyExport = true;
     const cur = slots.get(k);
-    if (cur) { cur.kwh += iv.kwh; cur.exp += e; cur.n++; }
-    else slots.set(k, { kwh: iv.kwh, exp: e, n: 1 });
+    if (cur) { cur.kwh += iv.kwh; cur.exp += e; cur.n++; cur.min += dur; }
+    else slots.set(k, { kwh: iv.kwh, exp: e, n: 1, min: dur });
   }
-  const intervalMinutes = durations.length ? modeOf(durations) : 60;
+  let intervalMinutes = durations.length ? modeOf(durations) : 60;
+  // A file with no usable duration information still gives itself away by its
+  // spacing: one reading a day lands every 24th slot.
+  if (intervalMinutes <= 60 && slots.size >= 3) {
+    const ks = Array.from(slots.keys()).sort((a, b) => a - b);
+    const gaps = [];
+    for (let q = 1; q < ks.length; q++) gaps.push(ks[q] - ks[q - 1]);
+    gaps.sort((a, b) => a - b);
+    const typical = median(gaps);
+    if (typical >= 2) intervalMinutes = Math.round(typical * 60);
+  }
+  // Coarser than hourly cannot be spread onto hours honestly (P0 #7): refuse it.
+  if (intervalMinutes > 60) throw coarseIntervalError(intervalMinutes, opts.utilityHint || opts.source);
   return buildSeries(slots, {
     ...opts,
     intervalMinutes,
@@ -358,7 +439,7 @@ function buildSeries(slots, opts) {
     return {
       ts: [], kwh: new Float64Array(0), exportKwh: null,
       intervalMinutes: opts.intervalMinutes || 60, gapsFilled, notes: ["no readings found"],
-      quality: { hours: 0, days: 0, years: 0, missing: 0, filled: 0 },
+      quality: { hours: 0, days: 0, years: 0, missing: 0, filled: 0, partialHours: 0 },
     };
   }
 
@@ -368,6 +449,45 @@ function buildSeries(slots, opts) {
   for (let y = first.y; y <= last.y; y++) { springDates.add(dstStartDate(y)); fallDates.add(dstEndDate(y)); }
 
   const expected = opts.expectedPerHour || 1;
+
+  // -- partial sub-hourly hours (P1) ------------------------------------------
+  // A 15-minute hour with readings missing would otherwise be summed short and look
+  // like a quiet hour.  At least half the hour present: scale it up to 60 minutes.
+  // Less than half: drop it, so it is filled or NaN-ed below exactly like a gap.
+  let partialScaled = 0, partialDropped = 0;
+  if (expected > 1) {
+    for (const k of keys) {
+      const s = slots.get(k);
+      if (s.min == null || s.n > expected || s.min >= 60) continue;
+      if (s.min >= 30) {
+        const f = 60 / s.min;
+        s.kwh *= f; s.exp *= f; s.min = 60;
+        partialScaled++;
+      } else {
+        slots.delete(k);
+        partialDropped++;
+      }
+    }
+    if (partialDropped) {
+      for (let q = keys.length - 1; q >= 0; q--) if (!slots.has(keys[q])) keys.splice(q, 1);
+    }
+    if (partialScaled) {
+      notes.push(`${partialScaled} hours had only some of their ${opts.intervalMinutes}-minute ` +
+                 `readings (at least half); each was scaled up to a full hour`);
+    }
+    if (partialDropped) {
+      notes.push(`${partialDropped} hours had less than half of their ` +
+                 `${opts.intervalMinutes}-minute readings and were treated as missing`);
+    }
+    if (!keys.length) {
+      return {
+        ts: [], kwh: new Float64Array(0), exportKwh: null,
+        intervalMinutes: opts.intervalMinutes || 60, gapsFilled, notes: notes.concat(["no readings found"]),
+        quality: { hours: 0, days: 0, years: 0, missing: 0, filled: 0, partialHours: partialScaled + partialDropped },
+      };
+    }
+  }
+
   const dupDays = new Map();
   for (const k of keys) {
     const s = slots.get(k);
@@ -423,7 +543,9 @@ function buildSeries(slots, opts) {
           for (const sgn of [-1, 1]) {
             const nk = k + sgn * off * 24;
             const s = slots.get(nk);
-            if (s && !missingSet.has(nk)) { vals.push(s.kwh); exps.push(s.exp); }
+            if (s && !missingSet.has(nk) && Number.isFinite(s.kwh)) {
+              vals.push(s.kwh); exps.push(Number.isFinite(s.exp) ? s.exp : 0);
+            }
           }
           if (vals.length) break;
         }
@@ -477,6 +599,7 @@ function buildSeries(slots, opts) {
     quality: {
       hours: N, days: days.size, years: N / HOURS_PER_YEAR,
       missing: stillMissing, filled,
+      partialHours: partialScaled + partialDropped,   // scaled up + dropped as gaps
     },
   };
 }
@@ -540,13 +663,15 @@ export function parseSceCsv(text, opts = {}) {
     if (end) {
       const d = (Date.UTC(end.y, end.mo - 1, end.d, end.h, end.mi) -
                  Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi)) / 60000;
-      if (d > 0 && d <= 60) dur = d;
+      // Any positive span counts (a daily export is 1440 and must be refused, not
+      // squeezed into one hour); "11:59PM"-style inclusive ends round up.
+      if (d > 0) dur = d >= 14 && d % 5 === 4 ? d + 1 : d;
     }
     intervals.push({ start: p, durationMinutes: dur, kwh: delivered, exportKwh: received || 0 });
   }
   if (!intervals.length) throw new Error("SCE CSV: no interval rows found");
 
-  const series = toHourly(intervals, { ...opts, exportChannel: true });
+  const series = toHourly(intervals, { ...opts, exportChannel: true, utilityHint: "sce" });
   const notes = [];
   if (bad) notes.push(`${bad} unparseable rows skipped`);
   notes.push("Timestamps are the local prevailing (clock) time printed by SCE (PDT in summer, " +
@@ -623,7 +748,7 @@ export function parsePgeCsv(text, opts = {}) {
   }
   if (!intervals.length) throw new Error("PG&E CSV: no usage rows found");
 
-  const series = toHourly(intervals, opts);
+  const series = toHourly(intervals, { ...opts, utilityHint: "pge" });
   const notes = ["Customer name, service address and account number were discarded at parse time."];
   if (bad) notes.push(`${bad} unparseable rows skipped`);
   if (skippedGas) notes.push(`${skippedGas} non-electric rows skipped`);
@@ -685,7 +810,7 @@ export function parseSdgeCsv(text, opts = {}) {
   }
   if (!intervals.length) throw new Error("SDG&E CSV: no interval rows found");
 
-  const series = toHourly(intervals, { ...opts, exportChannel: col.gen >= 0 });
+  const series = toHourly(intervals, { ...opts, exportChannel: col.gen >= 0, utilityHint: "sdge" });
   const notes = ["Meter number, account number and service address were discarded at parse time."];
   if (bad) notes.push(`${bad} unparseable rows skipped`);
   return finish(series, {
@@ -800,6 +925,7 @@ function firstText(node, lname) {
  * ESPI (Green Button "Download my data") Atom feed.
  *
  *   <LocalTimeParameters><dstOffset>3600</dstOffset><tzOffset>-28800</tzOffset>
+ *   <UsagePoint><ServiceCategory><kind>0</kind></ServiceCategory></UsagePoint>
  *   <ReadingType><flowDirection>1</flowDirection><powerOfTenMultiplier>0</powerOfTenMultiplier>
  *                <uom>72</uom></ReadingType>
  *   <IntervalBlock><IntervalReading>
@@ -809,14 +935,33 @@ function firstText(node, lname) {
  * `start` is epoch seconds (UTC).  We convert to LOCAL CLOCK time with
  * tzOffset + dstOffset, using the US DST rule (the feed's dstStartRule /
  * dstEndRule bitfields are not decoded - every supported utility is US).
- * `value` is in the ReadingType's unit scaled by powerOfTenMultiplier; uom 72
- * (Wh) is the norm, so kWh = value * 10^pot / 1000.  flowDirection 1 = delivered,
- * 19 = received.  A ReadingType applies to every IntervalBlock that follows it in
- * document order (which is how every feed we have seen is ordered); when a feed
- * has exactly one ReadingType it applies to everything.
+ *
+ * Which ReadingType governs an IntervalBlock: the Atom links say so.  A
+ * MeterReading entry links (rel="related") to its ReadingType and to its
+ * IntervalBlock collection; an IntervalBlock entry's self/up href sits under that
+ * MeterReading; a MeterReading sits under its UsagePoint, which carries
+ * ServiceCategory kind (0 = electricity, 1 = gas, 2 = water ...).  Where the feed
+ * has no usable links we fall back to document order: a ReadingType governs the
+ * blocks that follow it, and a sole ReadingType governs everything.
+ *
+ * Accepted: blocks whose ReadingType uom is 72 (Wh) - or carries no uom - on a
+ * UsagePoint that is electricity or unstated.  Everything else (gas in therms, uom
+ * 169; water; demand in W, uom 38; reactive energy...) is skipped and named in
+ * meta.notes.  kWh = value * 10^powerOfTenMultiplier / 1000.
+ *
+ * flowDirection: 1 = forward (delivered, import), 19 = reverse (received, export),
+ * 4 = net (positive = import, negative = export, split the way the PG&E and generic
+ * parsers split a signed column).  When a feed carries forward or reverse channels
+ * AND a net channel, the net channel is dropped so energy is not counted twice.  A
+ * negative value never reaches `kwh`.
  *
  * Titles, UsagePoint ids and ServiceLocation blocks are never read.
  */
+const SERVICE_KINDS = ["electricity", "gas", "water", "time", "heat", "refuse", "sewerage",
+                       "rates", "tvLicence", "internet"];
+const UOM_NAMES = { 72: "Wh", 169: "therm", 38: "W", 73: "VArh", 63: "VAr", 61: "VA", 71: "VAh",
+                    42: "m3", 119: "ft3", 128: "US gal", 132: "Btu" };
+
 export function parseEspiXml(text, opts = {}) {
   const doc = xmlWalk(stripBom(String(text)));
 
@@ -824,58 +969,169 @@ export function parseEspiXml(text, opts = {}) {
   const tzOffset = ltp ? +(firstText(ltp, "tzoffset") || 0) : -28800;
   const dstOffset = ltp ? +(firstText(ltp, "dstoffset") || 0) : 3600;
 
-  // Collect ReadingTypes and IntervalBlocks in document order.
+  // Walk in document order, remembering which Atom entry (and so which links) each
+  // UsagePoint / MeterReading / ReadingType / IntervalBlock came from.
   const ordered = [];
-  (function walk(n) {
+  (function walk(n, entry) {
     for (const c of n.children) {
-      if (c.lname === "readingtype") ordered.push({ kind: "rt", node: c });
-      else if (c.lname === "intervalblock") ordered.push({ kind: "ib", node: c });
-      else walk(c);
+      const e = c.lname === "entry" ? c : entry;
+      if (c.lname === "readingtype") ordered.push({ kind: "rt", node: c, links: espiLinks(entry) });
+      else if (c.lname === "intervalblock") ordered.push({ kind: "ib", node: c, links: espiLinks(entry) });
+      else if (c.lname === "meterreading") ordered.push({ kind: "mr", node: c, links: espiLinks(entry) });
+      else if (c.lname === "usagepoint") {
+        const sc = findAll(c, "servicecategory")[0];
+        const k = sc ? firstText(sc, "kind") : null;
+        ordered.push({ kind: "up", node: c, links: espiLinks(entry),
+                       service: k == null || k === "" ? null : +k });
+        walk(c, e);
+      } else walk(c, e);
     }
-  })(doc);
+  })(doc, null);
 
   const rts = ordered.filter((o) => o.kind === "rt");
-  const soleRt = rts.length === 1 ? rtInfo(rts[0].node) : null;
+  const mrs = ordered.filter((o) => o.kind === "mr");
+  const ups = ordered.filter((o) => o.kind === "up");
+  for (const o of rts) o.info = rtInfo(o.node);
+
+  // ---- link resolution ----------------------------------------------------
+  const rtBySelf = new Map();
+  for (const o of rts) if (o.links.self) rtBySelf.set(o.links.self, o);
+  for (const mr of mrs) {
+    mr.rt = null;
+    for (const h of mr.links.related) if (rtBySelf.has(h)) { mr.rt = rtBySelf.get(h); break; }
+    mr.up = ups.find((u) => u.links.self && mr.links.self && isUnder(mr.links.self, u.links.self)) ||
+            ups.find((u) => u.links.related.some((h) => h === mr.links.up)) || null;
+  }
+  const mrOf = (ib) => {
+    const at = [ib.links.self, ib.links.up].filter(Boolean);
+    return mrs.find((mr) => mr.links.self && at.some((h) => isUnder(h, mr.links.self))) ||
+           mrs.find((mr) => at.some((h) => mr.links.related.includes(h))) || null;
+  };
+
+  // A sole ReadingType governs the whole feed, including blocks that precede it;
+  // otherwise, without links, each one governs the blocks that follow it.
+  const soleRt = rts.length === 1 ? rts[0] : null;
+  let docRt = soleRt, docUp = null, linked = 0;
+  const blocks = [];
+  for (const o of ordered) {
+    if (o.kind === "rt") { if (!soleRt) docRt = o; continue; }
+    if (o.kind === "up") { docUp = o; continue; }
+    if (o.kind !== "ib") continue;
+    const mr = mrOf(o);
+    let rt = mr && mr.rt, up = mr && mr.up;
+    if (rt) linked++;
+    if (!rt) rt = docRt;
+    if (!up) up = ups.length === 1 ? ups[0] : docUp;
+    blocks.push({ node: o.node, info: rt ? rt.info : { flow: 1, pot: 0, uom: null },
+                  service: up ? up.service : null });
+  }
+
+  // ---- what to keep --------------------------------------------------------
+  const skipped = new Map();          // description -> readings
+  const keep = [];
+  for (const b of blocks) {
+    const { uom, flow } = b.info;
+    const elec = b.service == null || b.service === 0;
+    const wh = uom == null || uom === 72;
+    if (elec && wh) { keep.push(b); continue; }
+    const n = findAll(b.node, "intervalreading").length;
+    const svc = b.service == null ? "unstated" : (SERVICE_KINDS[b.service] || `kind ${b.service}`);
+    const desc = `${svc} UsagePoint, uom ${uom == null ? "unstated" : uom}` +
+      (uom != null && UOM_NAMES[uom] ? ` (${UOM_NAMES[uom]})` : "") + `, flowDirection ${flow}`;
+    skipped.set(desc, (skipped.get(desc) || 0) + n);
+  }
+  const hasDirectional = keep.some((b) => b.info.flow === 1 || b.info.flow === 19);
+  let netDropped = 0;
 
   const intervals = [];
-  // A sole ReadingType governs the whole feed, including blocks that precede it, so it is
-  // pinned here and never replaced; otherwise each one governs the blocks that follow it.
-  let rt = soleRt || { flow: 1, pot: 0, uom: 72 };
-  let sawExport = false;
-  for (const o of ordered) {
-    if (o.kind === "rt") { if (!soleRt) rt = rtInfo(o.node); continue; }
-    for (const rd of findAll(o.node, "intervalreading")) {
+  let sawExport = false, sawNet = false, negFolded = 0;
+  for (const b of keep) {
+    const { flow, pot } = b.info;
+    if (flow === 4 && hasDirectional) {
+      netDropped += findAll(b.node, "intervalreading").length;
+      continue;
+    }
+    for (const rd of findAll(b.node, "intervalreading")) {
       const tp = findAll(rd, "timeperiod")[0] || rd;
       const start = +(firstText(tp, "start") || NaN);
       const duration = +(firstText(tp, "duration") || 3600);
       const value = +(firstText(rd, "value") || NaN);
       if (!Number.isFinite(start) || !Number.isFinite(value)) continue;
-      const kwh = value * Math.pow(10, rt.pot) / (rt.uom === 72 || !rt.uom ? 1000 : 1);
+      const kwh = value * Math.pow(10, pot) / 1000;
       const p = epochToLocalParts(start, tzOffset, dstOffset);
-      const isExport = rt.flow === 19;
-      if (isExport) sawExport = true;
+      let imp = 0, exp = 0;
+      if (flow === 19) exp = Math.abs(kwh);
+      else {
+        // forward, net, or anything else: positive is import, negative is export
+        if (flow === 4) sawNet = true;
+        else if (kwh < 0) negFolded++;
+        if (kwh >= 0) imp = kwh; else exp = -kwh;
+      }
+      if (exp) sawExport = true;
       intervals.push({
         start: p,
         durationMinutes: Math.max(1, Math.round(duration / 60)),
-        kwh: isExport ? 0 : kwh,
-        exportKwh: isExport ? kwh : 0,
+        kwh: imp,
+        exportKwh: exp,
       });
     }
   }
-  if (!intervals.length) throw new Error("ESPI XML: no IntervalReading elements found");
+  if (!intervals.length) {
+    if (skipped.size) {
+      const what = Array.from(skipped.keys()).join("; ");
+      throw new LoadFileError(`ESPI XML: no electricity readings in Wh (skipped ${what})`, {
+        code: "no-electric",
+        userMessage: "This Green Button file has no electricity interval readings (it looks like " +
+          "gas or another service). Download the electric usage file instead.",
+      });
+    }
+    throw new Error("ESPI XML: no IntervalReading elements found");
+  }
 
-  const series = toHourly(intervals, opts);
+  const series = toHourly(intervals, { ...opts, exportChannel: sawExport });
   const notes = [
     "Feed titles, UsagePoint ids and ServiceLocation blocks were never read.",
     `tzOffset ${tzOffset}s, dstOffset ${dstOffset}s; timestamps converted to local clock time ` +
     `using the US DST rule (2nd Sunday of March -> 1st Sunday of November).`,
   ];
-  if (rts.length > 1) notes.push(`${rts.length} ReadingType blocks; each applies to the IntervalBlocks that follow it.`);
+  if (rts.length > 1) {
+    notes.push(linked === blocks.length
+      ? `${rts.length} ReadingType blocks; each IntervalBlock was matched to its ReadingType through the MeterReading links.`
+      : `${rts.length} ReadingType blocks; ${linked} of ${blocks.length} IntervalBlocks were matched through ` +
+        `MeterReading links, the rest to the ReadingType that precedes them in the document.`);
+  }
+  for (const [desc, n] of skipped) notes.push(`skipped ${desc}: ${n} readings are not electricity energy in Wh`);
+  if (netDropped) notes.push(`skipped ${netDropped} net (flowDirection 4) readings because the feed also has forward/reverse channels`);
+  if (sawNet) notes.push("flowDirection 4 (net) readings were split: positive kept as import, negative as export.");
+  if (negFolded) notes.push(`${negFolded} negative forward readings were kept as export, never as negative load.`);
   if (sawExport) notes.push("flowDirection 19 readings were kept as export (received) energy.");
   return finish(series, {
     source: "espi-xml", tz: opts.tz || tzToName(tzOffset),
     zip: espiZip(doc), utilityHint: opts.utilityHint || null, notes,
   });
+}
+
+/** The Atom links of one entry: { self, up, related: [] }, hrefs normalised. */
+function espiLinks(entry) {
+  const out = { self: null, up: null, related: [] };
+  if (!entry) return out;
+  for (const c of entry.children) {
+    if (c.lname !== "link" || !c.attrs.href) continue;
+    const h = normHref(c.attrs.href), rel = String(c.attrs.rel || "").toLowerCase();
+    if (rel === "self") out.self = h;
+    else if (rel === "up") out.up = h;
+    else if (rel === "related") out.related.push(h);
+  }
+  return out;
+}
+
+/** Path only, no scheme/host, no trailing slash, case-insensitive. */
+function normHref(h) {
+  return String(h).trim().replace(/^[a-z]+:\/\/[^/]+/i, "").replace(/\/+$/, "").toLowerCase();
+}
+
+function isUnder(child, parent) {
+  return child === parent || child.startsWith(parent + "/");
 }
 
 /** The one identifying field an ESPI feed may keep: the service location's ZIP. */
@@ -886,10 +1142,11 @@ function espiZip(doc) {
 }
 
 function rtInfo(node) {
+  const u = firstText(node, "uom");
   return {
     flow: +(firstText(node, "flowdirection") || 1),
     pot: +(firstText(node, "poweroftenmultiplier") || 0),
-    uom: +(firstText(node, "uom") || 72),
+    uom: u == null || u === "" ? null : +u,          // null = unstated, read as Wh
   };
 }
 
@@ -916,6 +1173,41 @@ function epochToLocalParts(epochSec, tzOffset, dstOffset) {
   };
 }
 
+// ----------------------------------------------------------- UTC -> local
+const LOCAL_FMT = new Map();
+
+/**
+ * Convert a stamp that carried a UTC offset (`p.off`, minutes east of UTC) to the
+ * naive local clock time of `tz`, with the platform's own zone rules
+ * (Intl.DateTimeFormat - no library).  Two UTC hours that land on the same local
+ * clock hour (the fall-back hour) are later summed into one slot, as everywhere else.
+ */
+function toLocalClock(p, tz, cache) {
+  const utcMs = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi) - p.off * 60000;
+  const hourMs = Math.floor(utcMs / 3600000) * 3600000;
+  let base = cache.get(hourMs);
+  if (!base) {
+    let fmt = LOCAL_FMT.get(tz);
+    if (!fmt) {
+      fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+      });
+      LOCAL_FMT.set(tz, fmt);
+    }
+    const parts = {};
+    for (const x of fmt.formatToParts(new Date(hourMs))) parts[x.type] = x.value;
+    base = { y: +parts.year, mo: +parts.month, d: +parts.day, h: +parts.hour % 24, mi: +parts.minute };
+    cache.set(hourMs, base);
+  }
+  // Every US zone is a whole number of hours off UTC, so the minutes carry straight
+  // over.  A zone that is not (base.mi != 0) is formatted minute by minute instead.
+  if (base.mi === 0) return { y: base.y, mo: base.mo, d: base.d, h: base.h, mi: Math.round((utcMs - hourMs) / 60000) };
+  const parts = {};
+  for (const x of LOCAL_FMT.get(tz).formatToParts(new Date(utcMs))) parts[x.type] = x.value;
+  return { y: +parts.year, mo: +parts.month, d: +parts.day, h: +parts.hour % 24, mi: +parts.minute };
+}
+
 // --------------------------------------------------------------- generic CSV
 /**
  * Last-resort parser: any delimited text with a timestamp column and a kWh
@@ -923,9 +1215,10 @@ function epochToLocalParts(epochSec, tzOffset, dstOffset) {
  * row in the first 40 that names both a time-ish and an energy-ish column.
  *
  * LIMITS (documented because this path guesses):
- *   - timestamps must be LOCAL CLOCK time; a trailing "Z" or "+00:00" is stripped
- *     and ignored rather than converted, so a UTC export will be off by the
- *     UTC offset.  Use the ESPI path for UTC data.
+ *   - timestamps without an offset are taken as LOCAL CLOCK time; a stamp with a
+ *     trailing "Z" or "+hh:mm"/"-hhmm" offset (fractional seconds allowed) is
+ *     converted to the local clock of `opts.tz` (default America/Los_Angeles) with
+ *     Intl.DateTimeFormat, and a note says so.
  *   - ambiguous numeric dates are read US-style, month first (03/04 = 4 March... no:
  *     = March 4th).
  *   - values must already be ENERGY in kWh for the interval.  A column of average
@@ -979,8 +1272,10 @@ export function parseGenericCsv(text, opts = {}) {
   }
   if (dtCol < 0 && dateCol < 0) throw new Error("generic CSV: no timestamp column found");
 
+  const tz = opts.tz || "America/Los_Angeles";
+  const tzCache = new Map();
   const intervals = [];
-  let bad = 0, prev = null, inferredDur = null;
+  let bad = 0, prev = null, inferredDur = null, converted = 0, convertedOff = null;
   for (let i = hdr + 1; i < rows.length; i++) {
     const r = rows[i];
     if (r.length <= kwhCol) continue;
@@ -1018,6 +1313,13 @@ export function parseGenericCsv(text, opts = {}) {
       dur = inferredDur;
     }
     prev = p;
+    // Durations above are measured on the stamps as printed; only then is a stamp
+    // with a UTC offset moved onto the local clock.
+    if (p.off != null) {
+      if (convertedOff == null) convertedOff = p.off;
+      p = toLocalClock(p, tz, tzCache);
+      converted++;
+    }
     const exp = expCol >= 0 ? (num(r[expCol]) || 0) : 0;
     // With no export column a negative value IS the export (a NEM meter writes received
     // energy as negative delivered); with one, a stray negative is simply floored at zero.
@@ -1035,9 +1337,17 @@ export function parseGenericCsv(text, opts = {}) {
     `${JSON.stringify(cells[dateCol >= 0 && timeCol >= 0 ? dateCol : (dtCol >= 0 ? dtCol : dateCol)])}` +
     `, energy column ${JSON.stringify(cells[kwhCol])}` +
     (expCol >= 0 ? `, export column ${JSON.stringify(cells[expCol])}` : "") + ".",
-    "Values are assumed to be kWh of energy per interval in local clock time; no unit or " +
-    "time-zone conversion is applied.",
+    converted
+      ? "Values are assumed to be kWh of energy per interval; no unit conversion is applied."
+      : "Values are assumed to be kWh of energy per interval in local clock time; no unit or " +
+        "time-zone conversion is applied.",
   ];
+  if (converted) {
+    const o = convertedOff, sign = o < 0 ? "-" : "+", a = Math.abs(o);
+    const first = o === 0 ? "Z" : `${sign}${pad2(Math.floor(a / 60))}:${pad2(a % 60)}`;
+    notes.push(`${converted} of ${intervals.length} timestamps carried a UTC offset (the first ` +
+               `was ${first}) and were converted to ${tz} local clock time.`);
+  }
   if (bad) notes.push(`${bad} unparseable rows skipped`);
   return finish(series, {
     source: "generic-csv", tz: opts.tz || "America/Los_Angeles",
@@ -1069,6 +1379,9 @@ export function parse(text, opts = {}) {
   try {
     return fn(src, opts);
   } catch (err) {
+    // A file we read correctly but cannot use (daily data) must not be re-read as
+    // something else; its userMessage is the answer.
+    if (err instanceof LoadFileError) throw err;
     if (fmt === "generic-csv" || fmt === "espi-xml") throw err;
     const ls = parseGenericCsv(src, opts);
     ls.meta.notes.unshift(`${fmt} parser failed (${err.message}); fell back to the generic CSV reader.`);
@@ -1083,7 +1396,10 @@ export function parse(text, opts = {}) {
  *   - the sets are ordered by their first timestamp;
  *   - where two sets cover the same clock hour the LATER set's value wins
  *     (utilities re-issue corrected data in the newer export) and the overlap is
- *     counted in a note;
+ *     counted in a note - but only a finite value ever wins: a NaN never overwrites;
+ *   - when more than 5% of the overlapping hours differ by more than 5%, a note says
+ *     the files may be from different meters;
+ *   - quality.missing is recounted from the merged series;
  *   - the join is then re-gridded, so a hole BETWEEN two exports is filled
  *     (<= 3 h) or NaN-ed and reported exactly like a hole inside one.
  */
@@ -1093,26 +1409,48 @@ export function mergeLoadSets(sets) {
   if (list.length === 1) return list[0];
 
   const ordered = list.slice().sort((a, b) => (a.ts[0] < b.ts[0] ? -1 : a.ts[0] > b.ts[0] ? 1 : 0));
+  // Only a finite reading is ever written: a NaN (an unfilled gap in one export)
+  // must not overwrite the real value another export has for that hour.  Hours that
+  // no export has a value for are simply absent, so buildSeries re-fills or NaN-s
+  // them and counts them like any other gap.
   const slots = new Map();
-  let overlap = 0;
+  let overlap = 0, compared = 0, disagree = 0;
   let anyExport = false;
   for (const ls of ordered) {
     for (let i = 0; i < ls.ts.length; i++) {
+      const v = ls.kwh[i];
+      if (!Number.isFinite(v)) continue;
       const p = parseStamp(ls.ts[i]);
       const k = stampKeyHour(p);
-      if (slots.has(k)) overlap++;
-      slots.set(k, { kwh: ls.kwh[i], exp: (ls.exportKwh ? ls.exportKwh[i] : 0) || 0, n: 1 });
+      const prev = slots.get(k);
+      if (prev) {
+        overlap++;
+        compared++;
+        const big = Math.max(Math.abs(prev.kwh), Math.abs(v));
+        if (Math.abs(prev.kwh - v) > 0.05 * big && Math.abs(prev.kwh - v) > 0.01) disagree++;
+      }
+      const e = ls.exportKwh ? ls.exportKwh[i] : 0;
+      slots.set(k, { kwh: v, exp: Number.isFinite(e) ? e : 0, n: 1 });
     }
     if (ls.exportKwh) anyExport = true;      // subsumes every per-hour value in this set
   }
 
   const intervalMinutes = Math.min(...ordered.map((s) => s.meta.intervalMinutes || 60));
   const series = buildSeries(slots, { intervalMinutes, anyExport, expectedPerHour: 1 });
+  // Count what is actually NaN in the merged series, not what buildSeries happened to fill.
+  let nan = 0;
+  for (const v of series.kwh) if (Number.isNaN(v)) nan++;
+  series.quality.missing = nan;
 
   const sources = Array.from(new Set(ordered.map((s) => s.meta.source)));
   const notes = [];
   if (overlap) notes.push(`${overlap} clock hours were present in more than one export; ` +
                           `the later export's value was kept.`);
+  if (compared && disagree > 0.05 * compared) {
+    notes.push(`${disagree} of ${compared} overlapping hours differ by more than 5% between ` +
+               `exports; the files may be from different meters or accounts. Check that every ` +
+               `file is for the same home.`);
+  }
   for (const ls of ordered) for (const n of ls.meta.notes) if (!notes.includes(n)) notes.push(n);
 
   const zip = ordered.map((s) => s.meta.zip).find(Boolean) || null;
@@ -1124,12 +1462,14 @@ export function mergeLoadSets(sets) {
   out.meta.gapsFilled = ordered.reduce((a, s) => a.concat(s.meta.gapsFilled || []), [])
     .concat(series.gapsFilled);
   out.meta.quality.filled = out.meta.gapsFilled.length;
+  out.meta.quality.partialHours = ordered.reduce((a, s) => a + ((s.meta.quality && s.meta.quality.partialHours) || 0), 0);
   out.meta.sources = sources;
   return out;
 }
 
 // ------------------------------------------------------------------- exports
 export default {
+  LoadFileError,
   parse, detectFormat, parseSceCsv, parsePgeCsv, parseSdgeCsv, parseEspiXml,
   parseGenericCsv, toHourly, mergeLoadSets,
   parseCsvRows, sniffDelimiter, parseDateParts, parseTimeParts, parseStamp,
