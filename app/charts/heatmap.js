@@ -48,6 +48,43 @@ function cellLookup(priced) {
   return (p, b) => byKey.get(p + "|" + b);
 }
 
+/**
+ * The flat region: every cell whose objective value is within a small tolerance of
+ * the best.  The optimiser crowns one cell, but on most roofs the surface is a
+ * plateau and the runner-up is a rounding error away; drawing the plateau says so.
+ *
+ *   tolerance   npv / lifetime: 3% of the best, floor $250 (so a tiny NPV still has
+ *               a visible band); irr: half a point; payback: half a year.
+ *   altBattery  the best cell with a different battery count than the optimum, and
+ *               how far behind it is - the question people actually ask.
+ *   second      the runner-up cell overall.
+ */
+export function plateau(priced, objective, fin) {
+  if (!priced || !priced.cells || !priced.cells.length || !priced.best) return null;
+  const g = (c) => goodness(c, objective, fin);
+  const best = priced.best, gBest = g(best);
+  let tol;
+  if (objective === "irr") tol = 0.005;
+  else if (objective === "payback") tol = 0.5;
+  else tol = Math.max(250, 0.03 * Math.abs(gBest));
+  const keys = new Set();
+  let second = null, altBattery = null;
+  for (const c of priced.cells) {
+    if (c === best || (c.panels === best.panels && c.batteries === best.batteries)) continue;
+    const v = g(c);
+    if (!Number.isFinite(v)) continue;
+    if (gBest - v <= tol) keys.add(c.panels + "|" + c.batteries);
+    if (!second || v > g(second)) second = c;
+    if (c.batteries !== best.batteries && (!altBattery || v > g(altBattery))) altBattery = c;
+  }
+  const gap = (c) => (c ? gBest - g(c) : null);
+  return {
+    tol, keys, count: keys.size, total: priced.cells.length, best,
+    second, secondGap: gap(second),
+    altBattery, altGap: gap(altBattery), altWithinTol: altBattery ? gap(altBattery) <= tol : false,
+  };
+}
+
 export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick, cap }) {
   // `cap`, when given, is the panel count at SCE's 150% line; columns beyond it
   // are drawn faded with a rule at the edge, since SCE would refuse them.
@@ -62,6 +99,8 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
   const colorFor = (v) => mix(T["neutral-mid"], v >= 0 ? T.s1 : T.s8, 0.1 + 0.9 * Math.min(1, Math.abs(norm(v))));
 
   const at = cellLookup(priced);
+  const flat = plateau(priced, objective, fin);
+  const near = (p, b) => !!(flat && flat.keys.has(p + "|" + b));
   const panels = priced.panelList, batteries = priced.battList;
   clear(host);
   host.style.gridTemplateColumns = `34px repeat(${panels.length}, minmax(8px, 1fr))`;
@@ -78,15 +117,19 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
       const isSel = selected && cell.panels === selected.panels && cell.batteries === selected.batteries;
       const over = cap !== null && cap !== undefined && p > cap;
       const edge = over && !panels.some((q) => q > cap && q < p);
+      const isNear = !isBest && near(p, b);
       host.appendChild(el("button.heat-cell" + (over ? ".over-cap" : "") + (edge ? ".cap-edge" : ""), {
         type: "button",
         style: `background:${colorFor(v)}`,
         "data-p": p, "data-b": b,
         "data-best": isBest ? "1" : null,
+        "data-near": isNear ? "1" : null,
         "data-sel": isSel ? "1" : null,
         title: `${p} panels, ${plural(b, "battery", "batteries")} — NPV ${fmtMoney(cell.npv)}, payback ${fmtYears(cell.payback)}`
+          + (isNear ? ` — within ${sliceFmt(flat.tol, objective)} of the best` : "")
           + (over ? " — above SCE's 150% sizing line" : ""),
-        "aria-label": `${p} panels, ${plural(b, "battery", "batteries")}, NPV ${fmtMoney(cell.npv)}`,
+        "aria-label": `${p} panels, ${plural(b, "battery", "batteries")}, NPV ${fmtMoney(cell.npv)}`
+          + (isNear ? ", effectively tied with the best" : ""),
         on: { click: () => onPick && onPick(p, b) },
       }));
     }
@@ -144,4 +187,4 @@ function renderHeatTable(priced, sel, at) {
   table.appendChild(body);
 }
 
-export default { renderHeatmap, goodness, sliceFmt, OBJ_LABEL };
+export default { renderHeatmap, plateau, goodness, sliceFmt, OBJ_LABEL };

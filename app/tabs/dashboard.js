@@ -13,7 +13,7 @@
 import { el, clear, $, T } from "../ui/dom.js";
 import { card, tiles, tile } from "../ui/blocks.js";
 import { fmtCompact, fmtMoney, fmtNum, fmtPct, fmtYears, fmtKwh, fmtHour, plural } from "../ui/format.js";
-import { OBJ_LABEL, renderHeatmap } from "../charts/heatmap.js";
+import { OBJ_LABEL, plateau, renderHeatmap, sliceFmt } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
 import { renderCashflow } from "../charts/money.js";
 import * as K from "../ui/knobs.js";
@@ -77,8 +77,9 @@ export function mount(pane, state, ctx) {
           el("span", { id: "heat-lo", text: "—" }),
           el("span.heat-ramp", { id: "heat-ramp" }),
           el("span", { id: "heat-hi", text: "—" }),
-          el("span", { style: "margin-left:auto", id: "heat-hint", text: "solid ring = optimum · dashed = your pick · columns are panels" }),
+          el("span", { style: "margin-left:auto", id: "heat-hint", text: "solid ring = optimum · thin ring = effectively tied · dashed = your pick · columns are panels" }),
         ]),
+        el("div.heat-margin", { id: "heat-margin" }),
         el("div.heat-cap", { id: "heat-cap" }),
         el("div.slices", {}, [
           el("div.chart-box", { style: "height:110px" }, [el("canvas", { id: "c-slice-p" })]),
@@ -172,6 +173,7 @@ export function render(state, ctx) {
     });
   }
   renderCapLine(state, ctx, cap);
+  renderMarginLine(state, ctx);
 
   const seg = $("day-season");
   if (seg) Array.from(seg.children).forEach((b, i) => b.setAttribute("aria-pressed", String(i === state.ui.season)));
@@ -312,6 +314,40 @@ function outlayTile(mode, fin, f, cell, ctx) {
 /** SCE's sizing lines for this household; null for other utilities or before any meter data is loaded. */
 function capFor(state, ctx) {
   return sizingCapFor(state.site.utilityId, ctx.recentAnnualKwh, { panelW: state.system.panelW, acFactor: state.system.acFactor });
+}
+
+/**
+ * How decisive the optimum is.  The heat map rings every cell inside the tolerance;
+ * this line puts a number on it and answers the question people actually have:
+ * "do I need the battery (or the next one)?".
+ */
+function renderMarginLine(state, ctx) {
+  const node = $("heat-margin");
+  if (!node) return;
+  clear(node);
+  const objective = ctx.objective || state.ui.objective;
+  const flat = ctx.priced ? plateau(ctx.priced, objective, state.fin) : null;
+  if (!flat) { node.hidden = true; return; }
+  node.hidden = false;
+  const unit = objective === "irr" ? "" : objective === "payback" ? "" : ` over ${state.fin.horizon} years`;
+  const tol = sliceFmt(flat.tol, objective);
+  const best = flat.best;
+  const sizeOf = (c) => `${c.panels} panels, ${plural(c.batteries, "battery", "batteries")}`;
+
+  if (flat.count === 0) {
+    node.appendChild(el("span", { text: `A clear winner: no other size comes within ${tol} of ${sizeOf(best)}.` }));
+    return;
+  }
+  node.appendChild(el("strong", { text: `Flat region: ${flat.count} other ${flat.count === 1 ? "size is" : "sizes are"} within ${tol} of the best.` }));
+  if (flat.altBattery) {
+    const alt = flat.altBattery;
+    const gap = sliceFmt(Math.abs(flat.altGap), objective);
+    node.appendChild(el("span", {
+      text: flat.altWithinTol
+        ? ` With ${plural(alt.batteries, "battery", "batteries")} instead of ${best.batteries}, the best is ${alt.panels} panels, only ${gap} behind${unit}: effectively a tie, so choose on backup value, roof space or budget rather than on this number.`
+        : ` The best with a different battery count (${sizeOf(alt)}) is ${gap} behind${unit}, so the battery count is the decisive part of this answer.`,
+    }));
+  }
 }
 
 function renderCapLine(state, ctx, cap) {

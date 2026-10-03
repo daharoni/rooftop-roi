@@ -424,6 +424,12 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
 .heat-cell.cap-edge { box-shadow: inset 2px 0 0 var(--ink-2); }
 .heat-cap { font-size: 11px; color: var(--ink-2); margin-top: 6px; }
 .heat-cell[data-best="1"] { box-shadow: inset 0 0 0 2px var(--ink); }
+/* The flat region: cells a rounding error from the optimum carry a thin ring, so the
+   eye reads a plateau rather than one bright winner. */
+.heat-cell[data-near="1"] { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 70%, transparent); }
+.heat-cell[data-near="1"].over-cap { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 40%, transparent); }
+.heat-margin { font-size: 12px; color: var(--ink-2); margin-top: 8px; max-width: 78ch; }
+.heat-margin strong { color: var(--ink); }
 .heat-cell[data-sel="1"]::after { content: ""; position: absolute; inset: -3px; border: 1.5px dashed var(--ink-2); border-radius: 4px; }
 .heat-axis { color: var(--ink-3); font-size: 10px; display: flex; align-items: center; }
 .heat-axis.v { justify-content: flex-end; padding-right: 6px; }
