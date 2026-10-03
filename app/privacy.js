@@ -47,7 +47,7 @@ export const CALLS = [
     what: "The address you type, sent to their Nominatim geocoder to turn it into coordinates.",
     when: "Only when you type an address and press Find.",
     avoidable: true,
-    escape: "Enter a ZIP code instead, or click your roof on the map.",
+    escape: "Enter a ZIP code instead, or, once your meter file is loaded, set the location on the Roof tab's map.",
   },
   {
     who: "Open-Meteo place search",
@@ -55,7 +55,7 @@ export const CALLS = [
     what: "The ZIP code you type, to find its approximate centre.",
     when: "Only when you use the ZIP box (or when an address lookup falls back to its ZIP).",
     avoidable: true,
-    escape: "Click your roof on the map instead.",
+    escape: "Load your meter file first, then set the location on the Roof tab's map or type coordinates there.",
   },
   {
     who: "Open-Meteo elevation",
@@ -109,8 +109,9 @@ export const STORAGE_NOTE =
 /** Replaced at boot by core/geocode.js's own wording when that module exists. */
 export let GEOCODE_NOTE =
   "Typing an address sends it to OpenStreetMap's Nominatim geocoder to get coordinates back. "
-  + "A ZIP code goes to Open-Meteo's place search instead; clicking the map sends neither, "
-  + "but loads Esri satellite tiles.";
+  + "A ZIP code goes to Open-Meteo's place search instead. To send neither, load your meter file "
+  + "first and set the location on the Roof tab, by clicking the map (which loads Esri satellite "
+  + "tiles) or typing coordinates.";
 
 /**
  * INTEGRATION: core/geocode.js may export PRIVACY_NOTE. Until it lands, the

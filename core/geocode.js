@@ -32,8 +32,9 @@ export const PRIVACY_NOTE =
   "data, not your bills, not your name, and no identifier of any kind. A ZIP code is sent " +
   "instead to Open-Meteo's place search (geocoding-api.open-meteo.com), which is coarser. Either " +
   "way, the rounded coordinates are then sent to Open-Meteo for elevation and weather. To send " +
-  "no address or ZIP at all, skip both boxes and click your roof on the map (which loads Esri " +
-  "satellite tiles). Results are © OpenStreetMap contributors.";
+  "no address or ZIP at all, skip both boxes, load your meter file, and then click your roof on the map " +
+  "on the Roof tab (which loads Esri satellite tiles) or type coordinates there. " +
+  "Results are © OpenStreetMap contributors.";
 
 /** Typed failure so the UI can tell 'no result' apart from 'no network'. */
 export class GeocodeError extends Error {

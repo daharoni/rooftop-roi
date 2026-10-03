@@ -180,6 +180,12 @@ export function household(open = false) {
   ] };
 }
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+  "October", "November", "December"];
+/** "" = unknown: the tariff file's default true-up month (October). */
+const TRUE_UP_OPTIONS = [{ v: "", t: "Unknown (utility default, October)" }]
+  .concat(MONTHS.map((m, i) => ({ v: i + 1, t: m })));
+
 export function rate(ctx, open = false) {
   return { group: "Your rate", open, items: [
     { path: "tariff.planId", kind: "select", label: "Rate plan",
@@ -190,6 +196,14 @@ export function rate(ctx, open = false) {
         + "while the utility still delivers it. Switching is free and changes the answer." },
     { path: "site.utilityId", kind: "select", label: "Utility",
       opts: ctx.utilityOptions && ctx.utilityOptions.length ? ctx.utilityOptions : [{ v: "sce", t: "Southern California Edison" }] },
+    { path: "site.baselineRegion", kind: "select", label: "Baseline region", reason: "sim",
+      opts: ctx.baselineRegionOptions && ctx.baselineRegionOptions.length
+        ? ctx.baselineRegionOptions : [{ v: "", t: "Utility default" }],
+      note: "The climate zone printed on your bill. It sets how many kWh a day get the baseline credit." },
+    { path: "fin.trueUpMonth", kind: "select", label: "True-up month", reason: "sim",
+      opts: TRUE_UP_OPTIONS,
+      note: "The month your annual Net Billing statement settles: the anniversary of your permission to "
+        + "operate. Unknown uses the utility default (October)." },
   ] };
 }
 

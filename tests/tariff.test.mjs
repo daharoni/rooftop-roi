@@ -405,6 +405,22 @@ test("fromBill round-trips the user's own numbers", () => {
   close(p.rates.summer.on.cpa_green, src.rates.summer.on.cpa_green + delta, 1e-5, "cpa_green shifted");
   assert.equal(T.validate(custom).ok, true, T.validate(custom).errors.join("; "));
 
+  // The diagnostic split stays consistent: sce == delivery + sce_generation in every
+  // cell after the override (the delta lands on delivery; sce_generation is as shipped).
+  for (const season of Object.keys(p.rates)) {
+    for (const pid of Object.keys(p.rates[season])) {
+      const c = p.rates[season][pid], c0 = src.rates[season][pid];
+      close(c.sce, c.delivery + c.sce_generation, 2e-6, season + "." + pid + " sce = delivery + sce_generation");
+      assert.equal(c.sce_generation, c0.sce_generation, season + "." + pid + " sce_generation not shifted");
+    }
+  }
+  // ...and when the bill is a CCA customer's, the same holds for the bundled column.
+  const cca = T.fromBill({ utilityId: "sce", planId: "TOU-D-PRIME", providerId: "cpa_green",
+                           periods: { summer: { on: 0.7 } } }, lib);
+  const cc = cca.plans[0].rates.summer.on;
+  close(cc.sce, cc.delivery + cc.sce_generation, 2e-6, "CCA override keeps sce = delivery + sce_generation");
+  close(cc.cpa_green, 0.7, 1e-12, "CCA override sets the CCA column");
+
   assert.throws(() => T.fromBill({ utilityId: "nope", planId: "x" }, lib), /unknown utility/);
   assert.throws(() => T.fromBill({ utilityId: "sce", planId: "nope" }, lib), /unknown plan/);
 });
@@ -545,7 +561,7 @@ test("per-utility NBT terms: ACC Plus, ARECR, true-up month, baseline regions an
     assert.equal(T.accPlusAdder(t), want[id], id + " ACC Plus adder");
     assert.ok(T.arecr(t) > 0.03 && T.arecr(t) < 0.5, id + " ARECR");
     assert.ok(["high", "medium", "low"].includes(t.nbt.eec_adjustment_source._confidence), id + " ARECR confidence");
-    assert.equal(T.trueUpMonth(t), 4, id + " default true-up month");
+    assert.equal(T.trueUpMonth(t), 10, id + " default true-up month is October (conservative)");
     const regions = T.baselineRegionList(t);
     assert.ok(regions.length > 0 && regions.filter((r) => r.isDefault).length === 1, id + " one default region");
     const def = T.defaultBaselineRegion(t);
@@ -563,12 +579,17 @@ test("per-utility NBT terms: ACC Plus, ARECR, true-up month, baseline regions an
 
 test("validate() makes the NBT terms errors, not warnings", () => {
   for (const [path, bad] of [["acc_plus_adder_per_kwh", undefined], ["eec_adjustment_per_kwh", undefined],
-                             ["eec_adjustment_per_kwh", 0], ["true_up_month", 13], ["true_up_month", undefined]]) {
+                             ["eec_adjustment_per_kwh", 0], ["true_up_month", 13], ["true_up_month", undefined],
+                             ["true_up_month", "4"], ["true_up_month", 4.5]]) {
     const t = JSON.parse(JSON.stringify(utilities.pge));
     if (bad === undefined) delete t.nbt[path]; else t.nbt[path] = bad;
     const r = T.validate(t);
     assert.ok(!r.ok && r.errors.some((e) => e.includes(path)), path + "=" + bad + " is an error");
   }
+  // trueUpMonth() reads the file the way validate() does: a string month is not a month.
+  const str = JSON.parse(JSON.stringify(utilities.pge));
+  str.nbt.true_up_month = "4";
+  assert.equal(T.trueUpMonth(str), 10, "a numeric string falls back to the default");
   const t = JSON.parse(JSON.stringify(utilities.sdge));
   delete t.plans[0].baseline_credit_pct;
   assert.ok(T.validate(t).errors.some((e) => e.includes("baseline_credit_pct")), "baseline_credit_pct required");

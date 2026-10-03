@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULTS, freshState, clone, getPath, setPath,
   toHash, fromHash, toStorage, fromStorage,
-  MAX_LIST,
+  MAX_LIST, NAME_MAX, cleanName,
 } from "../app/state.js";
 
 /** A state with something changed at every level of nesting. */
@@ -357,9 +357,20 @@ test("storage values pass the same schema", () => {
   assert.equal(s.fin.costPerW, 2.2);
 });
 
-test("storage from a newer build is ignored; unversioned storage reads as v1", () => {
-  assert.deepEqual(fromStorage({ v: 99, cw: 2.2 }, freshState()), freshState());
-  assert.equal(fromStorage({ cw: 2.2 }, freshState()).fin.costPerW, 2.2);
+test("a newer version is applied as far as this build understands it, and flagged; unversioned reads as v1", () => {
+  const rep = {};
+  const s = fromStorage({ v: 99, cw: 2.2, someFutureKey: 7 }, freshState(), rep);
+  assert.equal(s.fin.costPerW, 2.2, "a key this build understands still applies");
+  assert.equal(rep.damaged, true, "and the session is flagged");
+  const hrep = {};
+  assert.equal(fromHash("v=99&cw=2.2", freshState(), hrep).fin.costPerW, 2.2, "a link follows the same policy");
+  assert.equal(hrep.damaged, true);
+  const quiet = {};
+  assert.equal(fromStorage({ cw: 2.2 }, freshState(), quiet).fin.costPerW, 2.2);
+  assert.equal(quiet.damaged, undefined, "an unversioned session is not damage");
+  const vq = {};
+  fromHash("v=1&cw=2.2", freshState(), vq);
+  assert.equal(vq.damaged, undefined);
 });
 
 test("the new engine fields round-trip through both codecs", () => {
@@ -407,4 +418,145 @@ test("a hostile link cannot name prototype keys or flood the roof and flex lists
   assert.equal(rep.damaged, true);
   assert.equal(typeof ({}).polluted, "undefined");
   assert.equal(Object.getPrototypeOf(st.system.override), Object.prototype);
+});
+
+// ------------------------------------------- 2026-10-03 adversarial review
+
+const LONE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+test("names are cut by code point: an emoji at the 40th position never leaves a lone surrogate", () => {
+  const emojis = ["\u{1F600}", "\u{1F3E0}", "\u{1F697}", "\u{1F1FA}\u{1F1F8}", "\u{1F468}\u200D\u{1F469}", "\u00E9", "\u65E5"];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let it = 0; it < 400; it++) {
+    // A prefix of 35-45 UTF-16 units, so the cut lands on every side of a pair.
+    const pre = "x".repeat(35 + Math.floor(rnd() * 11));
+    let name = pre;
+    for (let k = 0; k < 4; k++) name += emojis[Math.floor(rnd() * emojis.length)];
+    const s = freshState();
+    s.roof.planes = [{ id: "p1", name, tilt: 20, azimuth: 180, maxPanels: 10, shading: { annual: 0 }, costAdder: 0 }];
+    s.flex = [{ id: "f1", kind: "ev", name, source: "manual", annualKwh: 3000, kwhByHour: null, detection: null,
+      schedule: { mode: "spread", daysPerWeek: 5, window: [8, 15], daylightFraction: 0.9, overnightWindow: [1, 5],
+        maxKW: 8, followSolar: true }, scale: 1 }];
+    const rep = {};
+    let h;
+    assert.doesNotThrow(() => { h = toHash(s, rep); }, name);
+    assert.equal(rep.damaged, undefined, "nothing had to be dropped: " + JSON.stringify(name));
+    const back = fromHash(h, freshState());
+    for (const n of [back.roof.planes[0].name, back.flex[0].name]) {
+      assert.ok(!LONE.test(n), "no lone surrogate in " + JSON.stringify(n));
+      assert.ok(Array.from(n).length <= NAME_MAX);
+    }
+    assert.equal(toHash(back), h, "stable once cut");
+  }
+});
+
+test("cleanName strips lone surrogates already in a name, from storage or a paste", () => {
+  assert.equal(cleanName("ab\uD83Dcd", "x"), "abcd");
+  assert.equal(cleanName("\uDE00", "fallback"), "fallback");
+  assert.equal(cleanName("x".repeat(39) + "\u{1F600}", "f"), "x".repeat(39) + "\u{1F600}");
+  assert.equal(cleanName({ toString() { throw new Error("no"); } }, "f"), "f");
+  const st = fromStorage({ v: 1, planes: [{ id: "p1", name: "Roof \uD83D", tilt: 20, azimuth: 180, maxPanels: 10 }] }, freshState());
+  assert.equal(st.roof.planes[0].name, "Roof");
+});
+
+test("toHash never throws: an unencodable or broken token is dropped and reported", () => {
+  const s = freshState();
+  s.fin.costPerW = 2.5;
+  s.roof.planes = [null, { id: "p2", name: "ok", tilt: 20, azimuth: 180, maxPanels: 10, shading: { annual: 0 }, costAdder: 0 }];
+  s.site.tz = "Bad\uD800";                      // a lone surrogate in a scalar
+  const rep = {};
+  let h;
+  assert.doesNotThrow(() => { h = toHash(s, rep); });
+  assert.equal(rep.damaged, true);
+  assert.ok(rep.keys.includes("roof") && rep.keys.includes("tz"));
+  const back = fromHash(h, freshState());
+  assert.equal(back.fin.costPerW, 2.5, "the good keys are still written");
+  assert.equal(back.roof.planes.length, 1);
+  assert.equal(back.roof.planes[0].id, "p2");
+});
+
+test("a damaged link key keeps the stored value instead of resetting it to the default", () => {
+  const stored = freshState();
+  stored.site.lat = 34.15; stored.site.lon = -118.75; stored.fin.costPerW = 2.2;
+  const rep = {};
+  const s = fromHash("#lat=%E0%A4%A&lon=-118.5&cw=abc", stored, rep);
+  assert.equal(s.site.lat, 34.15, "lat keeps its stored value");
+  assert.equal(s.site.lon, -118.5, "lon from the link still applies");
+  assert.equal(s.fin.costPerW, 2.2);
+  assert.deepEqual(rep.keys, ["lat", "cw"]);
+});
+
+test("storage: a null plane does not crash toHash on every reload", () => {
+  const rep = {};
+  const s = fromStorage({ v: 1, planes: [null] }, freshState(), rep);
+  assert.deepEqual(s.roof.planes, []);
+  assert.equal(rep.damaged, true);
+  assert.doesNotThrow(() => toHash(s));
+  const t = fromStorage({ v: 1, planes: "nope", flex: [3, null, { kind: "ev" }] }, freshState(), {});
+  assert.deepEqual(t.roof.planes, []);
+  assert.equal(t.flex.length, 1);
+  assert.equal(t.flex[0].kind, "ev");
+  assert.doesNotThrow(() => toHash(t));
+});
+
+test("storage: stored planes and loads go through the link's field coercion", () => {
+  const rep = {};
+  const s = fromStorage({ v: 1,
+    planes: [{ id: "__proto__", name: 42, tilt: 900, azimuth: "west", maxPanels: -3, shading: { annual: 7 },
+      costAdder: 1e12, polygon: [[34, -118], ["x", 1]], gutterEdge: [0, 9] },
+      { id: "p2", name: "ok", tilt: 25, azimuth: 200, maxPanels: 12, shading: { annual: 0.1 }, costAdder: 0,
+        polygon: [[34, -118], [34.1, -118], [34.1, -118.1]], gutterEdge: [0, 1] }],
+    flex: [{ id: "ev1", kind: "rocket", name: "Car", source: "detected", annualKwh: -5,
+      schedule: { mode: "teleport", daysPerWeek: 99, window: "8-15", maxKW: "fast", followSolar: false, hoursPerDay: 4 },
+      scale: 1, detection: { confidence: 0.8 } }],
+  }, freshState(), rep);
+  const [a, b] = s.roof.planes;
+  assert.equal(a.id, "p1");
+  assert.equal(a.name, "42");
+  assert.equal(a.tilt, 20);
+  assert.equal(a.azimuth, 180);
+  assert.equal(a.maxPanels, 20);
+  assert.equal(a.shading.annual, 0);
+  assert.equal(a.costAdder, 0);
+  assert.equal(a.polygon, null);
+  assert.equal(a.gutterEdge, null);
+  assert.deepEqual(b.polygon, [[34, -118], [34.1, -118], [34.1, -118.1]]);
+  assert.deepEqual(b.gutterEdge, [0, 1]);
+  const f = s.flex[0];
+  assert.equal(f.kind, "custom");
+  assert.equal(f.annualKwh, 0);
+  assert.equal(f.schedule.mode, "asRecorded");
+  assert.equal(f.schedule.daysPerWeek, 5);
+  assert.deepEqual(f.schedule.window, [8, 15]);
+  assert.equal(f.schedule.followSolar, false);
+  assert.equal(f.schedule.hoursPerDay, 4);
+  assert.equal(f.detection.confidence, 0.8);
+});
+
+test("storage: a __proto__ key never becomes a prototype, and `in` never reads through one", () => {
+  const raw = JSON.parse('{"v":1,"__proto__":{"cw":9,"planes":[null]},"ovp":{"__proto__":3,"p1":4},'
+    + '"customTariff":{"__proto__":{"polluted":true},"plans":[]},"flex":[{"id":"f1","kind":"ev","detection":{"__proto__":{"x":1}}}]}');
+  const rep = {};
+  let s;
+  assert.doesNotThrow(() => { s = fromStorage(raw, freshState(), rep); });
+  assert.equal(s.fin.costPerW, DEFAULTS.fin.costPerW, "cw from the prototype is not read");
+  assert.deepEqual(s.roof.planes, []);
+  assert.deepEqual(s.system.override.panelsByPlane, { p1: 4 });
+  assert.equal(Object.getPrototypeOf(s.tariff.custom), Object.prototype);
+  assert.equal(s.tariff.custom.polluted, undefined);
+  assert.equal(Object.getPrototypeOf(s.flex[0].detection), Object.prototype);
+  assert.equal(typeof ({}).polluted, "undefined");
+  assert.doesNotThrow(() => toHash(s));
+});
+
+test("storage: ovp, customTariff and scalars that are the wrong shape are flagged, not applied", () => {
+  const rep = {};
+  const base = freshState();
+  base.fin.costPerW = 2.4;
+  const s = fromStorage({ v: 1, ovp: [1, 2], customTariff: "x", cw: "cheap" }, base, rep);
+  assert.equal(s.system.override.panelsByPlane, null);
+  assert.equal(s.tariff.custom, null);
+  assert.equal(s.fin.costPerW, 2.4, "an unreadable stored scalar keeps the base value");
+  assert.ok(["ovp", "customTariff", "cw"].every((k) => rep.keys.includes(k)));
 });

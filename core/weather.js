@@ -145,6 +145,33 @@ const DB_STORE = "weather";
 const sharedConnections = new Map(); // dbName -> Promise<IDBDatabase>
 
 /**
+ * "Forget my data" latch.  Once forgetting has started, no cache in this page
+ * may write again: a sunlight fetch still in flight would otherwise call set()
+ * after the database was deleted, which silently re-creates it.  The page
+ * navigates away right after forgetting, which is what resets the latch.
+ */
+let forgotten = false;
+export function forgetCaches() { forgotten = true; }
+export function cachesForgotten() { return forgotten; }
+
+/**
+ * Does the shared database exist, without creating it?  Uses
+ * indexedDB.databases() where the browser has it (Chromium, Safari, Firefox
+ * 126+); resolves null when it cannot tell, and the caller decides.
+ */
+export async function sharedDbExists({ dbName = SHARED_DB_NAME, idb } = {}) {
+  const factory = idb || (typeof indexedDB !== "undefined" ? indexedDB : null);
+  if (!factory) return false;
+  if (typeof factory.databases !== "function") return null;
+  try {
+    const list = await factory.databases();
+    return list.some((d) => d && d.name === dbName);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Open (once per page) the shared database with every store present.  The connection
  * is cached; it closes itself when another tab upgrades or deletes the database
  * (`onversionchange`), and the next call opens a fresh one.  Rejects when IndexedDB is
@@ -173,17 +200,20 @@ export function openSharedDb({ dbName = SHARED_DB_NAME, idb } = {}) {
       db.onversionchange = () => {
         // Another tab wants to upgrade or delete ("Forget my data"): get out of its way.
         try { db.close(); } catch { /* already closed */ }
-        sharedConnections.delete(dbName);
+        dropIfOwn();
       };
-      db.onclose = () => sharedConnections.delete(dbName);
+      db.onclose = dropIfOwn;
       resolve(db);
     };
     req.onerror = () => reject(req.error);
     // An older tab still holds version 1 open and has not closed it.
     req.onblocked = () => reject(new Error("IndexedDB upgrade blocked by another open tab"));
   });
+  // Every handler forgets the cached promise only while it is still THIS one:
+  // a late close of an old connection must not evict the newer connection.
+  function dropIfOwn() { if (sharedConnections.get(dbName) === p) sharedConnections.delete(dbName); }
   sharedConnections.set(dbName, p);
-  p.catch(() => sharedConnections.delete(dbName));
+  p.catch(dropIfOwn);
   return p;
 }
 
@@ -211,6 +241,7 @@ export function indexedDbCache({ dbName = DB_NAME, storeName = DB_STORE } = {}) 
     } catch (err) {
       // The cached connection was closed under us (another tab upgraded): reopen once.
       if (retry && err && err.name === "InvalidStateError") {
+        if (forgotten) throw err;                // closed on purpose: do not reopen
         sharedConnections.delete(dbName);
         return tx(mode, fn, false);
       }
@@ -220,6 +251,7 @@ export function indexedDbCache({ dbName = DB_NAME, storeName = DB_STORE } = {}) 
   return {
     kind: "indexeddb",
     async get(key) {
+      if (forgotten) return null;                // opening would re-create the database
       try {
         return (await tx("readonly", (s) => s.get(key))) ?? null;
       } catch {
@@ -227,6 +259,7 @@ export function indexedDbCache({ dbName = DB_NAME, storeName = DB_STORE } = {}) 
       }
     },
     async set(key, value) {
+      if (forgotten) return;                     // never re-create a database being erased
       try {
         await tx("readwrite", (s) => s.put(value, key));
       } catch {
@@ -646,7 +679,8 @@ export async function fetchYears({
         });
       raw = await fetchRawYear({ lat, lon, year, elevationM, signal, fetchImpl, today });
       try {
-        await cache?.set?.(key, raw);
+        // An abort that lands after the response (Forget my data) still skips the write.
+        if (!signal?.aborted) await cache?.set?.(key, raw);
       } catch {
         /* cache write failures are not user-visible */
       }
@@ -729,6 +763,9 @@ export default {
   indexedDbCache,
   openSharedDb,
   closeSharedDb,
+  sharedDbExists,
+  forgetCaches,
+  cachesForgotten,
   SHARED_DB_NAME,
   SHARED_DB_VERSION,
   SHARED_DB_STORES,

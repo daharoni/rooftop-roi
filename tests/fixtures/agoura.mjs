@@ -124,10 +124,16 @@ export function plane(panels, over = {}) {
 }
 
 /** The prototype's default scenario: one roof, the detected EV, the pool pump. */
+// Agoura Hills levies a generation municipal surcharge (sce.json meta.bill_validation).
+// It is city-specific, so the engine applies it only when asked; the reference
+// household lives there, so its params ask.
+export const AGOURA_MUNICIPAL_FACTOR = TARIFF.meta.bill_validation.generation_municipal_surcharge_factor;
+
 export function refParams(panels = 20, batteries = 1, over = {}) {
   return {
     planes: [plane(panels)], flex: [evFlex(), poolFlex()],
     batteries, planId: "TOU-D-PRIME", providerId: "cpa_green", weatherKey: "tmy",
+    municipalSurchargeFactor: AGOURA_MUNICIPAL_FACTOR,
     ...over,
   };
 }

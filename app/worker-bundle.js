@@ -66,10 +66,19 @@ const EV_TUNING = {
   minChargerKW: 2.8,            // a plateau lower than this is not a Level-2 charger
   // Below this a detection is not adopted (see `detectEV`).
   minConfidence: 0.5,
-  // Plausibility: share of EV energy in Jun-Sep, and in the 18:00-22:59 evening block,
-  // above which the "EV" is far more likely to be air-conditioning.
+  // Plausibility: share of EV energy in Jun-Sep, and in the evening block
+  // [eveningHours[0], eveningHours[1]), above which the "EV" is far more likely to be
+  // air-conditioning.
   maxSummerShare: 0.75,
-  maxEveningShare: 0.9,
+  maxEveningShare: 0.75,
+  eveningHours: [17, 23],
+  // A car uses at least this much a year and charges at least this often.  Below either,
+  // the "sessions" are a heat pump's or an AC's thermostat cycles (review 2026-10-03).
+  minAnnualKwh: 500,
+  minSessionsPerMonth: 2,
+  // A record with < 60 days outside Jun-Sep cannot run the summer test; it must show at
+  // least this share of the energy overnight (22:00-06:00) instead.
+  minShortRecordOvernightShare: 0.3,
 };
 
 // ------------------------------------------------------------------- helpers
@@ -176,8 +185,9 @@ function dayBounds(cal) {
  *   day     (10AM-7:59PM): only runs of >= 2 consecutive hours whose excess is flat
  *           (range < 1.0 kWh) and sits between 0.70x and 1.20x the inferred charger
  *           power - this rejects air-conditioning, which ramps;
- *   charger kW = median of the top decile of overnight excess; every hour is capped
- *           at it, and at the metered kWh for that hour.
+ *   charger kW = median of the top decile of overnight excess (held to within 15%
+ *           of the largest flat plateau, see below); every hour is capped at it, and
+ *           at the metered kWh for that hour.
  *
  * NaN hours (a gap the parser could not fill) are treated as absent: they never
  * enter a baseline and never carry EV energy.
@@ -187,9 +197,17 @@ function dayBounds(cal) {
  *     AND daytime (`estimateChargerKW`), replacing the old fixed 8 kW fallback; the
  *     2.0 / 4.0 kWh thresholds become ceilings that scale down to 0.5x / 0.8x that kW
  *     for a small charger, floored at 1.5x the house's median hourly load;
+ *   - every plateau cluster of at least `minChargerKW` counts when the heaviest one
+ *     does, so a two-car house is seen as two levels: the thresholds scale to the
+ *     smallest, the per-hour cap is the largest (ONE estimate, also used for the
+ *     daytime band), and a daytime plateau at either level counts;
  *   - the result is returned as **null** (nothing adopted) when there are no
  *     sessions, when confidence < `minConfidence` (0.5), or when the pattern fails
- *     the plausibility test (summer-only, or evening-only = air-conditioning);
+ *     the plausibility test: summer-only or evening-only (air-conditioning); under
+ *     `minAnnualKwh` (500) a year or under `minSessionsPerMonth` (2) sessions a
+ *     covered month (a heat pump's thermostat cycles); or, on a record with < 60
+ *     days outside Jun-Sep, under 30% of the energy overnight
+ *     ("short-record-unconfirmed").  `detection.rejectCode` names the test;
  *   - a detected EV is scheduled "asRecorded": nothing is moved into solar hours
  *     until the visitor opts in.
  *
@@ -200,12 +218,16 @@ function dayBounds(cal) {
  * ~70% coverage.  The plausibility test, not the score, is what catches AC.
  *
  * opts:
- *   chargerKW     the visitor's stated charger size (kW).  Used as-is for the
- *                 thresholds and the per-hour cap, and it waives the evening-only
- *                 test (the visitor has told us there is a car).
- *   keepRejected  return the FlexLoad even when it is rejected, with
- *                 `detection.accepted: false` and `detection.rejectReason` (for the
- *                 Loads tab's "we looked, here is why not" line, and for tests).
+ *   chargerKW     the visitor's stated charger size (kW).  Always the per-hour cap.
+ *                 When the record's own plateau agrees (within 40%), it also sets
+ *                 the thresholds and waives the evening-only test (the visitor has
+ *                 told us there is a car).  When it disagrees, `detection.
+ *                 chargerMismatch` is true, the record's levels join it for the
+ *                 thresholds and the daytime band, and every test runs.
+ *   keepRejected  return the FlexLoad even when a plausibility test rejects it, with
+ *                 `detection.accepted: false`, `detection.rejectReason` (a sentence)
+ *                 and `detection.rejectCode` (for the Loads tab's "we looked, here is
+ *                 why not" line, and for tests).  Without it a rejection is null.
  *   any EV_TUNING key overrides that constant; an explicit excessThreshold or
  *   coreExcess is used as given (not scaled).
  */
@@ -249,41 +271,58 @@ function detectEV(loadSet, opts = {}) {
   const floor = Math.max(T.minExcessFloor, T.houseFloorMult * medianLoad);
 
   const base0 = buildBaseline(val, present, nDates, null, false, T);
-  const estKW = estimateChargerKW(N, sCell, sNaive, val, present, base0, floor);
-  const plateauKW = userKW || (estKW >= T.minChargerKW ? estKW : null);
-  if (plateauKW) {
-    // An explicit threshold in opts is the caller's to keep; otherwise scale to the charger.
+  const est = estimateChargerKW(N, sCell, sNaive, val, present, base0, floor);
+  // The record's charger level(s): every plateau cluster of at least `minChargerKW`,
+  // provided the HEAVIEST cluster is one (a house whose dominant plateau is 1.6 kW of
+  // heat pump does not get a 3 kW "charger" out of a minor cluster).  A second
+  // cluster is a second car: a two-EV house charging 3.3 kW at night and 11.5 kW on a
+  // Saturday has both.
+  const levels = est.kw >= T.minChargerKW ? est.levels.filter((l) => l >= T.minChargerKW) : [];
+  const plateauKW = levels.length ? Math.max(...levels) : null;
+  // A stated size that the record's own plateau contradicts (by more than 40%) is
+  // kept for the cap - the visitor knows their charger - but it no longer vouches for
+  // the pattern: the evening test runs, and the record's levels set the thresholds.
+  const chargerMismatch = !!(userKW && plateauKW &&
+    Math.max(userKW, plateauKW) / Math.min(userKW, plateauKW) > 1.4);
+  const bandKW = userKW ? (chargerMismatch ? [userKW, ...levels] : [userKW]) : levels;
+  const thrKW = bandKW.length ? Math.min(...bandKW) : null;
+  if (thrKW) {
+    // An explicit threshold in opts is the caller's to keep; otherwise scale to the
+    // SMALLEST charger, so a 3.3 kW car is not hidden by an 11.5 kW one.
     if (!("excessThreshold" in opts)) {
-      T.excessThreshold = Math.min(EV_TUNING.excessThreshold, Math.max(floor, T.thresholdFrac * plateauKW));
+      T.excessThreshold = Math.min(EV_TUNING.excessThreshold, Math.max(floor, T.thresholdFrac * thrKW));
     }
     if (!("coreExcess" in opts)) {
       T.coreExcess = Math.min(EV_TUNING.coreExcess,
-        Math.max(T.excessThreshold + 0.5, T.coreFrac * plateauKW));
+        Math.max(T.excessThreshold + 0.5, T.coreFrac * thrKW));
     }
   }
 
   // ---- two-pass baseline ---------------------------------------------------
-  // The reference estimate (top decile of overnight excess) is kept because it
-  // reproduces the prototype; but on a small charger that decile is mostly house noise
-  // stacked on the charger, so it is held to within 15% of the plateau estimate.
+  // ONE charger estimate drives the per-hour cap: the largest plausible plateau.  The
+  // reference estimate (top decile of overnight excess) is kept when it agrees with
+  // that plateau to within 15%, because it reproduces the prototype; when it does not
+  // (a small overnight car under a big daytime one, or house noise stacked on a small
+  // charger) the plateau wins.
   const fallbackKW = plateauKW || 8.0;
   const pickKW = (base) => {
     if (userKW) return userKW;
     const top = inferChargerKW(val, present, N, sCell, sHour, base, NIGHT, T, fallbackKW);
-    return plateauKW && top > 1.15 * plateauKW ? plateauKW : top;
+    return plateauKW && (top > 1.15 * plateauKW || top < 0.85 * plateauKW) ? plateauKW : top;
   };
+  const dayLevels = (kw) => (bandKW.length ? Array.from(new Set([...bandKW, kw])) : [kw]);
   let chargerKW = pickKW(base0);
-  const ev0 = detectRuns(N, sCell, sHour, sNaive, val, present, base0, chargerKW, NIGHT, T);
+  const ev0 = detectRuns(N, sCell, sHour, sNaive, val, present, base0, chargerKW, dayLevels(chargerKW), NIGHT, T);
 
   const exclude = new Uint8Array(nDates * 24);
   for (const i of ev0.keys()) exclude[sCell[i]] = 1;
   const base1 = buildBaseline(val, present, nDates, exclude, true, T);
   chargerKW = pickKW(base1);
-  const ev1 = detectRuns(N, sCell, sHour, sNaive, val, present, base1, chargerKW, NIGHT, T);
+  const ev1 = detectRuns(N, sCell, sHour, sNaive, val, present, base1, chargerKW, dayLevels(chargerKW), NIGHT, T);
 
   // ---- emit ----------------------------------------------------------------
   const kwhByHour = new Float64Array(N);
-  let evTotal = 0, total = 0, dayEv = 0, summerEv = 0, eveningEv = 0;
+  let evTotal = 0, total = 0, dayEv = 0, summerEv = 0, eveningEv = 0, overnightEv = 0;
   let nonSummerHours = 0;
   for (let i = 0; i < N; i++) {
     const metered = present[sCell[i]] ? val[sCell[i]] : 0;
@@ -294,7 +333,8 @@ function detectEV(loadSet, opts = {}) {
     const mo = +ts[i].slice(5, 7);
     if (mo >= 6 && mo <= 9) summerEv += e;
     else if (present[sCell[i]]) nonSummerHours++;
-    if (sHour[i] >= 18 && sHour[i] <= 22) eveningEv += e;
+    if (sHour[i] >= T.eveningHours[0] && sHour[i] < T.eveningHours[1]) eveningEv += e;
+    if (sHour[i] >= 22 || sHour[i] < 6) overnightEv += e;
   }
 
   const sessions = sessionsFrom(N, sHour, sNaive, ts, ev1);
@@ -316,7 +356,11 @@ function detectEV(loadSet, opts = {}) {
     `${T.dayLevelLo.toFixed(2)}x and ${T.dayLevelHi.toFixed(2)}x the inferred charger power ` +
     `are attributed to the EV; this separates charging plateaus from air-conditioning, which ` +
     `ramps. Per-hour EV is capped at the ${userKW ? "stated" : "inferred"} charger power of ` +
-    `${chargerKW} kW${userKW ? "" : " (median of the top decile of overnight excess)"}. ` +
+    `${chargerKW} kW${userKW ? "" : chargerKW === plateauKW
+      ? " (the largest flat charging plateau in the record)"
+      : " (median of the top decile of overnight excess)"}. ` +
+    (levels.length > 1 ? `The record shows ${levels.length} charging levels (` +
+      `${levels.slice().sort((x, y) => x - y).join(" and ")} kW); daytime plateaus at either count. ` : "") +
     `Thresholds scale with the charger (${T.thresholdFrac}x / ${T.coreFrac}x its kW, capped at ` +
     `${EV_TUNING.excessThreshold} / ${EV_TUNING.coreExcess} kWh) but never drop below ` +
     `${round2(floor)} kWh (${T.houseFloorMult}x the house's median hourly load). Detected daytime ` +
@@ -329,25 +373,45 @@ function detectEV(loadSet, opts = {}) {
     coverage: nUsable / N,
   });
 
-  // ---- plausibility: is this a car, or the air conditioner? -----------------
+  // ---- plausibility: is this a car, or the air conditioner / heat pump? ------
   // A car is driven all year.  Air-conditioning shows up as an "EV" that only charges
-  // in Jun-Sep, or only in the 18:00-23:00 evening block (the hours after a hot day
-  // when the house is occupied and the compressor runs flat out).  Either pattern is
-  // rejected.  The summer test needs at least ~60 days outside Jun-Sep to judge; the
-  // evening test is skipped when the caller states a charger size, because then the
-  // visitor has told us there IS a car.
+  // in Jun-Sep, or almost only in the 17:00-23:00 evening block (the hours after a hot
+  // day when the house is occupied and the compressor runs flat out).  A heat pump or
+  // other thermostat load leaves a thin scatter of "sessions": a few hundred kWh a
+  // year, far fewer than a car's weekly charges.  All of these are rejected.
+  //   - the summer test needs at least ~60 days outside Jun-Sep to judge; a record
+  //     shorter than that must instead show real overnight charging (>= 30% of the
+  //     energy between 22:00 and 06:00), or the split stays unconfirmed;
+  //   - the evening test is skipped when the caller states a charger size that the
+  //     record does not contradict (then the visitor has told us there IS a car).
   const summerShare = evTotal > 0 ? summerEv / evTotal : 0;
   const eveningShare = evTotal > 0 ? eveningEv / evTotal : 0;
-  let rejectReason = null;
-  if (!sessions.length) rejectReason = "no charging sessions found";
-  else if (nonSummerHours >= 60 * 24 && summerShare > T.maxSummerShare) {
-    rejectReason = `${Math.round(summerShare * 100)}% of the candidate energy is in Jun-Sep; ` +
-      `that is air-conditioning, not a car`;
-  } else if (!userKW && eveningShare > T.maxEveningShare) {
-    rejectReason = `${Math.round(eveningShare * 100)}% of the candidate energy is between 18:00 ` +
-      `and 23:00 with no overnight or daytime sessions; that looks like air-conditioning`;
+  const overnightShare = evTotal > 0 ? overnightEv / evTotal : 0;
+  const coveredMonths = nUsable / (HOURS_PER_YEAR / 12);
+  const shortRecord = nonSummerHours < 60 * 24;
+  const [eveA, eveB] = T.eveningHours;
+  let rejectReason = null, rejectCode = null;
+  const reject = (code, why) => { rejectCode = code; rejectReason = why; };
+  if (!sessions.length) reject("no-sessions", "no charging sessions found");
+  else if (!shortRecord && summerShare > T.maxSummerShare) {
+    reject("summer-only", `${Math.round(summerShare * 100)}% of the candidate energy is in Jun-Sep; ` +
+      `that is air-conditioning, not a car`);
+  } else if (shortRecord && overnightShare < T.minShortRecordOvernightShare) {
+    reject("short-record-unconfirmed", `the record has fewer than 60 days outside Jun-Sep and only ` +
+      `${Math.round(overnightShare * 100)}% of the candidate energy is overnight (22:00-06:00); ` +
+      `with no winter to compare against, that cannot be told apart from air-conditioning`);
+  } else if ((!userKW || chargerMismatch) && eveningShare > T.maxEveningShare) {
+    reject("evening-only", `${Math.round(eveningShare * 100)}% of the candidate energy is between ` +
+      `${pad2(eveA)}:00 and ${pad2(eveB)}:00; a car is rarely charged only then, air-conditioning ` +
+      `often runs only then`);
+  } else if (annualKwh < T.minAnnualKwh) {
+    reject("too-small", `${Math.round(annualKwh)} kWh/yr is below ${T.minAnnualKwh}; that is a ` +
+      `thermostat load (heat pump, AC) or noise, not a car`);
+  } else if (sessions.length < T.minSessionsPerMonth * coveredMonths) {
+    reject("too-few-sessions", `${sessions.length} sessions over ${round2(coveredMonths)} months ` +
+      `is fewer than ${T.minSessionsPerMonth} a month; a car charges more often than that`);
   } else if (confidence < T.minConfidence) {
-    rejectReason = `confidence ${round2(confidence)} is below ${T.minConfidence}`;
+    reject("low-confidence", `confidence ${round2(confidence)} is below ${T.minConfidence}`);
   }
   if (rejectReason && !opts.keepRejected) return null;
 
@@ -366,12 +430,17 @@ function detectEV(loadSet, opts = {}) {
       daytimeKwh: round3(dayEv),
       confidence: round2(confidence),
       chargerSource: userKW ? "stated" : "inferred",
+      chargerMismatch,
+      // plateauKW is null when the record's plateau was too small to be a charger and
+      // so did not shape anything; chargerLevels lists every level that did.
       thresholds: { excessKwh: round2(T.excessThreshold), coreKwh: round2(T.coreExcess),
                     floorKwh: round2(floor), medianHourlyKwh: round3(medianLoad),
-                    plateauKW: estKW },
-      plausibility: { summerShare: round2(summerShare), eveningShare: round2(eveningShare) },
+                    plateauKW, chargerLevels: levels },
+      plausibility: { summerShare: round2(summerShare), eveningShare: round2(eveningShare),
+                      overnightShare: round2(overnightShare), coveredMonths: round2(coveredMonths) },
       accepted: !rejectReason,
       rejectReason,
+      rejectCode,
     },
     // Never move load the visitor has not agreed to move: a detected EV stays exactly
     // where the meter recorded it until the Loads tab switches it to "spread".
@@ -401,7 +470,7 @@ function detectEV(loadSet, opts = {}) {
  * current is the flattest thing a house does; AC cycles and ramps, so it rarely
  * forms a heavy cluster.
  */
-function estimateChargerKW(N, sCell, sNaive, val, present, base, floor) {
+function estimateChargerKW(N, sCell, sNaive, val, present, base, floor, minShare = 0.25) {
   const ex = new Float64Array(N);
   for (let i = 0; i < N; i++) {
     const c = sCell[i];
@@ -425,7 +494,7 @@ function estimateChargerKW(N, sCell, sNaive, val, present, base, floor) {
     }
     i = j + 1;
   }
-  if (!levels.length) return null;
+  if (!levels.length) return { kw: null, levels: [] };
   const BIN = 0.5;
   const bins = new Map();
   for (const [l, w] of levels) {
@@ -438,9 +507,23 @@ function estimateChargerKW(N, sCell, sNaive, val, present, base, floor) {
     const w = (bins.get(b - 1) || 0) + bins.get(b) + (bins.get(b + 1) || 0);
     if (w > bestW) { bestW = w; best = b; }
   }
-  const lo = (best - 1) * BIN, hi = (best + 2) * BIN;
-  const inCluster = levels.filter(([l]) => l >= lo && l < hi).map(([l]) => l).sort((a, b) => a - b);
-  return round2(medianOf(inCluster));
+  // Every cluster, heaviest first: a window of three bins, not overlapping one
+  // already taken, carrying at least `minShare` of the heaviest cluster's energy.
+  const windowW = (b) => (bins.get(b - 1) || 0) + (bins.get(b) || 0) + (bins.get(b + 1) || 0);
+  const cand = Array.from(bins.keys()).map((b) => [b, windowW(b)]).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  const taken = [];
+  for (const [b, w] of cand) {
+    if (w < minShare * bestW) break;
+    if (taken.some((t) => Math.abs(t - b) < 3)) continue;
+    taken.push(b);
+  }
+  if (!taken.includes(best)) taken.unshift(best);
+  const medianIn = (b) => {
+    const lo = (b - 1) * BIN, hi = (b + 2) * BIN;
+    return round2(medianOf(levels.filter(([l]) => l >= lo && l < hi).map(([l]) => l).sort((x, y) => x - y)));
+  };
+  const all = taken.map(medianIn);
+  return { kw: all[0], levels: all };
 }
 
 /**
@@ -496,7 +579,7 @@ function inferChargerKW(val, present, N, sCell, sHour, base, NIGHT, T, fallbackK
 }
 
 /** The night-run + daytime-plateau scan.  Returns Map(slotIndex -> ev kWh). */
-function detectRuns(N, sCell, sHour, sNaive, val, present, base, chargerKW, NIGHT, T) {
+function detectRuns(N, sCell, sHour, sNaive, val, present, base, chargerKW, dayKW, NIGHT, T) {
   const ev = new Map();
   const excess = new Float64Array(N);
   for (let i = 0; i < N; i++) {
@@ -521,11 +604,13 @@ function detectRuns(N, sCell, sHour, sNaive, val, present, base, chargerKW, NIGH
     } else i++;
   }
 
-  // --- day: only flat plateaus that look like the charger
-  const loLvl = T.dayLevelLo * chargerKW, hiLvl = T.dayLevelHi * chargerKW;
+  // --- day: only flat plateaus that look like one of the chargers
+  const bands = dayKW.map((kw) => [T.dayLevelLo * kw, T.dayLevelHi * kw]);
   i = 0;
   while (i < N) {
-    if (!NIGHT[sHour[i]] && excess[i] >= loLvl && excess[i] <= hiLvl) {
+    const band = NIGHT[sHour[i]] ? null : bands.find(([lo, hi]) => excess[i] >= lo && excess[i] <= hi);
+    if (band) {
+      const [loLvl, hiLvl] = band;
       let j = i;
       for (;;) {
         const k = j + 1;
@@ -1197,7 +1282,9 @@ const MIN_USABLE_DAYS = 300;
 
 function prepare(data, opts) {
   const load = data.load, tariffs = data.tariffs;
-  const minUsableDays = opts && opts.minUsableDays !== undefined ? +opts.minUsableDays : MIN_USABLE_DAYS;
+  // null / undefined = the default bar; only a finite number lowers or raises it.
+  const minOpt = opts ? opts.minUsableDays : undefined;
+  const minUsableDays = minOpt != null && isFinite(+minOpt) ? +minOpt : MIN_USABLE_DAYS;
   const ts = load.ts, N = ts.length;
   const month = new Uint8Array(N);        // 1-12
   const hourA = new Int8Array(N);         // 0-23 wall clock
@@ -1223,7 +1310,7 @@ function prepare(data, opts) {
   for (let i = 0; i < N; i++) years.add(+ts[i].slice(0, 4));
   const hol = holidaySet(Array.from(years));
 
-  const dayStart = [], dayLen = [], dayDow = [], monthDays = [], monthKey = [];
+  const dayStart = [], dayLen = [], dayDow = [], monthDays = [], monthKey = [], dayExpect = [];
   const dayValid = [], monthValidHours = [], monthHours = [];
   let prevDay = "", prevMonth = "", d = -1, m = -1, prevTs = "";
   let cachedDayType = 0;
@@ -1234,6 +1321,9 @@ function prepare(data, opts) {
     const dkey = s.slice(0, 10), mkey = s.slice(0, 7);
     if (dkey !== prevDay) {
       prevDay = dkey; d++; dayStart.push(i); dayLen.push(0); dayValid.push(0);
+      // Hours a complete day has: 23 on the spring-forward Sunday, else 24 (a fall-back
+      // day may carry 25 rows; dividing by the rows present covers that).
+      dayExpect.push(mo === 3 && dd === dstBounds(y).start ? 23 : 24);
       const dow = new Date(Date.UTC(y, mo - 1, dd)).getUTCDay();
       dayDow.push(dow);
       cachedDayType = (dow === 0 || dow === 6 || hol.has(y + "-" + mo + "-" + dd)) ? 1 : 0;
@@ -1253,12 +1343,14 @@ function prepare(data, opts) {
   }
 
   const nDays = d + 1;
-  // Usable days: each day counts by the share of its slots that carry a reading, so a
-  // fixed charge, a baseline allowance and the annualisation all see the same days.
+  // Usable days: each day counts by the share of a FULL day's hours that carry a reading
+  // (finite hours / 24, DST-aware), so a record cut mid-day or a day with one reading
+  // counts as a fraction of a day, and a fixed charge, a baseline allowance and the
+  // annualisation all see the same days.
   const monthUsableDays = new Float64Array(m + 1);
   let usableDays = 0;
   for (let k = 0; k < nDays; k++) {
-    const frac = dayLen[k] > 0 ? dayValid[k] / dayLen[k] : 0;
+    const frac = Math.min(1, dayValid[k] / Math.max(dayLen[k], dayExpect[k]));
     usableDays += frac;
     monthUsableDays[monthIdx[dayStart[k]]] += frac;
   }
@@ -1485,8 +1577,20 @@ function reshapeFlex(flex, cal, solarShape) {
 
 // ---------------------------------------------------------------- rates
 function planById(tariffs, id) {
-  for (let i = 0; i < tariffs.plans.length; i++) if (tariffs.plans[i].id === id) return tariffs.plans[i];
-  return tariffs.plans[0];
+  return resolvePlan(tariffs, id).plan;
+}
+/**
+ * Which plan prices this run.  An empty id asks for the utility's default plan
+ * (`plans[].default === true`, else the first; mirrors core/tariff.js defaultPlan()).
+ * An id the tariff does not list falls back to that same default and says so.
+ */
+function resolvePlan(t, id) {
+  const plans = (t && t.plans) || [];
+  const def = plans.find((p) => p.default === true) || plans[0];
+  const want = id == null || id === "" ? null : String(id);
+  if (want) for (let i = 0; i < plans.length; i++) if (plans[i].id === want) return { plan: plans[i], requested: want, fallback: false };
+  if (!def) throw new Error("tariff has no plans: cannot price plan '" + id + "'");
+  return { plan: def, requested: want, fallback: !!want };
 }
 /**
  * The provider the utility's customers are on unless they opted out: the provider
@@ -1509,13 +1613,15 @@ function tariffDefaultProvider(t) {
  */
 function resolveProvider(t, providerId) {
   const provs = (t && t.providers) || {};
-  if (providerId && provs[providerId]) return { id: providerId, requested: providerId, fallback: false };
+  const want = providerId == null || providerId === "" ? null : String(providerId);
+  if (want && provs[want]) return { id: want, requested: want, fallback: false };
   const def = tariffDefaultProvider(t);
   const uid = (t && t.utility && t.utility.id) || null;
   if (!def && !uid) {
     throw new Error("tariff has no providers and no utility.id: cannot price provider '" + providerId + "'");
   }
-  return { id: def || uid, requested: providerId == null ? null : providerId, fallback: providerId != null };
+  // An empty id asks for the default; only an id the tariff does not know is a fallback.
+  return { id: def || uid, requested: want, fallback: !!want };
 }
 
 /**
@@ -1573,13 +1679,17 @@ function resolveBaseline(t, region) {
   };
 }
 
-/** True-up month 1-12: params override, else nbt.true_up_month, else April. */
-const DEFAULT_TRUE_UP_MONTH = 4;
+/**
+ * True-up month 1-12: params override, else nbt.true_up_month, else October.  Only a
+ * NUMBER that is an integer 1-12 is accepted - a numeric string ("4") is not - exactly
+ * as core/tariff.js trueUpMonth() and validate() read the file.
+ */
+const DEFAULT_TRUE_UP_MONTH = 10;
+const isMonth = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 12;
 function resolveTrueUpMonth(t, override) {
-  const ok = (v) => Number.isInteger(+v) && +v >= 1 && +v <= 12;
-  if (override != null && override !== "" && ok(override)) return +override;
+  if (isMonth(override)) return override;
   const f = t && t.nbt && t.nbt.true_up_month;
-  return ok(f) ? +f : DEFAULT_TRUE_UP_MONTH;
+  return isMonth(f) ? f : DEFAULT_TRUE_UP_MONTH;
 }
 
 /**
@@ -1587,10 +1697,11 @@ function resolveTrueUpMonth(t, override) {
  *
  * accPlus     undefined / null = the tariff file's nbt.acc_plus_adder_per_kwh;
  *             a number is an explicit override.
- * opts        { baselineRegion, trueUpMonth } - both optional, see DEFAULTS.
+ * opts        { baselineRegion, trueUpMonth, municipalSurchargeFactor } - all optional,
+ *             see DEFAULTS.
  */
 function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capExport, opts) {
-  const t = ctx.tariffs, plan = planById(t, planId);
+  const t = ctx.tariffs, planRes = resolvePlan(t, planId), plan = planRes.plan;
   const o = opts || {};
   const prov = resolveProvider(t, providerIdIn);
   const providerId = prov.id;
@@ -1607,12 +1718,15 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
   // provider (provider id differs from utility.id).
   const uidForAdder = t.utility && t.utility.id;
   const adder = (uidForAdder && providerId !== uidForAdder) ? (t.nbt.cca_export_adder_per_kwh || 0) : 0;
-  // Two bill lines deliberately kept out of the rate tables (sce.json meta.notes):
-  // Agoura Hills' generation municipal surcharge, levied on the GENERATION component
-  // only, and CPA's flat per-kWh energy surcharge.  Folding both into the hourly
-  // import price is exact and costs nothing in the inner loop.
+  // Two bill lines deliberately kept out of the rate tables (sce.json meta.notes): a
+  // city's generation municipal surcharge, levied on the GENERATION component only, and
+  // CPA's flat per-kWh energy surcharge.  Folding both into the hourly import price is
+  // exact and costs nothing in the inner loop.  The municipal factor is city-specific
+  // (sce.json meta.bill_validation carries Agoura Hills' for the bill replay), so it
+  // applies ONLY when the caller passes one: `opts.municipalSurchargeFactor`.
   const bv = (t.meta || {}).bill_validation || {};
-  const munFactor = bv.generation_municipal_surcharge_factor || 0;
+  const mf = +o.municipalSurchargeFactor;
+  const munFactor = isFinite(mf) && mf > 0 ? mf : 0;
   const cpaSurcharge = /^cpa/.test(providerId) ? (bv.cpa_energy_surcharge_per_kwh || 0) : 0;
   const isSummer = {};
   for (let m = 1; m <= 12; m++) isSummer[m] = plan.summer_months.indexOf(m) >= 0;
@@ -1646,7 +1760,8 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
     per[i] = c.p; imp[i] = c.r; summer[i] = su;
     exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
   }
-  return { plan, imp, exp, period: per, summer,
+  return { plan, planRequested: planRes.requested, planFallback: planRes.fallback,
+           imp, exp, period: per, summer,
            providerId, providerRequested: prov.requested, providerFallback: prov.fallback,
            accPlus: accPlusUsed, arecr,
            capExport, munFactor, cpaSurcharge,
@@ -1662,7 +1777,9 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
 
 /** The tariff terms a run actually used, for the method panel and for tests. */
 function tariffTerms(r) {
-  return { providerId: r.providerId, providerFallback: r.providerFallback,
+  return { planId: r.plan.id, planRequested: r.planRequested, planFallback: r.planFallback,
+           providerId: r.providerId, providerRequested: r.providerRequested,
+           providerFallback: r.providerFallback, municipalSurchargeFactor: r.munFactor,
            accPlusAdder: r.accPlus, arecr: r.arecr, nsc: r.nsc,
            baselineRegion: r.baselineRegion, baselineRegionFallback: r.baselineRegionFallback,
            baselineKwhPerDay: { summer: r.baselineAllow.summer, winter: r.baselineAllow.winter },
@@ -1791,7 +1908,8 @@ function buildScenario(ctx, params, opts) {
     baseClampedKwh: clampedKwh, flexNanHours,
     rates: buildRates(ctx, p.planId, p.providerId, p.applyNbc, climateCredit(ctx, p),
                       p.accPlusAdder, !p.ngom,
-                      { baselineRegion: p.baselineRegion, trueUpMonth: p.trueUpMonth }),
+                      { baselineRegion: p.baselineRegion, trueUpMonth: p.trueUpMonth,
+                        municipalSurchargeFactor: p.municipalSurchargeFactor }),
     weatherKey: p.weatherKey,
     _pv: null,
   };
@@ -1835,22 +1953,50 @@ function pvFor(scn, alloc) {
 
 // ---------------------------------------------------------------- billing
 /**
+ * Which months of the record settle the credit bank.  The billing year is the twelve
+ * months ending in the true-up month, and the record is treated as a CYCLE: the months
+ * after the last true-up month in the record wrap round to join the months before the
+ * first one, so every month belongs to exactly one relevant period and no period is a
+ * stub.
+ *
+ *   - every occurrence of `tum` in the record is a settlement point;
+ *   - the wrapped period (after the last point, round to the first) runs
+ *     M - 12 x (points - 1) months; if that is under 12 the first point is dropped and
+ *     the wrapped months roll into the next year's window instead (13-23 months);
+ *   - a record shorter than a year that never reaches `tum` settles once, at its end.
+ *
+ * So a 24-month record always settles two 12-month years whatever its start month, a
+ * 12-month record settles one year ending in `tum`, and a 13-month record settles one
+ * 12- or 13-month year with no 1-month stub.  Returns the settlement month indices.
+ */
+function settlementPoints(ctx, tum) {
+  const M = ctx.nMonths, pts = [];
+  for (let m = 0; m < M; m++) if (ctx.monthNum[m] === tum) pts.push(m);
+  if (!pts.length) return [M - 1];
+  if (pts.length > 1 && M - 12 * (pts.length - 1) < 12) pts.shift();
+  return pts;
+}
+
+/**
  * Turn monthly energy totals into a bill, NBT-style:
  *   subtotal = fixed + energy - baseline credit, floored at the minimum charge;
  *   export credits then offset the subtotal down to (not below) that floor;
  *   the unused balance rolls forward and is cashed out at NSC at true-up.
+ * The credit bank runs round the record as a cycle (settlementPoints above): the bank
+ * left at the end of the record is CARRIED into the record's first month, never
+ * forfeited, and reported as `trailing`.
  */
 function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mBandKwh, mBandCred) {
   const M = ctx.nMonths;
-  let bal$ = 0, balKwh = 0, total = 0, forfeitedTotal = 0, exportValue = 0;
-  const rows = detail ? [] : null;
-  // The first relevant period runs at least 12 billing months: a record that starts
-  // shortly before the true-up month does not settle a two-month stub on its own (that
-  // made year-1 savings depend on the download date).  After the first settlement, every
-  // true-up month settles; the last month of the record always settles what is left.
-  let lastSettle = -1;
   const blSummer = r.baselineSummerMonths || r.plan.summer_months;
   const blPct = r.baselineCreditPct || 1;
+
+  // ---- 1. everything that does not depend on the credit bank, month by month
+  const subtotalA = new Float64Array(M), floorA = new Float64Array(M);
+  const expKwhA = new Float64Array(M), expCredA = new Float64Array(M);
+  const accPlusA = new Float64Array(M), climateA = new Float64Array(M);
+  const pre = detail ? new Array(M) : null;
+  let forfeitedCap = 0;
   for (let m = 0; m < M; m++) {
     // Usable days: a month with unfilled gaps is billed (fixed charge, minimum charge,
     // baseline allowance, climate credit) only for the share of it the simulation saw.
@@ -1874,7 +2020,7 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
         over -= take;
       }
       forfeit$ = Math.min(forfeit$, expCred);
-      expKwh -= forfeitKwh; expCred -= forfeit$; forfeitedTotal += forfeit$;
+      expKwh -= forfeitKwh; expCred -= forfeit$; forfeitedCap += forfeit$;
     }
     const fixed = r.fixed * days;
     // Baseline credit applies up to baseline_credit_pct of the allocation (SDG&E
@@ -1887,32 +2033,37 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
     let subtotal = fixed + energy - credit;
     let minApplied = 0;
     if (subtotal < floor) { minApplied = floor - subtotal; subtotal = floor; }
-
-    // The ACC Plus adder is the one export credit that MAY offset fixed and
-    // non-bypassable charges, so it is settled outside the credit bank.
-    const accPlus = (r.accPlus || 0) * expKwh;
-    bal$ += expCred; balKwh += expKwh;
-    const used = Math.min(bal$, Math.max(0, subtotal - floor));
-    if (bal$ > EPS) { balKwh *= (1 - used / bal$); }
-    bal$ -= used;
-    let bill = subtotal - used;
-
+    // The CA Climate Credit is a flat bill credit, not an energy charge: it lands after
+    // the export offset and CAN push the bill below the fixed charge.
     let climate = 0;
     if (r.climate && r.climate.amount && r.climate.months.indexOf(ctx.monthNum[m]) >= 0) {
-      // The CA Climate Credit is a flat bill credit, not an energy charge: it lands
-      // after the export offset and CAN push the bill below the fixed charge.
       climate = r.climate.amount * share;
-      bill -= climate;
     }
+    subtotalA[m] = subtotal; floorA[m] = floor; expKwhA[m] = expKwh; expCredA[m] = expCred;
+    // The ACC Plus adder is the one export credit that MAY offset fixed and
+    // non-bypassable charges, so it is settled outside the credit bank.
+    accPlusA[m] = (r.accPlus || 0) * expKwh;
+    climateA[m] = climate;
+    if (pre) pre[m] = { days, calDays, fixed, energy, credit, minApplied, forfeitKwh, forfeit$ };
+  }
 
-    bill -= accPlus;                              // may take the bill below the floor
-    exportValue += used + accPlus;                // dollars sourced from exported kWh
-
+  // ---- 2. the credit bank, round the cycle, starting empty in the month after the
+  // record's last settlement point.
+  const points = settlementPoints(ctx, r.trueUpMonth);
+  const isPoint = new Uint8Array(M);
+  for (const k of points) isPoint[k] = 1;
+  const start = (points[points.length - 1] + 1) % M;
+  const usedA = new Float64Array(M), trueUpA = new Float64Array(M);
+  const forfeitSettleA = new Float64Array(M), balA = new Float64Array(M);
+  let bal$ = 0, balKwh = 0, endBank$ = 0, endBankKwh = 0;
+  for (let j = 0; j < M; j++) {
+    const m = (start + j) % M;
+    bal$ += expCredA[m]; balKwh += expKwhA[m];
+    const used = Math.min(bal$, Math.max(0, subtotalA[m] - floorA[m]));
+    if (bal$ > EPS) { balKwh *= (1 - used / bal$); }
+    bal$ -= used;
     let trueUp = 0, forfeitCredit = 0;
-    const settleNow = m === M - 1
-      || (ctx.monthNum[m] === r.trueUpMonth && (lastSettle >= 0 || m >= 11));
-    if (settleNow) {
-      lastSettle = m;
+    if (isPoint[m]) {
       // Schedule NBT SC 4.e.i, in order: the credit bank is first reduced by the
       // "Average Retail Export Compensation Rate" applied to net surplus kWh, THEN the
       // net surplus kWh are paid at Net Surplus Compensation.  The ARECR is about three
@@ -1922,23 +2073,48 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
       const reduction = Math.min(bal$, r.arecr * balKwh);
       trueUp = balKwh * r.nsc;
       forfeitCredit = Math.max(0, reduction - trueUp);
-      forfeitedTotal += forfeitCredit;
-      bill -= trueUp;
-      exportValue += trueUp;
-      bal$ -= reduction;                 // any residual rolls into the new relevant period
+      bal$ -= reduction;               // any residual rolls into the new relevant period
       balKwh = 0;
     }
-    total += bill;
-    if (rows) rows.push({ key: ctx.monthKey[m], days, calendarDays: calDays, fixed, energy,
-                          baselineCredit: -credit, minimumAdj: minApplied,
-                          exportCreditUsed: -used, accPlus: -accPlus,
-                          climateCredit: -climate, trueUp: -trueUp, settled: settleNow, bill,
-                          importKwh: mImpKwh[m], exportKwh: expKwh,
-                          forfeitedKwh: forfeitKwh, forfeitedCredit: forfeit$ + forfeitCredit,
-                          creditBalance: bal$ });
+    if (m === M - 1) { endBank$ = bal$; endBankKwh = balKwh; }
+    usedA[m] = used; trueUpA[m] = trueUp; forfeitSettleA[m] = forfeitCredit; balA[m] = bal$;
   }
-  return { total, months: rows, leftoverCredit: bal$, forfeited: forfeitedTotal,
-           exportValue };
+
+  // ---- 3. totals and rows, in record order
+  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0;
+  const rows = detail ? [] : null;
+  for (let m = 0; m < M; m++) {
+    const bill = subtotalA[m] - usedA[m] - climateA[m] - accPlusA[m] - trueUpA[m];
+    total += bill;
+    exportValue += usedA[m] + accPlusA[m] + trueUpA[m];   // dollars sourced from exported kWh
+    forfeitedTotal += forfeitSettleA[m];
+    if (rows) {
+      const q = pre[m];
+      rows.push({ key: ctx.monthKey[m], days: q.days, calendarDays: q.calDays, fixed: q.fixed,
+                  energy: q.energy, baselineCredit: -q.credit, minimumAdj: q.minApplied,
+                  exportCreditUsed: -usedA[m], accPlus: -accPlusA[m],
+                  climateCredit: -climateA[m], trueUp: -trueUpA[m], settled: !!isPoint[m], bill,
+                  importKwh: mImpKwh[m], exportKwh: expKwhA[m],
+                  forfeitedKwh: q.forfeitKwh, forfeitedCredit: q.forfeit$ + forfeitSettleA[m],
+                  creditBalance: balA[m] });
+    }
+  }
+  // The months after the record's last settlement: their bank is carried round into the
+  // record's first month (and settled at the first settlement point), not forfeited.
+  const last = points[points.length - 1];
+  const unsettledMonths = [];
+  for (let m = last + 1; m < M; m++) unsettledMonths.push(ctx.monthKey[m]);
+  const trailing = { unsettledMonths, bankKwh: unsettledMonths.length ? endBankKwh : 0,
+                     bankDollars: unsettledMonths.length ? endBank$ : 0,
+                     carriedTo: unsettledMonths.length ? ctx.monthKey[0] : null,
+                     settledAt: unsettledMonths.length ? ctx.monthKey[points[0]] : null };
+  const periods = points.map(function (p, i) {
+    const from = i === 0 ? start : points[i - 1] + 1;
+    const months = i === 0 ? ((p - start + M) % M) + 1 : p - points[i - 1];
+    return { start: ctx.monthKey[from], end: ctx.monthKey[p], months };
+  });
+  return { total, months: rows, leftoverCredit: endBank$, forfeited: forfeitedTotal,
+           exportValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
 }
 
 // ---------------------------------------------------------------- dispatch
@@ -2115,6 +2291,10 @@ function runHours(scn, params, detail) {
     solarFraction: tPv > 0 ? tSelf / tPv : 0,
     weatherKey: scn.weatherKey,
     tariffTerms: tariffTerms(r),
+    // Which months settled the credit bank, the relevant periods they close, and the bank
+    // the record's last months carry round into its first (settle() / docs/engine.md §6).
+    trueUp: { month: r.trueUpMonth, settledMonths: billing.settledMonths,
+              periods: billing.periods, trailing: billing.trailing },
   };
   if (detail) {
     out.monthly = billing.months;
@@ -2162,6 +2342,9 @@ const DEFAULTS = {
   baselineRegion: null,
   // Settlement month 1-12 (the PTO anniversary); null = the file's nbt.true_up_month.
   trueUpMonth: null,
+  // A city's generation municipal surcharge / utility-user tax as a fraction of the
+  // generation charge (Agoura Hills: sce.json meta.bill_validation).  null = none.
+  municipalSurchargeFactor: null,
   strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5,
   exportLimitKW: 0,
 };
@@ -2293,7 +2476,8 @@ const _internal = { holidaySet, isDST, spread, fallbackReshape, dayBounds,
 
 const SolarEngine = {
   prepare, buildScenario, runHours, simulate, billPeriod, billOnAllPlans, billOnAllProviders,
-  baselines, attachSavings, buildRates, settle, planById, profileFor, pvFor, climateCredit,
+  baselines, attachSavings, buildRates, settle, settlementPoints, planById, resolvePlan,
+  resolveTrueUpMonth, profileFor, pvFor, climateCredit,
   resolveProvider, resolveBaseline, tariffAccPlus, tariffArecr,
   MIN_USABLE_DAYS, DEFAULT_TRUE_UP_MONTH,
   reshapeFlex, setFlexReshape, flexReshapeSource,

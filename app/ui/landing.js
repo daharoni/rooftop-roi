@@ -194,8 +194,9 @@ function startPanel(handlers) {
       el("div", {}, [
         el("button.btn", { type: "button", text: "Pick it on the map instead", on: { click: () => handlers.onMap() } }),
         el("p.ctl-note", { style: "margin-top:5px",
-          text: "Opens satellite imagery from Esri. The tile requests show Esri roughly which block you "
-            + "are looking at (about 75 m), along with your IP address; nothing you typed is sent." }),
+          text: "Available once your meter file is loaded: the map lives on the Roof tab. It shows satellite "
+            + "imagery from Esri, and the tile requests show Esri roughly which block you are looking at "
+            + "(about 75 m), along with your IP address. No address or ZIP is sent from the map." }),
       ]),
     ]),
 
@@ -325,10 +326,19 @@ export function landingNotice(spec) {
 }
 
 /** Prefer an error's own user-facing wording (GeocodeError, parser errors) over its technical message. */
+export const GENERIC_ERROR = "Something went wrong reading that; details in the console.";
+
+/**
+ * The sentence to show for an error.  Only errors written for people carry a
+ * `userMessage` (LoadFileError, WeatherUnavailableError, the geocoder's errors,
+ * userError() in main.js); anything else - a TypeError, a DOMException, a bare
+ * Error from deep inside a parser - is a bug or an internal detail, so the page
+ * says something went wrong and the console (where callers log `err`) has the rest.
+ */
 export function userMessageOf(err, fallback) {
   if (err && typeof err.userMessage === "string" && err.userMessage) return err.userMessage;
-  if (err && typeof err.message === "string" && err.message) return err.message;
-  return fallback;
+  if (!err) return fallback || GENERIC_ERROR;
+  return GENERIC_ERROR;
 }
 
 export function landingError(message) {

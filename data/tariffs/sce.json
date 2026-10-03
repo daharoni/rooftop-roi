@@ -1796,7 +1796,7 @@
   "net_surplus_compensation_per_kwh": 0.02008,
   "nonbypassable_charges_per_kwh": 0.00779,
   "true_up": "annual",
-  "true_up_month": 4,
+  "true_up_month": 10,
   "eec_adjustment_per_kwh": 0.05981,
   "eec_adjustment_source": {
    "month": "2026-09",

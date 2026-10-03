@@ -212,7 +212,7 @@ export class ControlRail {
         if (spec.opts && !spec.opts.some((o) => String(o.v) === String(w.control.value))) {
           this._fillSelect(w.control, spec, v);
         }
-        w.control.value = String(v);
+        w.control.value = v === null || v === undefined ? "" : String(v);
       } else {
         if (document.activeElement !== w.control) w.control.value = v ?? "";
         if (w.value) w.value.textContent = formatValue(spec, v);
@@ -233,7 +233,7 @@ export class ControlRail {
   _fillSelect(node, spec, value) {
     clear(node);
     for (const o of spec.opts || []) node.appendChild(el("option", { value: String(o.v), text: o.t }));
-    node.value = String(value);
+    node.value = value === null || value === undefined ? "" : String(value);
   }
 }
 

@@ -19,7 +19,7 @@
  * share link places a neighbourhood, never a house - see roundCoord().
  * ========================================================================== */
 
-import { openSharedDb, closeSharedDb, SHARED_DB_NAME } from "../core/weather.js";
+import { openSharedDb, closeSharedDb, sharedDbExists, forgetCaches, SHARED_DB_NAME } from "../core/weather.js";
 
 export const STORAGE_KEY = "rooftop-roi:v1";
 
@@ -27,8 +27,26 @@ export const STORAGE_KEY = "rooftop-roi:v1";
  * Version of both codecs.  The hash carries `v=1` and storage carries `{ v: 1 }`;
  * a future change to a default or a key's meaning adds an entry to MIGRATIONS so
  * an old link keeps meaning what it meant when it was shared.
+ *
+ * Version policy, the same for a link and for a stored session:
+ *   v absent        read as version 1 (links and sessions from before versioning).
+ *   v <= CODEC_VERSION   migrated forward and applied.
+ *   v >  CODEC_VERSION   written by a newer build: every key this build
+ *                   understands is still applied (each one passes its own schema),
+ *                   unknown keys are ignored, and the result is flagged damaged so
+ *                   the page can say some settings may not have come through.
+ *   v unreadable    treated like a newer version.
  */
 export const CODEC_VERSION = 1;
+
+/** Read a `v` from a link or a stored session; flags anything this build cannot fully vouch for. */
+function readVersion(raw, report) {
+  if (raw === undefined || raw === null || raw === "") return 1;
+  const v = Number(raw);
+  if (!Number.isInteger(v) || v < 1) { flag(report, "v"); return 1; }
+  if (v > CODEC_VERSION) { flag(report, "v"); return CODEC_VERSION; }
+  return v;
+}
 
 /**
  * from-version -> function(flat key/value object) returning the next version's
@@ -82,7 +100,7 @@ export const DEFAULTS = {
   },
   fin: {
     costPerW: 3.0, costPerKwh: 1000, adder: 0,
-    trueUpMonth: null,        // 1-12, PTO anniversary month for the NBT true-up; null = tariff file default
+    trueUpMonth: null,        // 1-12, PTO anniversary month for the NBT true-up; null = utility default (October, from the tariff file)
     incentiveMode: "none", discountPct: 0, passThroughPct: 0.34, taxCreditPct: 0,
     sgipPerKwh: 0, rebates: 0,
     horizon: 25, escalation: 0.05, exportEscalation: 0, investReturn: 0.07, discountRate: 0.025,
@@ -108,8 +126,10 @@ export const DEFAULTS = {
 /**
  * Every scalar that survives a reload, with the short key it wears in the hash
  * and the schema a value must pass to be accepted from a link or from storage.
- * A value that fails (unparseable, out of range, not in the enum) is replaced by
- * the DEFAULTS value, never by null.  Ranges are the rail's own slider bounds,
+ * A value that fails (unparseable, out of range, not in the enum) is ignored: the
+ * setting keeps the value it already had in the state being layered onto (the
+ * stored session under a link, DEFAULTS under a fresh start), never null and
+ * never a default that silently overwrites a stored value.  Ranges are the rail's own slider bounds,
  * widened where a typed value or another utility's tariff can legitimately sit
  * outside them.
  *
@@ -241,10 +261,21 @@ export function safeDecode(raw) {
   try { return decodeURIComponent(String(raw)); } catch { return null; }
 }
 
-const cleanName = (v, fallback) => {
-  const n = String(v == null ? "" : v).replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, NAME_MAX);
+/** A high surrogate not followed by a low one, or a low one not preceded by a high one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Names are cut by code point, never by UTF-16 unit: cutting an emoji in half
+ * leaves a lone surrogate, which encodeURIComponent refuses with a URIError,
+ * and the address bar would then stop updating for the rest of the session.
+ * Lone surrogates already present (from storage, or a typed paste) are dropped.
+ */
+export function cleanName(v, fallback) {
+  if (v !== null && v !== undefined && typeof v === "object") return fallback;
+  const s = String(v == null ? "" : v).replace(LONE_SURROGATE, "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  const n = Array.from(s).slice(0, NAME_MAX).join("").trim();
   return n || fallback;
-};
+}
 const inRange = (v, d, lo, hi, int) => {
   const n = Number(v);
   if (v === "" || v === null || v === undefined || !Number.isFinite(n) || n < lo || n > hi) return d;
@@ -257,9 +288,12 @@ export function clone(v) {
   if (ArrayBuffer.isView(v)) return v.slice();
   if (Array.isArray(v)) return v.map(clone);
   const out = {};
-  for (const k of Object.keys(v)) out[k] = clone(v[k]);
+  // An own "__proto__" key (JSON.parse makes those) would become out's prototype.
+  for (const k of Object.keys(v)) if (k !== "__proto__") out[k] = clone(v[k]);
   return out;
 }
+
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && !ArrayBuffer.isView(v);
 
 export function freshState() { return clone(DEFAULTS); }
 
@@ -325,6 +359,85 @@ function flexFromFields(p, i) {
   };
 }
 
+// ---------------------------------------------------- stored-object coercion
+//
+// localStorage is just as untrusted as a link (another build, a devtools edit,
+// a browser extension), so a stored plane or flexible load goes through the same
+// per-field coercion as one from the hash, plus the parts only storage carries.
+
+const MAX_POLYGON = 64;
+
+/** [[lat, lon], ...] with every point finite and on the globe; null otherwise. */
+function storedPolygon(v) {
+  if (!Array.isArray(v) || !v.length || v.length > MAX_POLYGON) return null;
+  const out = [];
+  for (const q of v) {
+    if (!Array.isArray(q) || q.length < 2) return null;
+    const lat = Number(q[0]), lon = Number(q[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    out.push([lat, lon]);
+  }
+  return out;
+}
+
+/** The gutter is a pair of vertex indices into the polygon. */
+function storedGutter(v, polygon) {
+  if (!polygon || !Array.isArray(v) || v.length !== 2) return null;
+  const ok = v.every((i) => Number.isInteger(i) && i >= 0 && i < polygon.length);
+  return ok ? [v[0], v[1]] : null;
+}
+
+/** A stored plane, or null when it is not an object at all. */
+function planeFromStored(p, i) {
+  if (!isPlainObject(p)) return null;
+  const shade = isPlainObject(p.shading) ? p.shading.annual : undefined;
+  const plane = planeFromFields([p.id, p.tilt, p.azimuth, p.maxPanels, shade, p.costAdder, p.name], i);
+  plane.polygon = storedPolygon(p.polygon);
+  plane.gutterEdge = storedGutter(p.gutterEdge, plane.polygon);
+  return plane;
+}
+
+/** A stored flexible load, or null when it is not an object at all. */
+function flexFromStored(f, i) {
+  if (!isPlainObject(f)) return null;
+  const s = isPlainObject(f.schedule) ? f.schedule : {};
+  const w = Array.isArray(s.window) ? s.window : [];
+  const ow = Array.isArray(s.overnightWindow) ? s.overnightWindow : [];
+  const out = flexFromFields([
+    f.id, f.kind, f.annualKwh, f.source, s.mode, s.daysPerWeek, w[0], w[1],
+    s.daylightFraction, ow[0], ow[1], s.maxKW, s.followSolar === false ? "0" : "1", f.scale, f.name,
+  ], i);
+  if (s.hoursPerDay !== undefined) out.schedule.hoursPerDay = inRange(s.hoursPerDay, 8, 0, 24);
+  // Provenance from the detector (confidence, charger kW): display-only, kept as plain data.
+  if (isPlainObject(f.detection)) out.detection = clone(f.detection);
+  return out;
+}
+
+/** A plane list from storage: objects only, at most MAX_LIST, anything else flagged. */
+function storedList(list, fromStored, report, key) {
+  if (!Array.isArray(list)) { flag(report, key); return null; }
+  if (list.length > MAX_LIST) flag(report, key);
+  const out = [];
+  list.slice(0, MAX_LIST).forEach((x, i) => {
+    const v = fromStored(x, i);
+    if (v) out.push(v); else flag(report, key);
+  });
+  return out;
+}
+
+/** {planeId: panels} with safe ids and integer counts; null when empty or unreadable. */
+function storedOverride(obj, report) {
+  if (!isPlainObject(obj)) { flag(report, "ovp"); return null; }
+  const map = {};
+  let n = 0;
+  for (const k of Object.keys(obj)) {
+    if (++n > MAX_LIST + 1) { flag(report, "ovp"); break; }
+    if (!isSafeId(k, 24)) { flag(report, "ovp"); continue; }
+    map[k] = inRange(obj[k], 0, 0, 200, true);
+  }
+  return Object.keys(map).length ? map : null;
+}
+
 /**
  * Split a raw (still percent-encoded) list value on `;` then `:`, and decode each
  * field exactly once.  A field that will not decode becomes "" and is reported.
@@ -356,34 +469,59 @@ const round = (v, dp) => Math.round(v * 10 ** dp) / 10 ** dp;
  * the default scenario", and the caller drops the `#` entirely; anything else
  * starts with `v=1`.
  */
-export function toHash(state) {
+export function toHash(state, report) {
+  // Never throws: a value that will not encode (a lone surrogate that slipped
+  // past cleanName, a plane that is not an object) drops its own token only,
+  // and `report` says so.  An exception here would freeze the address bar.
+  const tryEncode = (key, fn) => {
+    try { return fn(); } catch { flag(report, key); return null; }
+  };
+  const list = (key, items, enc) => {
+    const toks = [];
+    for (const it of items || []) {
+      const t = tryEncode(key, () => enc(it));
+      if (t !== null) toks.push(t);
+    }
+    return toks;
+  };
   const parts = [];
+  state = state || {};
   for (const [key, path, kind] of SCALARS) {
-    const v = getPath(state, path), d = getPath(DEFAULTS, path);
-    if (v === d || v === null || v === undefined) continue;
-    if (kind === "num" && Number(v) === Number(d)) continue;
-    const out = (key === "lat" || key === "lon") ? roundCoord(v) : v;
-    parts.push(key + "=" + encodeURIComponent(kind === "bool" ? (out ? "1" : "0") : String(out)));
+    const tok = tryEncode(key, () => {
+      const v = getPath(state, path), d = getPath(DEFAULTS, path);
+      if (v === d || v === null || v === undefined) return null;
+      if (kind === "num" && Number(v) === Number(d)) return null;
+      const out = (key === "lat" || key === "lon") ? roundCoord(v) : v;
+      return key + "=" + encodeURIComponent(kind === "bool" ? (out ? "1" : "0") : String(out));
+    });
+    if (tok !== null) parts.push(tok);
   }
   const planes = state.roof && state.roof.planes;
-  if (planes && planes.length) parts.push("roof=" + planes.map(planeToToken).join(";"));
+  if (Array.isArray(planes) && planes.length) {
+    const toks = list("roof", planes, planeToToken);
+    if (toks.length) parts.push("roof=" + toks.join(";"));
+  }
 
-  const flex = state.flex || [];
-  if (flex.length) parts.push("flex=" + flex.map(flexToToken).join(";"));
+  const flex = Array.isArray(state.flex) ? state.flex : [];
+  if (flex.length) {
+    const toks = list("flex", flex, flexToToken);
+    if (toks.length) parts.push("flex=" + toks.join(";"));
+  }
 
   const ov = state.system && state.system.override && state.system.override.panelsByPlane;
-  if (ov && Object.keys(ov).length) {
-    parts.push("ovp=" + Object.entries(ov)
-      .map(([k, n]) => encodeURIComponent(k) + ":" + encodeURIComponent(String(n))).join(";"));
+  if (ov && typeof ov === "object" && Object.keys(ov).length) {
+    const toks = list("ovp", Object.entries(ov),
+      ([k, n]) => encodeURIComponent(k) + ":" + encodeURIComponent(String(n)));
+    if (toks.length) parts.push("ovp=" + toks.join(";"));
   }
   return parts.length ? ["v=" + CODEC_VERSION].concat(parts).join("&") : "";
 }
 
 /**
  * Apply a hash over `base`.  Never throws: a malformed percent sequence, an
- * out-of-range number or an unknown enum value leaves that setting at its
- * DEFAULTS value and is listed in `report` ({ damaged, keys }) so the page can
- * say the link was damaged.
+ * out-of-range number or an unknown enum value leaves that setting at the value
+ * `base` had (DEFAULTS when there is no base) and is listed in `report`
+ * ({ damaged, keys }) so the page can say the link was damaged.
  */
 export function fromHash(hash, base, report) {
   const state = base ? clone(base) : freshState();
@@ -391,7 +529,7 @@ export function fromHash(hash, base, report) {
   try { body = String(hash || "").replace(/^#/, ""); } catch { body = ""; }
   if (!body) return state;
 
-  const kv = {};
+  const kv = Object.create(null);
   for (const pair of body.split("&")) {
     const i = pair.indexOf("=");
     if (i < 0) continue;
@@ -399,7 +537,7 @@ export function fromHash(hash, base, report) {
     if (key === null) { flag(report, "?"); continue; }
     kv[key] = pair.slice(i + 1);               // still encoded
   }
-  const version = kv.v !== undefined ? Number(safeDecode(kv.v)) : 1;
+  const version = readVersion(kv.v !== undefined ? safeDecode(kv.v) : undefined, report);
   delete kv.v;
   const flat = migrate(kv, version);
 
@@ -424,7 +562,8 @@ export function fromHash(hash, base, report) {
     if (!spec) continue;                       // unknown key: an older or newer link
     const decoded = safeDecode(raw);
     const v = decoded === null ? INVALID : parseScalar(spec[2], spec[3], decoded);
-    if (v === INVALID) { flag(report, key); setPath(state, spec[1], clone(getPath(DEFAULTS, spec[1]))); continue; }
+    // Damaged: keep what `base` had (a stored value survives a broken link key).
+    if (v === INVALID) { flag(report, key); continue; }
     setPath(state, spec[1], v);
   }
   return state;
@@ -456,25 +595,45 @@ export function toStorage(state) {
   return out;
 }
 
-export function fromStorage(obj, base) {
+/**
+ * Apply a stored session over `base`.  Never throws, and validates exactly as
+ * strictly as fromHash: scalars through their schema, planes and flexible loads
+ * through the same per-field coercion, prototype keys refused.  Anything
+ * unreadable keeps `base`'s value and is listed in `report`.  See CODEC_VERSION
+ * for what a newer `v` does.
+ */
+export function fromStorage(obj, base, report) {
   const state = base ? clone(base) : freshState();
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return state;
-  // A session written by a newer build than this one: its keys may mean
-  // something else, so start clean rather than half-apply it.
-  if (typeof obj.v === "number" && obj.v > CODEC_VERSION) return state;
-  const flat = migrate(Object.assign({}, obj), typeof obj.v === "number" ? obj.v : 1);
+  if (!isPlainObject(obj)) { if (obj !== null && obj !== undefined) flag(report, "storage"); return state; }
+  // Own keys only, into an object with no prototype: a stored "__proto__" must
+  // never become anything's prototype, and `in` must not read through one.
+  const own = Object.create(null);
+  for (const k of Object.keys(obj)) if (!PROTO_KEYS.has(k)) own[k] = obj[k];
+  const version = readVersion(own.v, report);
+  delete own.v;
+  const flat = migrate(own, version);
+  const has = (k) => Object.hasOwn(flat, k);
+
   for (const [key, path, kind, rule] of SCALARS) {
-    if (!(key in flat)) continue;
+    if (!has(key)) continue;
     const v = parseScalar(kind, rule, flat[key]);
-    setPath(state, path, v === INVALID ? clone(getPath(DEFAULTS, path)) : v);
+    if (v === INVALID) { flag(report, key); continue; }
+    setPath(state, path, v);
   }
-  if (Array.isArray(flat.planes)) state.roof.planes = clone(flat.planes);
-  if (Array.isArray(flat.flex)) state.flex = clone(flat.flex);
-  if (flat.customTariff) state.tariff.custom = clone(flat.customTariff);
-  if (flat.ovp && typeof flat.ovp === "object" && Object.keys(flat.ovp).length) {
-    state.system.override.panelsByPlane = clone(flat.ovp);
+  if (has("planes")) {
+    const planes = storedList(flat.planes, planeFromStored, report, "planes");
+    if (planes) state.roof.planes = planes;
   }
-  if (flat.xsolAck === true) state.ui.existingSolarAck = true;
+  if (has("flex")) {
+    const flex = storedList(flat.flex, flexFromStored, report, "flex");
+    if (flex) state.flex = flex;
+  }
+  if (has("customTariff")) {
+    if (isPlainObject(flat.customTariff)) state.tariff.custom = clone(flat.customTariff);
+    else flag(report, "customTariff");
+  }
+  if (has("ovp")) state.system.override.panelsByPlane = storedOverride(flat.ovp, report);
+  if (has("xsolAck") && flat.xsolAck === true) state.ui.existingSolarAck = true;
   return state;
 }
 
@@ -519,18 +678,28 @@ const hasWindow = typeof window !== "undefined";
  * calls in 30 s, and an unguarded throw here would abort every later listener
  * in update()'s loop.
  */
+let hashWriteOk = true;
+
 export function writeHash(state = current) {
   if (!hasWindow) return "";
   let h = "";
+  const report = {};
   try {
-    h = toHash(state);
+    h = toHash(state, report);
     const url = h ? "#" + h : location.pathname + location.search;
     history.replaceState(null, "", url);
+    // A dropped token means the address bar no longer reproduces the session.
+    hashWriteOk = !report.damaged;
+    if (report.damaged) console.warn("Some settings could not be written to the address bar:", report.keys);
   } catch (err) {
+    hashWriteOk = false;
     console.warn("Could not update the address bar:", err && err.message);
   }
   return h;
 }
+
+/** False when the last writeHash failed or had to drop a setting: the URL is stale or partial. */
+export function hashIsCurrent() { return hashWriteOk; }
 
 export function readHash() { return hasWindow ? location.hash : ""; }
 
@@ -607,8 +776,22 @@ export function saveLoadSet(loadSet) {
   });
 }
 
-export function readLoadSet() {
+/**
+ * The stored LoadSet, or null.  Opening a database that does not exist creates
+ * it, so a first visit (or the first boot after "Forget my data") checks first
+ * where the browser can say; where it cannot, the open goes ahead and an empty
+ * database is created, which holds nothing.
+ */
+export async function readLoadSet() {
+  try {
+    if ((await sharedDbExists({ dbName: DB_NAME })) === false) return null;
+  } catch { /* cannot tell: open it */ }
   return tx("readonly", (store) => store.get(LOAD_KEY)).catch(() => null);
+}
+
+/** Drop the stored LoadSet (a file the engine refused), keeping the weather cache. */
+export function clearLoadSet() {
+  return tx("readwrite", (store) => store.delete(LOAD_KEY)).catch(() => undefined);
 }
 
 /**
@@ -617,6 +800,8 @@ export function readLoadSet() {
  * another open tab), the shared connection is closed, and the database deleted.
  */
 export async function forgetEverything() {
+  // Latch first: from here on no weather cache write may reopen the database.
+  forgetCaches();
   cancelPersist();
   clearLocal();
   if (hasWindow) {
@@ -642,7 +827,7 @@ export default {
   freshState, clone, getPath, setPath, safeDecode,
   toHash, fromHash, toStorage, fromStorage,
   get, subscribe, update, replace, setAt,
-  writeHash, readHash, saveLocal, loadLocal, clearLocal,
+  writeHash, readHash, hashIsCurrent, saveLocal, loadLocal, clearLocal, cleanName,
   persistSoon, flushPersist, cancelPersist,
-  saveLoadSet, readLoadSet, forgetEverything,
+  saveLoadSet, readLoadSet, clearLoadSet, forgetEverything,
 };

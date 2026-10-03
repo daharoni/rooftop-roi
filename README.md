@@ -39,8 +39,9 @@ roof outline you traced and your location at full precision (share links round i
 decimals, ~1 km). A street address you type is never stored. "Forget my data" erases all of it.
 
 **Sharing a scenario.** Every setting you change — prices, financing, roof faces, load schedules —
-is packed into the URL after `#`, so the address bar is always a link that reproduces your exact
-dashboard. "Share link" copies it. The link never contains your meter data; someone opening it adds
+is packed into the URL after `#`, so the address bar is always a link that reproduces every setting
+except traced roof outlines, custom tariffs and the existing-solar acknowledgement, which stay on this
+device. "Share link" copies it. The link never contains your meter data; someone opening it adds
 their own file, or, if you built the scenario on the demo household, the demo loads automatically.
 
 ## What you need

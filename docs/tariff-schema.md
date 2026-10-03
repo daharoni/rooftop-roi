@@ -109,6 +109,14 @@ asserts it reproduces `model_reproduces_bill.model_total`:
 For SCE this lands on **$749.41** against an actual **$749.37** (0.01%, residual is kWh
 rounding), **when the bill's own prices are applied** (next section).
 
+**`generation_municipal_surcharge_factor` is the reference bill's city, not SCE's.** It is
+Agoura Hills' generation municipal surcharge (franchise fee / utility-user tax). City
+utility-user taxes vary — many cities levy none, others levy several percent on the whole
+bill — and they are **not modelled by default**: the engine applies a factor only when the
+caller passes `municipalSurchargeFactor`, and the bill-replay tests pass this one. The
+CPA energy surcharge (`cpa_energy_surcharge_per_kwh`) applies to every CPA customer and is
+always priced for `cpa_*` providers.
+
 #### Calibration overrides (`meta.bill_validation.bill_rates`)
 
 A bill is a snapshot of the rates in force during its billing period; the plan it anchored
@@ -130,9 +138,10 @@ No new engine or sim parameter is needed: the override is applied to a cloned ta
   fixedPerDay: bill_rates.fixed_charge_per_day })`.
 - `tests/engine.test.mjs` shifts every column of each replayed cell except `sce_generation` by
   `(bill delivery − shipped delivery)` — this restores the as-billed cell exactly, including the
-  generation share the municipal surcharge is levied on (`fromBill` shifts the diagnostic
-  `delivery`/`sce_generation` columns too, which moves that surcharge by about $0.07) — and
-  sets `fixed_charge_per_day` from the override.
+  generation share the municipal surcharge is levied on — and sets `fixed_charge_per_day`
+  from the override. `fromBill` now does the same to the diagnostic columns: it shifts
+  `delivery` with the price columns and leaves `<utility>_generation` as shipped, so
+  `sce = delivery + sce_generation` still holds after an override.
 
 A replay that only passes by editing the shipped plan back to the bill's numbers is wrong;
 update the plan to the utility's current published values and keep the bill in `bill_rates`.
@@ -251,7 +260,7 @@ they let the Bills tab explain the split and let a CCA's total be re-derived. Th
 | `net_surplus_compensation_per_kwh` | number ≥ 0 | Paid for energy left over at the annual true-up. Roughly a third of the clawback rate, which is why oversizing is penalised. |
 | `nonbypassable_charges_per_kwh` | number ≥ 0 | $/kWh of **import** that solar cannot escape. **Already inside the rate tables** — do not add it on top. Recorded only so the UI can show which part of the price is unavoidable. |
 | `true_up` | string | `"annual"`. |
-| `true_up_month` | int 1-12 | **Required.** The default settlement month **when the user has not given a PTO month** (the engine's `trueUpMonth` param overrides it). All three files use **4 (April)**. The real month is the customer's PTO anniversary, which we do not know; April is the conservative choice because the relevant period then closes after the low-load, high-solar spring, when the credit bank is at its largest, so the ARECR clawback and the NSC payout bite hardest. It also matches CPA's true-up cycle on the SCE reference bill. The engine never settles a first period shorter than 12 months (docs/engine.md §6). |
+| `true_up_month` | int 1-12 (a JSON number) | **Required.** The default settlement month **when the user has not given a PTO month** (the engine's `trueUpMonth` param overrides it). All three files use **10 (October)**. The real month is the customer's PTO anniversary, which we do not know. October is the conservative default: the credit bank is at its largest right after summer, so an October settlement debits the whole summer surplus at the ARECR and pays it out at the low NSC rate before winter can draw it down at retail value. A spring settlement (April-June) is the most optimistic choice for the same reason — the winter months consume the bank first. On the reference household (24-month record, 60 panels, no battery) annual savings are $5,403 with October and $5,488 with April; a system that never banks a surplus is unaffected. October is at or near the low end of the twelve months but not always the minimum (September is $6 lower there; with a battery or a larger array, February can be lower by $15-60). A user who knows their PTO month should enter it. A string such as `"10"` is invalid here and is ignored by both `core/tariff.js` and the engine. How the record is split into relevant periods is in docs/engine.md §6. |
 | `eec_adjustment_per_kwh` | number > 0 | **Required.** The Average Retail Export Compensation Rate of Schedule NBT SC 4.e.i (published as "EEC Adjustment Pricing"): $/kWh by which the credit bank is debited for net surplus kWh at true-up, *before* NSC is paid. Generation + delivery components summed. SCE $0.05981 and SDG&E $0.11001 (both September 2026); PG&E publishes no equivalent figure (see docs/tariffs-pge.md §8), so it carries SCE's value as a low-confidence placeholder. Published monthly by true-up month. |
 | `eec_adjustment_source` | object | `{ month, _confidence: high/medium/low, note }`: which month's value and how sure we are. A `low` here means the number is a placeholder. |
 | `notes` | string | The long-form explanation: matrix shape, the lock-in trajectory, battery export caps, grid-charging prohibition. |
@@ -293,7 +302,7 @@ add the ACC Plus adder.
 | `defaultBaselineRegion(t)` | `meta.baseline_region` if it names an allocation, else the first region, else `null`. |
 | `baselineCreditPct(t, plan)` | `plan.baseline_credit_pct`, else 1. |
 | `arecr(t)` | `nbt.eec_adjustment_per_kwh`, or `null`. |
-| `trueUpMonth(t)` | `nbt.true_up_month`, else 4. |
+| `trueUpMonth(t)` | `nbt.true_up_month` when it is an integer number 1-12, else 10. The engine's `resolveTrueUpMonth` applies the same rule. |
 | `plan(t, id)` | Plan object, case-insensitive on `id` then `name`; `null` if absent. `plan(t)` = default. |
 | `defaultPlan(t)` | The `default: true` plan, else `plans[0]`. |
 | `providersOf(t, plan)` | Provider ids this plan actually prices (filters the diagnostic columns). |

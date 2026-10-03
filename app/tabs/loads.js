@@ -128,7 +128,8 @@ function loadCard(load, state, ctx) {
       const med = median(det.sessions.map((x) => x.kwh));
       facts.push(["Median session", fmtKwh(med, 1)]);
     }
-    if (det.chargerKW) facts.push(["Charger", fmtNum(det.chargerKW, 1) + " kW inferred"]);
+    if (det.chargerKW) facts.push(["Charger", fmtNum(det.chargerKW, 1) +
+      (det.chargerSource === "stated" ? " kW stated" : " kW inferred")]);
     if (det.confidence !== undefined) facts.push(["Confidence", fmtPct(det.confidence, 0)]);
   }
   facts.push(["Energy", fmtKwh(load.annualKwh * (load.scale ?? 1), 0) + "/yr"]);

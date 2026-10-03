@@ -95,7 +95,7 @@ const ctx = {
   objective: null, installerAnnualKwh: null,
   bestPlan: null, bestPlanGain: 0, bestProvider: null, bestProviderGain: 0,
   weatherOptions: [{ v: "tmy", t: "TMY (typical year)" }],
-  planOptions: [], providerOptions: [], utilityOptions: [],
+  planOptions: [], providerOptions: [], utilityOptions: [], baselineRegionOptions: [],
   dataWarnings: [],
   escalationNote: "",
   climateCredit: null,
@@ -103,6 +103,8 @@ const ctx = {
   coverage: null,            // last core/coverage.js answer for this location
   coverageOk: false,         // a modelled IOU has been chosen, by ZIP or explicitly by the user
   blockReason: "",           // non-empty: the reason no simulation runs, shown in the banner
+  coverageBlocked: false,    // the block is about the utility; only an explicit UI pick lifts it
+  siteNotice: "",            // one-line note after a roof-tab location change
   getState: State.get,
   actions: {},
 };
@@ -234,8 +236,17 @@ function onWorkerMessage(m) {
       // say exactly why, and hand the person back a working landing page.
       workerReady = false;
       const msg = m.userMessage || m.message || "The simulation engine could not start with this data.";
-      ctx.blockReason = msg;
       status(msg, 1);
+      if (m.code === "INSUFFICIENT_DATA") {
+        // The file itself is unusable: drop it from memory and from IndexedDB, so a
+        // ZIP typed next does not bounce straight back off the same short file.
+        ctx.loadSet = null;
+        State.update((s) => { s.load = null; }, "silent");
+        State.clearLoadSet();
+        ctx.blockReason = "";
+      } else {
+        ctx.blockReason = msg;
+      }
       backToLanding(msg);
       return;
     }
@@ -606,14 +617,36 @@ function refreshOptions(s) {
   if (ctx.planOptions.length) rail.setOptions("tariff.planId", ctx.planOptions, s);
   if (ctx.providerOptions.length) rail.setOptions("tariff.providerId", ctx.providerOptions, s);
   if (ctx.utilityOptions.length) rail.setOptions("site.utilityId", ctx.utilityOptions, s);
+  ctx.baselineRegionOptions = baselineRegionOptions();
+  rail.setOptions("site.baselineRegion", ctx.baselineRegionOptions, s);
   if (ctx.weatherOptions.length) rail.setOptions("ui.weatherKey", ctx.weatherOptions, s);
+}
+
+/** Hours with a reading: the parser's quality count when it has one, else the finite kWh. */
+function usableHours(loadSet) {
+  if (!loadSet) return 0;
+  const q = loadSet.meta && loadSet.meta.quality;
+  if (q && Number.isFinite(q.usableHours) && q.usableHours > 0) return q.usableHours;
+  let n = 0;
+  const k = loadSet.kwh || [];
+  for (let i = 0; i < k.length; i++) if (Number.isFinite(k[i])) n++;
+  return n;
+}
+
+/** The baseline-region picker for the current rate book; "" = the tariff file's default. */
+function baselineRegionOptions() {
+  const list = ctx.tariff && Core.tariff && Core.tariff.baselineRegionList
+    ? Core.tariff.baselineRegionList(ctx.tariff) : [];
+  const def = list.find((r) => r.isDefault);
+  return [{ v: "", t: def ? `Utility default (${def.label})` : "Utility default" }]
+    .concat(list.map((r) => ({ v: r.id, t: r.label })));
 }
 
 function renderTopBar(s) {
   const chip = $("household-chip");
   if (!chip) return;
   const meta = (ctx.loadSet && ctx.loadSet.meta) || {};
-  const years = meta.nHours ? meta.nHours / 8760 : 0;
+  const years = usableHours(ctx.loadSet) / 8760;
   const bits = [];
   if (meta.totalKwh && years) bits.push(fmtKwh(meta.totalKwh / years, 0) + "/yr");
   if (s.site.utilityId) bits.push(s.site.utilityId.toUpperCase());
@@ -639,7 +672,15 @@ function onControlSet(path, value, spec) {
   if (path === "ui.addPreset") { if (value) addPreset(value); return; }
   if (path === "ui.assumptionsJump") { const n = $(value); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (path === "ui.customEnabled") { toast("Custom rates from a bill are not wired up yet — pick the closest published plan."); return; }
-  if (path === "site.utilityId") { switchUtility(value); return; }
+  // The person picked it in the rail: an explicit choice, which may lift a coverage block.
+  if (path === "site.utilityId") { switchUtility(value, { explicit: true }); return; }
+  // "" in these two selects means "let the tariff file decide".
+  if (path === "site.baselineRegion" || path === "fin.trueUpMonth") {
+    const v = value === "" || value === null || value === undefined ? null
+      : (path === "fin.trueUpMonth" ? Number(value) : String(value));
+    State.update((s) => { State.setPath(s, path, v); }, "sim");
+    return;
+  }
 
   const reason = spec.reason || defaultReason(path);
   State.update((s) => {
@@ -662,17 +703,49 @@ function onControlSet(path, value, spec) {
  * with the old one, so it has to be re-booted with the new tariffs, and the
  * plan and provider fall back to that utility's defaults.
  */
-async function switchUtility(utilityId) {
+async function switchUtility(utilityId, opts = {}) {
   if (!utilityOf(utilityId)) return;
+  // A programmatic switch while a muni / out-of-state block stands changes nothing.
+  if (ctx.coverageBlocked && !opts.explicit) return;
   State.update((s) => {
     s.site.utilityId = utilityId;
     s.tariff.planId = null;
     s.tariff.providerId = null;
+    s.site.baselineRegion = null;
   }, "silent");
-  await chooseTariff(null);
+  const ok = await chooseTariff(null, { explicit: !!opts.explicit });
+  if (ok) ctx.siteNotice = "";
+  renderBanner();
   markStale();
   await bootWorker();
   render();
+}
+
+/**
+ * Coordinates typed or clicked on the Roof tab.  They never consult coverage by
+ * themselves (there is no reverse geocoder offline), so the utility is kept and
+ * the person is told so in one line; when a geocoder did supply a city, that
+ * city goes through coverage like a landing-page lookup.  A coverage block
+ * stands either way: a new point never restores a run on a blocked utility.
+ */
+async function onSiteChange(site) {
+  if (!site || !Number.isFinite(Number(site.lat)) || !Number.isFinite(Number(site.lon))) return;
+  const before = State.get().site;
+  const moved = before.lat === null || before.lon === null
+    || State.roundCoord(before.lat) !== State.roundCoord(site.lat)
+    || State.roundCoord(before.lon) !== State.roundCoord(site.lon);
+  if (site.city || site.state) {
+    const prior = utilityOf(before.utilityId) ? before.utilityId : null;
+    await chooseTariff(null, { geo: { city: site.city, state: site.state }, prior });
+  } else if (moved && ctx.loadSet && ctx.coverageOk && !ctx.coverageBlocked && before.utilityId) {
+    ctx.siteNotice = `Location changed; utility still ${utilityName(before.utilityId)}. `
+      + "Change it on the Bills tab if that is wrong.";
+  }
+  State.update((s) => {
+    s.site.lat = Number(site.lat);
+    s.site.lon = Number(site.lon);
+  }, "site");
+  if (inApp) renderBanner();
 }
 
 function pickCell(panels, batteries) {
@@ -712,7 +785,7 @@ const ACTIONS = {
   setStrategy: (v) => State.setAt("system.strategy", v, "sim"),
   setFinancing: (mode) => State.setAt("fin.financing.mode", mode, "finance"),
   setMaxPanels: (n) => State.setAt("system.maxPanels", n, "sim"),
-  setSite: (site) => State.update((s) => Object.assign(s.site, site), "site"),
+  setSite: (site) => onSiteChange(site),
   setPlanes: (planes) => State.update((s) => { s.roof.planes = planes; }, "roof"),
   /**
    * The installer-proposal path hands back the annual kWh on the quote. It is
@@ -805,14 +878,20 @@ State.subscribe((s, reason, info) => {
  * same site share the one in-flight promise; a failure is not memoised.
  */
 let weatherMemo = { key: "", promise: null };
+/** Aborts the in-flight sunlight fetch ("Forget my data", or a new site). */
+let weatherAbort = null;
 const siteKey = (lat, lon) => `${Number(lat).toFixed(2)},${Number(lon).toFixed(2)}`;
 
 function weatherFor(s) {
   const key = siteKey(s.site.lat, s.site.lon);
   if (weatherMemo.key === key && weatherMemo.promise) return weatherMemo.promise;
   let fromCache = true;
+  if (weatherAbort) weatherAbort.abort();        // the old site's fetch is no longer wanted
+  const ac = typeof AbortController === "function" ? new AbortController() : null;
+  weatherAbort = ac;
   const promise = Core.weather.tryFetchYears({
     lat: s.site.lat, lon: s.site.lon, elevationM: s.site.elevationM ?? undefined,
+    signal: ac ? ac.signal : undefined,
     onProgress: ({ index, total, fromCache: cached }) => {
       if (!cached) fromCache = false;
       ctx.solarProgress = Math.max(0.05, (index + 1) / (total || 11));
@@ -868,7 +947,8 @@ async function ensureSolar() {
     s.solar.note = result.message || "";
     ctx.solarProgress = 0;
     ctx.solarStatusText = result.message || "Sunlight could not be fetched.";
-    ctx.dataWarnings = [{ severity: "bad", text: `Sunlight: ${result.message}` }];
+    ctx.dataWarnings = ctx.dataWarnings.filter((w) => !/^Sunlight: /.test(w.text));
+    addWarning({ severity: "bad", text: `Sunlight: ${result.message}` });
     renderRoofOnly();
     return false;
   }
@@ -912,12 +992,15 @@ function buildWeatherOptions(s) {
 
 // ------------------------------------------------------------------- intake
 
+/** An Error whose message is written for the person, which userMessageOf will show. */
+function userError(text) { const e = new Error(text); e.userMessage = text; return e; }
+
 async function readFiles(files) {
-  if (!Core.greenbutton) throw new Error("The Green Button parser is not available in this build.");
+  if (!Core.greenbutton) throw userError("The Green Button parser is not available in this build.");
   const sets = [];
   for (const file of files) {
     if (/\.zip$/i.test(file.name)) {
-      throw new Error(`${file.name} is a zip. Unzip it first and drop the CSV or XML inside.`);
+      throw userError(`${file.name} is a zip. Unzip it first and drop the CSV or XML inside.`);
     }
     const text = await file.text();
     sets.push(Core.greenbutton.parse(text, { filename: file.name }));
@@ -927,6 +1010,7 @@ async function readFiles(files) {
 
 async function onFiles(files) {
   if (!files || !files.length) return;
+  supersedeQuestion();
   landingError("");
   landingNotice(null);
   try {
@@ -942,13 +1026,14 @@ async function onFiles(files) {
 }
 
 async function onDemo() {
+  supersedeQuestion();
   landingError("");
   landingNotice(null);
   try {
     const names = ["demo-sce-usage-2024-09.csv", "demo-sce-usage-2025-09.csv"];
     const texts = await Promise.all(names.map(async (n) => {
       const res = await fetch(`data/demo/${n}`);
-      if (!res.ok) throw new Error(`data/demo/${n} is missing (HTTP ${res.status})`);
+      if (!res.ok) throw userError(`The demo data could not be loaded (data/demo/${n}, HTTP ${res.status}).`);
       return res.text();
     }));
     const sets = texts.map((t, i) => Core.greenbutton.parse(t, { filename: names[i] }));
@@ -973,6 +1058,13 @@ async function onDemo() {
     console.error(err);
     landingError(userMessageOf(err, "The demo data could not be loaded."));
   }
+}
+
+/** The service ZIP a meter file names in its own header, if any. */
+function fileZipOf(loadSet) {
+  const meta = (loadSet && loadSet.meta) || {};
+  const z = String(meta.zip || meta.serviceZip || "").slice(0, 5);
+  return /^\d{5}$/.test(z) ? z : null;
 }
 
 /** Everything that happens once there is a LoadSet, however it arrived. */
@@ -1002,9 +1094,10 @@ async function adoptLoadSet(loadSet, zipHint) {
   }
 
   // Which rate book. A ZIP out of the file header beats anything we guessed.
-  const zip = zipHint || meta.zip || meta.serviceZip || null;
+  const zip = zipHint || fileZipOf(loadSet);
   State.saveLoadSet(loadSet);
-  await chooseTariff(zip, { ask: true });
+  // A new file after a coverage block: its utility is asked, never inherited.
+  await chooseTariff(zip, { ask: true, forceAsk: !zip && ctx.coverageBlocked });
   await proceedIfClear();
 }
 
@@ -1062,12 +1155,22 @@ async function proceedIfClear() {
 /**
  * Pick the rate book. With a ZIP (or a geocoder's city) this first asks
  * core/coverage.js whether the model applies there at all:
- *   iou      -> that utility (an ambiguous prefix picks one and says so)
+ *   iou      -> that utility; a ZIP whose prefix two IOUs share (926, 931, 932,
+ *               935, 936 - 92672 San Clemente is SDG&E, 92630 Lake Forest SCE)
+ *               ASKS which one, through the same question as a split muni ZIP.
  *   muni     -> blocked: a publicly owned utility is not on Net Billing.  A ZIP that
  *               is split with an IOU asks instead, with an explicit IOU choice.
  *   outside  -> blocked: California only.
  *   unknown  -> the person picks the utility explicitly, with a warning.
  * Never silently falls back to the first utility in the library.
+ *
+ * opts.ask       with no location, ask for a utility rather than give up
+ * opts.geo       { city, state } from a geocoder
+ * opts.prior     a utility chosen for this same location in an earlier session
+ *                (reload only): settles a question it is a valid answer to
+ * opts.forceAsk  ask even though a utility is set (new data after a block)
+ * opts.explicit  the person picked this utility in the UI.  Only an explicit
+ *                pick may lift a coverage block; a programmatic call never does.
  * Resolves true when a modelled utility is in place (ctx.coverageOk).
  */
 async function chooseTariff(zip, opts = {}) {
@@ -1084,23 +1187,30 @@ async function chooseTariff(zip, opts = {}) {
   let utilityId = utilityOf(s.site.utilityId) ? s.site.utilityId : null;
   const geo = opts.geo || {};
   if (zip || geo.city || geo.state) {
+    // A new location is undecided until it is decided: nothing may run on the
+    // previous location's utility while the question is open.
+    ctx.coverageOk = false;
     const cov = Core.coverage
       ? Core.coverage.coverageForZip(zip, ctx.tariffLib, { city: geo.city, state: geo.state })
       : legacyCoverage(zip);
     ctx.coverage = cov;
-    const decided = await decideCoverage(cov, zip);
-    if (decided === null) { ctx.coverageOk = false; return false; }
+    const decided = await decideCoverage(cov, zip, opts.prior || null);
+    if (!decided) return false;
     utilityId = decided;
-  } else if (!utilityId) {
+  } else if (ctx.coverageBlocked && !opts.explicit && !opts.forceAsk) {
+    // A muni or out-of-state block stands until the person picks a utility by hand.
+    return false;
+  } else if (!utilityId || opts.forceAsk) {
     if (!opts.ask) { ctx.coverageOk = false; return false; }
     const picked = await askUtility("Which utility sends your electricity bill? This file does not say, and no location has been set.");
-    if (!picked) { ctx.coverageOk = false; return false; }
+    if (!picked) return false;
     utilityId = picked;
   }
 
   const t = utilityOf(utilityId);
   if (!t) { ctx.coverageOk = false; return false; }
   ctx.coverageOk = true;
+  ctx.coverageBlocked = false;
   ctx.blockReason = "";
   ctx.tariff = t;
   ctx.climateCredit = Core.tariff.climateCredit(t);
@@ -1133,43 +1243,38 @@ const utilityName = (id) => ((utilityOf(id) || {}).utility || {}).name
 /** If core/coverage.js failed to load, still never guess: unknown unless the tariff prefixes match. */
 function legacyCoverage(zip) {
   const hit = zip ? Core.tariff.utilityForZip(zip, ctx.tariffLib) : null;
-  return hit ? { kind: "iou", utilityId: hit.utilityId, ambiguous: hit.ambiguous, candidates: hit.candidates }
-    : { kind: "unknown" };
+  if (!hit) return { kind: "unknown" };
+  return { kind: "iou", utilityId: hit.ambiguous ? null : hit.utilityId, ambiguous: !!hit.ambiguous,
+    candidates: hit.candidates || [hit.utilityId] };
 }
 
-/** Turn a coverage answer into a utility id, or null (blocked or declined). */
-async function decideCoverage(cov, zip) {
-  const msg = Core.coverage ? Core.coverage.coverageMessage(cov) : "";
-  if (cov.kind === "iou") {
-    if (cov.ambiguous) {
-      ctx.dataWarnings.push({
-        text: `ZIP ${zip} is served by more than one utility (${cov.candidates.map((c) => String(c).toUpperCase()).join(", ")}). `
-          + `Assuming ${String(cov.utilityId).toUpperCase()} — change it on the Bills tab if that is wrong.`,
-      });
-    }
-    return cov.utilityId;
+/**
+ * Turn a coverage answer into a utility id, or null (blocked, declined, or the
+ * question was superseded by a newer one).  The decision itself is the pure
+ * core/coverage.coverageDecision; this only puts its question on screen.
+ */
+async function decideCoverage(cov, zip, prior) {
+  const ids = ctx.tariffLib.ids || [];
+  const C = Core.coverage;
+  const d = C && C.coverageDecision
+    ? C.coverageDecision(cov, { zip, ids, nameOf: utilityName, prior })
+    : (cov.kind === "iou" && !cov.ambiguous ? { utilityId: cov.utilityId }
+      : { ask: { tone: "warn", text: "Which utility sends your electricity bill?",
+        options: [...ids.map((id) => ({ label: utilityName(id), value: id })), { label: "Another utility", value: "__other" }],
+        handPicked: true } });
+  if (d.utilityId) return d.utilityId;
+  if (d.block) { block(d.block, { coverage: true }); return null; }
+  const answer = await ask({ tone: d.ask.tone, text: d.ask.text,
+    actions: d.ask.options.map((o) => ({ label: o.label, value: o.value, primary: o.primary })) });
+  const a = C && C.answerCoverage ? C.answerCoverage(cov, answer)
+    : (answer === null ? { superseded: true } : answer === "__other" || answer === "__muni"
+      ? { block: "This tool only models SCE, PG&E and SDG&E under Net Billing for now." } : { utilityId: answer });
+  if (a.superseded) return null;                  // a newer question owns the outcome now
+  if (a.block) { block(a.block, { coverage: true }); return null; }
+  if (d.ask.handPicked) {
+    addWarning({ text: `Utility chosen by hand (${utilityName(a.utilityId)}); the ZIP did not identify it.` });
   }
-  if (cov.kind === "outside") { block(msg || "California only for now."); return null; }
-  if (cov.kind === "muni" && !cov.shared) { block(msg); return null; }
-  if (cov.kind === "muni") {
-    // Split ZIP: ask, never assume.  Only an explicit "my bill is from <IOU>" goes on.
-    const iou = cov.iouHint && cov.iouHint.utilityId;
-    const choice = await ask({
-      tone: "warn",
-      text: `Part of this area is served by ${cov.name}, a publicly owned utility that is not on Net Billing; `
-        + "this tool does not model it yet. Who sends your electricity bill?",
-      actions: [
-        { label: `${cov.name}`, value: "__muni" },
-        ...(iou ? [{ label: `${utilityName(iou)}`, value: iou, primary: true }] : []),
-        ...(!iou ? (ctx.tariffLib.ids || []).map((id) => ({ label: utilityName(id), value: id })) : []),
-      ],
-    });
-    if (!choice || choice === "__muni") { block(msg); return null; }
-    return choice;
-  }
-  // unknown: explicit pick with a warning.
-  const picked = await askUtility(msg || "This ZIP is not in any utility list this tool has.");
-  return picked || null;
+  return a.utilityId;
 }
 
 function askUtility(text) {
@@ -1181,31 +1286,75 @@ function askUtility(text) {
       { label: "Another utility", value: "__other" },
     ],
   }).then((v) => {
-    if (!v || v === "__other") {
-      block("This tool only models SCE, PG&E and SDG&E under Net Billing for now.");
+    if (v === null) return null;                  // superseded
+    if (v === "__other") {
+      block("This tool only models SCE, PG&E and SDG&E under Net Billing for now.", { coverage: true });
       return null;
     }
-    ctx.dataWarnings.push({ text: `Utility chosen by hand (${utilityName(v)}); the ZIP did not identify it.` });
+    addWarning({ text: `Utility chosen by hand (${utilityName(v)}); the ZIP did not identify it.` });
     return v;
   });
 }
 
-/** Show a choice on whichever surface is visible and resolve with the picked value. */
+/** Add a data warning unless one with the same text is already listed. */
+function addWarning(w) {
+  if (!ctx.dataWarnings.some((x) => x.text === w.text)) ctx.dataWarnings.push(w);
+}
+
+/**
+ * The question on screen, if any.  Only one can be open: a newer ask(), a
+ * banner re-render without it, or a fresh intake (another ZIP, another file)
+ * supersedes it, and the superseded promise resolves null so whatever chain
+ * was awaiting it ends instead of hanging forever.
+ */
+let openQuestion = null;   // { spec, finish }
+
+function supersedeQuestion() {
+  const q = openQuestion;
+  openQuestion = null;
+  if (q) q.finish(null);
+}
+
+/** Show a choice on whichever surface is visible and resolve with the picked value (null if superseded). */
 function ask(spec) {
+  supersedeQuestion();
   return new Promise((resolve) => {
-    const actions = spec.actions.map((a) => ({
-      label: a.label, primary: a.primary,
-      onClick: () => { landingNotice(null); renderBanner(); resolve(a.value); },
-    }));
-    if (inApp) renderBanner({ tone: spec.tone, text: spec.text, actions });
-    else landingNotice({ tone: spec.tone, text: spec.text, actions });
+    let done = false;
+    const q = { spec: null, finish: null };
+    q.finish = (v) => {
+      if (done) return;
+      done = true;
+      if (openQuestion === q) openQuestion = null;
+      resolve(v);
+    };
+    q.spec = {
+      tone: spec.tone, text: spec.text,
+      actions: spec.actions.map((a) => ({
+        label: a.label, primary: a.primary,
+        onClick: () => {
+          if (openQuestion !== q) return;          // a stale button from a superseded question
+          openQuestion = null;
+          landingNotice(null);
+          renderBanner();
+          q.finish(a.value);
+        },
+      })),
+    };
+    openQuestion = q;
+    if (inApp) renderBanner(q.spec);
+    else landingNotice(q.spec);
   });
 }
 
-/** Stop the optimiser and say why, on the landing page and in the app banner. */
-function block(message) {
+/**
+ * Stop the optimiser and say why, on the landing page and in the app banner.
+ * opts.coverage marks a utility-coverage block (muni, out of state, "another
+ * utility"), which only an explicit utility pick in the UI may lift.
+ */
+function block(message, opts = {}) {
   ctx.blockReason = message;
   ctx.coverageOk = false;
+  if (opts.coverage) ctx.coverageBlocked = true;
   if (inApp) {
     if (worker) { worker.terminate(); worker = null; workerReady = false; }
     ctx.grid = null; ctx.priced = null; ctx.selected = null; ctx.detail = null;
@@ -1231,6 +1380,7 @@ function shorten(text, sentences) {
 async function onAddress(query) {
   if (!query || !query.trim()) { landingError("Type an address first, or use the ZIP field."); return; }
   if (!Core.geocode) { landingError("The geocoder is not available in this build. Use the ZIP field."); return; }
+  supersedeQuestion();
   landingError("");
   try {
     const hit = await Core.geocode.geocode(query.trim());
@@ -1244,6 +1394,7 @@ async function onZip(zip) {
   const clean = String(zip || "").trim();
   if (!/^\d{5}$/.test(clean)) { landingError("A ZIP code is five digits."); return; }
   if (!Core.geocode) { landingError("The geocoder is not available in this build."); return; }
+  supersedeQuestion();
   landingError("");
   try {
     const hit = await Core.geocode.zipCentroid(clean);
@@ -1310,6 +1461,8 @@ function backToLanding(message) {
  * warning once acknowledged, or a question from ask().
  */
 function renderBanner(question) {
+  // Redrawing without the open question removes its buttons, so it is superseded.
+  if (!question) supersedeQuestion();
   const shell = $("shell");
   if (!shell) return;
   let node = $("app-banner");
@@ -1322,6 +1475,10 @@ function renderBanner(question) {
   const items = [];
   if (question) items.push(question);
   else if (ctx.blockReason) items.push({ tone: "bad", text: ctx.blockReason });
+  if (!question && !ctx.blockReason && ctx.siteNotice) {
+    items.push({ tone: "warn", text: ctx.siteNotice,
+      actions: [{ label: "Dismiss", onClick: () => { ctx.siteNotice = ""; renderBanner(); } }] });
+  }
   if (ctx.loadSet && State.get().ui.existingSolarAck && hasExistingSolar(ctx.loadSet)) {
     items.push({ tone: "bad", text: EXISTING_SOLAR_BANNER });
   }
@@ -1338,6 +1495,13 @@ function renderBanner(question) {
 }
 
 async function enterApp() {
+  // Re-entry (after a bounce back to the landing): take the old tab down properly
+  // first, so its charts and the roof builder's map do not leak.
+  if (mountedTab && typeof mountedTab.unmount === "function") {
+    try { mountedTab.unmount(); } catch (err) { console.warn("Tab unmount failed:", err); }
+  }
+  destroyAll();
+  mountedTab = null;
   inApp = true;
   landingNotice(null);
   $("landing").hidden = true;
@@ -1366,6 +1530,15 @@ async function forgetEverything() {
     + "Nothing was ever sent anywhere, so this is the only copy this page has.",
   );
   if (!sure) return;
+  // Nothing still running may write after the erase: stop the worker, abort any
+  // sunlight fetch (its cache.set would reopen the database), stop persisting.
+  persist = false;
+  supersedeQuestion();
+  if (worker) { worker.terminate(); worker = null; workerReady = false; }
+  bootGen++;
+  if (weatherAbort) weatherAbort.abort();
+  weatherMemo = { key: "", promise: null };
+  if (Core.weather && Core.weather.forgetCaches) Core.weather.forgetCaches();
   await State.forgetEverything();
   location.href = location.pathname;
 }
@@ -1379,6 +1552,11 @@ async function forgetEverything() {
  */
 async function shareLink() {
   State.writeHash(State.get());
+  if (State.hashIsCurrent && !State.hashIsCurrent()) {
+    // The address bar is stale or missing a setting: copying it would share the wrong scenario.
+    toast("Could not build a link for these settings just now. Try again in a moment; nothing was copied.");
+    return;
+  }
   const ok = await copyToClipboard(location.href);
   const s = State.get();
   toast(ok
@@ -1421,14 +1599,27 @@ function bindShell() {
       const before = State.toHash(State.get());
       if (location.hash.replace(/^#/, "") === before) return;   // our own replaceState
       const report = {};
+      const prevUtil = State.get().site.utilityId;
       const next = State.fromHash(location.hash, State.get(), report);
       next.ui.tab = normalizeTab(next.ui.tab);
       State.replace(next, "load");
       if (report.damaged) toast(DAMAGED_LINK);
       if (ctx.loadSet && inApp) {
+        if (mountedTab && typeof mountedTab.unmount === "function") mountedTab.unmount();
         mountedTab = null;
         mountTab();
-        refreshSolarAndGrid();
+        if (next.site.utilityId !== prevUtil) {
+          // A different rate book: the worker was initialised with the old one.
+          // A programmatic switch, so a standing coverage block is not lifted.
+          chooseTariff(null).then(async () => {
+            markStale();
+            await bootWorker();
+            await refreshSolarAndGrid();
+            render();
+          });
+        } else {
+          refreshSolarAndGrid();
+        }
       }
     } catch (err) {
       // A pasted link must never blank a working page.
@@ -1445,7 +1636,8 @@ function bindShell() {
   });
 }
 
-const DAMAGED_LINK = "The link was damaged; the unreadable settings are using defaults.";
+const DAMAGED_LINK = "Part of the link could not be read; those settings were left as they were.";
+const DAMAGED_SESSION = "Some saved settings could not be read; those are back at their defaults.";
 
 // ---------------------------------------------------------------------- boot
 
@@ -1462,7 +1654,12 @@ async function boot() {
   let start = State.freshState();
   try {
     const stored = State.loadLocal();
-    if (stored) start = State.fromStorage(stored, start);
+    const report = {};
+    if (stored) start = State.fromStorage(stored, start, report);
+    if (report.damaged) {
+      console.warn("Unreadable saved settings:", report.keys);
+      toast(DAMAGED_SESSION);
+    }
   } catch (err) {
     console.warn("The saved session could not be read; starting fresh.", err);
     start = State.freshState();
@@ -1519,7 +1716,16 @@ async function boot() {
       } catch { /* detection is optional */ }
     }
     // Same gates as a fresh file: a modelled utility and no unacknowledged export.
-    if (!ctx.coverageOk) await chooseTariff(null, { ask: true });
+    // The file's own ZIP is stored with it, so its coverage decision is re-run
+    // exactly as on the first drop (a LADWP file stays blocked; a split ZIP the
+    // person already answered is not asked again).
+    const fileZip = fileZipOf(saved);
+    if (fileZip) {
+      const prior = utilityOf(State.get().site.utilityId) ? State.get().site.utilityId : null;
+      await chooseTariff(fileZip, { ask: true, prior });
+    } else if (!ctx.coverageOk) {
+      await chooseTariff(null, { ask: true });
+    }
     await proceedIfClear();
   } else if (State.get().ui.demo && location.hash) {
     // A shared link built on the demo household: load the demo so the

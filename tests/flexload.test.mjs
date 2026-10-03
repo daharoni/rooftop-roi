@@ -173,7 +173,9 @@ test("detectEV: an evening AC load on 40% of summer days is not an EV (was 0.90 
 test("detectEV: an evening-only load all year round is rejected as AC-like", () => {
   const { ls } = houseWith((s, h, dow, roll) => (roll < 0.4 && h >= 20 && h < 23 ? 4.5 : 0));
   assert.equal(FL.detectEV(ls), null);
-  assert.match(FL.detectEV(ls, { keepRejected: true }).detection.rejectReason, /18:00 and 23:00/);
+  const why = FL.detectEV(ls, { keepRejected: true }).detection;
+  assert.match(why.rejectReason, /17:00 and 23:00/);
+  assert.equal(why.rejectCode, "evening-only");
 });
 
 test("detectEV: a 3.3 kW Level-2 charging 4 h three nights a week is found (was 226 of 2,068)", () => {
@@ -215,6 +217,93 @@ test("detectEV: a stated chargerKW is used for the cap and recorded as stated", 
   assert.equal(ev.schedule.maxKW, 3.3);
   for (const v of ev.kwhByHour) assert.ok(v <= 3.3 + 1e-9);
   assert.ok(onTarget(ev, added) >= 0.7 * trueAnnual);
+});
+
+/** houseWith, cut to the stamps in [from, to). */
+function houseBetween(inject, from, to) {
+  const { ls, added } = houseWith(inject);
+  const idx = [];
+  for (let i = 0; i < ls.ts.length; i++) if (ls.ts[i] >= from && ls.ts[i] < to) idx.push(i);
+  return {
+    ls: { meta: {}, ts: idx.map((i) => ls.ts[i]), kwh: Float64Array.from(idx.map((i) => ls.kwh[i])), exportKwh: null },
+    added: Float64Array.from(idx.map((i) => added[i])),
+  };
+}
+
+test("detectEV: a winter heat pump on 60% of nights is not an EV (was 162 kWh/yr at 0.58)", () => {
+  const { ls } = houseWith((s, h, dow, roll) => {
+    const mo = +s.slice(5, 7);
+    return roll < 0.6 && (mo >= 11 || mo <= 3) && h >= 2 && h < 6 ? 3 : 0;
+  });
+  assert.equal(FL.detectEV(ls), null);
+  const d = FL.detectEV(ls, { keepRejected: true }).detection;
+  assert.ok(["too-small", "too-few-sessions"].includes(d.rejectCode), d.rejectReason);
+  assert.equal(d.thresholds.plateauKW, null, "a sub-charger plateau is reported as not used");
+});
+
+test("detectEV: an Oct-Apr 01:00-07:00 heat pump is not an EV (was 165 kWh/yr)", () => {
+  const { ls } = houseWith((s, h) => {
+    const mo = +s.slice(5, 7);
+    return (mo >= 10 || mo <= 4) && h >= 1 && h < 7 ? 3.5 : 0;
+  });
+  assert.equal(FL.detectEV(ls), null);
+  assert.equal(FL.detectEV(ls, { chargerKW: 7.2 }), null);
+});
+
+test("detectEV: a Jun-Sep-only record must show overnight charging to be believed", () => {
+  // flat afternoon AC, 13:00-18:00 on half the days: was accepted at 1,045 kWh/yr, 0.9
+  const day = houseBetween((s, h, dow, roll) => (roll < 0.5 && h >= 13 && h < 18 ? 4 : 0),
+    "2025-06-01", "2025-10-01");
+  assert.equal(FL.detectEV(day.ls), null);
+  assert.equal(FL.detectEV(day.ls, { keepRejected: true }).detection.rejectCode, "short-record-unconfirmed");
+
+  // evening AC on the same short record: rejected with a clear margin, not a near miss
+  const eve = houseBetween((s, h, dow, roll) => (roll < 0.4 && h >= 20 && h < 23 ? 4.5 : 0),
+    "2025-06-01", "2025-10-01");
+  assert.equal(FL.detectEV(eve.ls), null);
+  const d = FL.detectEV(eve.ls, { keepRejected: true }).detection;
+  assert.ok(d.plausibility.eveningShare - FL.EV_TUNING.maxEveningShare > 0.1,
+    `evening share ${d.plausibility.eveningShare} vs limit ${FL.EV_TUNING.maxEveningShare}`);
+
+  // a real overnight charger on the same short record is still found
+  const car = houseBetween((s, h, dow) =>
+    ((dow === 1 || dow === 3 || dow === 5) && h >= 22) || ((dow === 2 || dow === 4 || dow === 6) && h < 2) ? 3.3 : 0,
+  "2025-06-01", "2025-10-01");
+  assert.ok(FL.detectEV(car.ls), "overnight charging on a summer-only record is accepted");
+});
+
+test("detectEV: a two-EV house (3.3 kW nights + 11.5 kW Saturday daytime) is found (was 273 of 3,171)", () => {
+  const { ls, added, trueAnnual } = houseWith((s, h, dow) =>
+    (((dow === 1 || dow === 3) && h >= 22) || ((dow === 2 || dow === 4) && h < 2) ? 3.3 : 0) +
+    (dow === 6 && h >= 10 && h < 13 ? 11.5 : 0));
+  const ev = FL.detectEV(ls);
+  assert.ok(ev, "expected an EV");
+  const hit = onTarget(ev, added);
+  assert.ok(hit >= 0.7 * trueAnnual, `on target ${hit.toFixed(0)} of ${trueAnnual.toFixed(0)} kWh/yr`);
+  assert.ok(ev.annualKwh <= 1.3 * trueAnnual, `over-claims: ${ev.annualKwh} kWh/yr`);
+  assert.ok(within(ev.detection.chargerKW, 11.5, 0.15), `cap ${ev.detection.chargerKW} kW is the larger charger`);
+  assert.equal(ev.detection.thresholds.chargerLevels.length, 2);
+  for (const v of ev.kwhByHour) assert.ok(v <= ev.detection.chargerKW + 1e-9);
+});
+
+test("detectEV: a stated chargerKW the record contradicts is kept for the cap but flagged and checked", () => {
+  const { ls, added, trueAnnual } = houseWith((s, h, dow) =>
+    ((dow === 1 || dow === 3 || dow === 5) && h >= 22) ||
+    ((dow === 2 || dow === 4 || dow === 6) && h < 2) ? 3.3 : 0);
+  const ev = FL.detectEV(ls, { chargerKW: 7.2 });
+  assert.ok(ev);
+  assert.equal(ev.detection.chargerKW, 7.2);
+  assert.equal(ev.detection.chargerSource, "stated");
+  assert.equal(ev.detection.chargerMismatch, true);
+  assert.ok(onTarget(ev, added) >= 0.7 * trueAnnual, "the 3.3 kW plateau still sets the thresholds");
+  // agreeing within 40%: no flag
+  assert.equal(FL.detectEV(ls, { chargerKW: 3.6 }).detection.chargerMismatch, false);
+  // and a mismatched stated size no longer waives the evening test
+  const { ls: eve } = houseWith((s, h, dow, roll) =>
+    (roll < 0.5 && h >= 18 && h < 22 ? 3.3 : 0));
+  const e = FL.detectEV(eve, { chargerKW: 11.5, keepRejected: true }).detection;
+  assert.equal(e.chargerMismatch, true);
+  assert.equal(e.rejectCode, "evening-only");
 });
 
 // ---------------------------------------------------------------------------

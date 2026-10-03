@@ -605,7 +605,7 @@ test("partial 15-minute hours: >= half present is scaled up, < half is a gap; bo
   assert.ok(Math.abs(ls.meta.totalKwh - 48) < 1e-9, "no energy is lost to the missing quarters");
   const notes = ls.meta.notes.join(" | ");
   assert.match(notes, /2 hours had only some of their 15-minute readings/);
-  assert.match(notes, /1 hours had less than half/);
+  assert.match(notes, /1 hour had less than half/);
 });
 
 test("merge: a NaN in a later export never overwrites a real value; missing is recounted", () => {
@@ -680,4 +680,189 @@ test("parseStamp keeps the printed clock and reports the offset; fractional seco
   assert.deepEqual(GB.parseStamp("2025-07-01 07:15:00-0700"), { y: 2025, mo: 7, d: 1, h: 7, mi: 15, off: -420 });
   assert.deepEqual(GB.parseStamp("2025-07-01T07:15"), { y: 2025, mo: 7, d: 1, h: 7, mi: 15 });
   assert.deepEqual(GB.parseStamp("01-OCT-2025 13:00"), { y: 2025, mo: 10, d: 1, h: 13, mi: 0 });
+});
+
+// ---------------------------------------------------------------------------
+// Adversarial-review regressions (round 2)
+// ---------------------------------------------------------------------------
+test("parseStamp: a time RANGE is not an offset; ISO offsets (incl. a space before) still are", () => {
+  const range = { y: 2025, mo: 7, d: 1, h: 13, mi: 0 };
+  assert.deepEqual(GB.parseStamp("2025-07-01 13:00-14:00"), range);
+  assert.deepEqual(GB.parseStamp("2025-07-01 13:00 - 14:00"), range);
+  assert.deepEqual(GB.parseStamp("07/01/2025 1:00 PM-2:00 PM"), range);
+  // out of the -12:00..+14:00 range: not an offset even with a "T"
+  assert.deepEqual(GB.parseStamp("2025-07-01T13:00-14:00"), range);
+  // offset forms
+  assert.deepEqual(GB.parseStamp("2025-07-01T00:00:00 -0700"), { y: 2025, mo: 7, d: 1, h: 0, mi: 0, off: -420 });
+  assert.deepEqual(GB.parseStamp("2025-07-01T00:00:00-07:00"), { y: 2025, mo: 7, d: 1, h: 0, mi: 0, off: -420 });
+  assert.deepEqual(GB.parseStamp("2025-07-01T00:00-07:00"), { y: 2025, mo: 7, d: 1, h: 0, mi: 0, off: -420 });
+  assert.deepEqual(GB.parseStamp("2025-07-01 00:00:00+05:30"), { y: 2025, mo: 7, d: 1, h: 0, mi: 0, off: 330 });
+
+  // a whole generic CSV in the range style parses exactly as it did before offsets existed
+  const rows = ["Interval,kWh"];
+  for (let h = 0; h < 48; h++) {
+    const d = h < 24 ? "2025-07-01" : "2025-07-02";
+    rows.push(`${d} ${pad2(h % 24)}:00-${pad2((h + 1) % 24)}:00,1.000`);
+  }
+  const ls = GB.parse(rows.join("\n"));
+  assert.equal(ls.meta.nHours, 48);
+  assert.equal(ls.meta.start, "2025-07-01T00:00");
+  assert.equal(ls.meta.intervalMinutes, 60);
+  assert.ok(Math.abs(ls.meta.totalKwh - 48) < 1e-9);
+  assert.doesNotMatch(ls.meta.notes.join(" | "), /UTC offset/);
+
+  // and the space-before-offset form converts like any other offset
+  const off = ["Timestamp,kWh"];
+  for (let h = 0; h < 24; h++) off.push(`2025-07-01T${pad2(h)}:00:00 -0400,1.000`);
+  const lo = GB.parse(off.join("\n"));
+  assert.equal(lo.meta.start, "2025-06-30T21:00", "00:00 EDT is 21:00 PDT the day before");
+  assert.equal(lo.meta.nHours, 24);
+});
+
+test("merge: a gap-FILLED hour in a later export never overwrites a real reading", () => {
+  const gen = (d0, d1, val, hole) => {
+    const rows = ["Timestamp,kWh"];
+    for (let d = d0; d <= d1; d++) for (let h = 0; h < 24; h++) {
+      if (hole && d * 24 + h >= hole[0] && d * 24 + h < hole[1]) continue;
+      rows.push(`2025-01-${pad2(d)} ${pad2(h)}:00,${val(d, h).toFixed(3)}`);
+    }
+    return GB.parse(rows.join("\n"));
+  };
+  const A = gen(1, 20, (d, h) => (d === 15 && h >= 3 && h < 5 ? 9 : 1));        // real 9 kWh spike
+  const B = gen(10, 29, () => 1, [15 * 24 + 3, 15 * 24 + 5]);                  // B missing it, fills 1
+  assert.deepEqual(B.meta.gapsFilled.map((g) => g.ts), ["2025-01-15T03:00", "2025-01-15T04:00"]);
+  for (const order of [[A, B], [B, A]]) {
+    const m = GB.mergeLoadSets(order);
+    assert.equal(m.kwh[m.ts.indexOf("2025-01-15T03:00")], 9);
+    assert.equal(m.kwh[m.ts.indexOf("2025-01-15T04:00")], 9);
+    assert.equal(m.meta.gapsFilled.length, 0, "the merged series has no filled hours");
+    assert.equal(m.meta.quality.filled, 0);
+  }
+  // a fill no real reading covers survives, and is still listed
+  const C = gen(21, 29, () => 1);
+  const m = GB.mergeLoadSets([gen(1, 10, () => 1), B, C]);
+  assert.deepEqual(m.meta.gapsFilled.map((g) => g.ts), ["2025-01-15T03:00", "2025-01-15T04:00"]);
+  assert.equal(m.meta.quality.filled, 2);
+  // overlap counts every shared hour; only metered-vs-metered hours are compared
+  assert.match(m.meta.notes.join(" | "), /present in more than one export/);
+});
+
+test("merge: per-export NaN-gap notes are dropped when the merge closes the hole", () => {
+  const gen = (d0, d1, hole) => {
+    const rows = ["Timestamp,kWh"];
+    for (let d = d0; d <= d1; d++) for (let h = 0; h < 24; h++) {
+      if (hole && d * 24 + h >= hole[0] && d * 24 + h < hole[1]) continue;
+      rows.push(`2025-01-${pad2(d)} ${pad2(h)}:00,1.000`);
+    }
+    return GB.parse(rows.join("\n"));
+  };
+  const B = gen(10, 29, [12 * 24, 14 * 24]);                                   // 48 h NaN
+  assert.match(B.meta.notes.join(" | "), /consecutive hours missing/);
+  const m = GB.mergeLoadSets([gen(1, 20), B]);
+  assert.equal(m.meta.quality.missing, 0);
+  assert.doesNotMatch(m.meta.notes.join(" | "), /consecutive hours missing/);
+  const both = GB.mergeLoadSets([gen(1, 20, [12 * 24, 14 * 24]), B]);
+  assert.equal(both.meta.quality.missing, 48);
+  assert.equal(both.meta.notes.filter((n) => /consecutive hours missing/.test(n)).length, 1);
+});
+
+/**
+ * A link-free ESPI feed built from parts: up(kind), rt({flow, uom}), ib(values, durSec).
+ * Starts 2025-01-06 00:00 PST, well away from any DST date.
+ */
+const JAN_START = Date.UTC(2025, 0, 6, 8) / 1000;
+const espiParts = {
+  up: (kind) => `<entry><content><UsagePoint><ServiceCategory><kind>${kind}</kind></ServiceCategory></UsagePoint></content></entry>`,
+  rt: ({ flow = 1, uom = 72 } = {}) => `<entry><content><ReadingType><flowDirection>${flow}</flowDirection>` +
+    `<powerOfTenMultiplier>0</powerOfTenMultiplier><uom>${uom}</uom></ReadingType></content></entry>`,
+  mr: () => `<entry><content><MeterReading/></content></entry>`,
+  ib: (vals, dur = 3600, skip = () => false) => `<entry><content><IntervalBlock>` +
+    vals.map((v, i) => skip(i) ? "" : `<IntervalReading><timePeriod><duration>${dur}</duration>` +
+      `<start>${JAN_START + i * dur}</start></timePeriod><value>${v}</value></IntervalReading>`).join("") +
+    `</IntervalBlock></content></entry>`,
+  feed: (body) => `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">` +
+    `<entry><content><LocalTimeParameters><dstOffset>3600</dstOffset><tzOffset>-28800</tzOffset>` +
+    `</LocalTimeParameters></content></entry>${body}</feed>`,
+};
+
+test("ESPI without links: electric then gas UsagePoints listed first do not make the electric blocks gas", () => {
+  const P = espiParts, H = 24 * 14;
+  const elec = Array.from({ length: H }, () => 1000), gas = Array.from({ length: H }, () => 5);
+  const xml = P.feed(P.up(0) + P.up(1) + P.mr() + P.rt() + P.ib(elec) + P.mr() + P.rt({ uom: 169 }) + P.ib(gas));
+  const ls = GB.parse(xml);
+  assert.equal(ls.meta.nHours, H);
+  assert.ok(Math.abs(ls.meta.totalKwh - H) < 1e-9, `total ${ls.meta.totalKwh}: electricity only`);
+  assert.match(ls.meta.notes.join(" | "), /uom 169 \(therm\)/);
+});
+
+test("ESPI forward + reverse channels: no duplicate notes; partial hours judged per channel", () => {
+  const P = espiParts, H = 24 * 14;
+  const fwd = Array.from({ length: H }, () => 1000);
+  const rev = Array.from({ length: H }, (_, i) => (i % 24 >= 10 && i % 24 < 15 ? 2000 : 0));
+  const ls = GB.parse(P.feed(P.up(0) + P.rt() + P.ib(fwd) + P.rt({ flow: 19 }) + P.ib(rev)));
+  const notes = ls.meta.notes.join(" | ");
+  assert.doesNotMatch(notes, /duplicated/);
+  assert.ok(Math.abs(ls.meta.totalKwh - H) < 1e-9);
+  assert.ok(Math.abs(sum(ls.exportKwh) - 14 * 5 * 2) < 1e-9);
+  assert.match(notes, /flowDirection 19 readings were kept as export/);
+
+  // 15-minute: one hour has 2 of 4 forward readings but all 4 reverse ones
+  const Q = 96 * 4;
+  const f15 = Array.from({ length: Q }, () => 250), r15 = Array.from({ length: Q }, () => 100);
+  const hole = (i) => i === 96 + 40 || i === 96 + 41;            // Jan 7 10:00, quarters 0-1
+  const q = GB.parse(P.feed(P.up(0) + P.rt() + P.ib(f15, 900, hole) + P.rt({ flow: 19 }) + P.ib(r15, 900)));
+  const k = q.ts.indexOf("2025-01-07T10:00");
+  assert.ok(Math.abs(q.kwh[k] - 1) < 1e-9, `import scaled to ${q.kwh[k]}`);
+  assert.ok(Math.abs(q.exportKwh[k] - 0.4) < 1e-9, `export untouched at ${q.exportKwh[k]}`);
+  assert.equal(q.meta.quality.partialHours, 1);
+  assert.doesNotMatch(q.meta.notes.join(" | "), /duplicated/);
+});
+
+test("ESPI: a net-only feed does not claim flowDirection 19 readings", () => {
+  const P = espiParts;
+  const vals = Array.from({ length: 48 }, (_, i) => (i % 24 >= 10 && i % 24 < 15 ? -1000 : 1000));
+  const ls = GB.parse(P.feed(P.up(0) + P.rt({ flow: 4 }) + P.ib(vals)));
+  const notes = ls.meta.notes.join(" | ");
+  assert.match(notes, /flowDirection 4 \(net\)/);
+  assert.doesNotMatch(notes, /flowDirection 19/);
+});
+
+test("interval length: the file's own durations decide it; missing rows never make it coarse", () => {
+  const pre = `Energy Usage Information\n"For location: X\n\nDetailed Usage\n` +
+    `Date,Energy Consumption time Period Start,Energy Consumption time Period End,Delivered,Received\n`;
+  const h12 = (h) => `${(h % 12) || 12}:00${h < 12 ? "AM" : "PM"}`;
+  const row = (d, h, e, kwh) => `"01/${pad2(d)}/2025 ","01/${pad2(d)}/2025 ${h12(h)} ","${e} ","${kwh}","0.000"`;
+  const end = (d, h) => (h === 23 ? `01/${pad2(d + 1)}/2025 12:00AM` : `01/${pad2(d)}/2025 ${h12(h + 1)}`);
+
+  // every other hour missing, each row a stated 60 minutes: hourly, gaps filled
+  const sparse = [];
+  for (let d = 1; d <= 10; d++) for (let h = 0; h < 24; h += 2) sparse.push(row(d, h, end(d, h), "1.0"));
+  const s = GB.parse(pre + sparse.join("\n"));
+  assert.equal(s.meta.intervalMinutes, 60);
+  assert.ok(s.meta.quality.filled > 100);
+
+  // one 2-hour SCE row carrying 2 kWh is split, not doubled by a fill
+  const rows = [];
+  for (let d = 1; d <= 10; d++) for (let h = 0; h < 24; h++) {
+    if (d === 5 && h === 3) continue;
+    if (d === 5 && h === 2) { rows.push(row(d, 2, `01/05/2025 ${h12(4)}`, "2.0")); continue; }
+    rows.push(row(d, h, end(d, h), "1.0"));
+  }
+  const ls = GB.parse(pre + rows.join("\n"));
+  assert.equal(ls.meta.nHours, 240);
+  assert.ok(Math.abs(ls.meta.totalKwh - 240) < 1e-9, `total ${ls.meta.totalKwh}`);
+  assert.equal(ls.kwh[ls.ts.indexOf("2025-01-05T02:00")], 1);
+  assert.equal(ls.kwh[ls.ts.indexOf("2025-01-05T03:00")], 1);
+  assert.equal(ls.meta.quality.filled, 0);
+  assert.match(ls.meta.notes.join(" | "), /1 reading covered more than one hour/);
+
+  // no duration column at all: 15-minute SDG&E rows are read as 15-minute from the spacing
+  const sd = ["Meter Number,Date,Start Time,Consumption,Generation,Net"];
+  for (let h = 0; h < 72; h++) for (let qq = 0; qq < 4; qq++) {
+    sd.push(`M1,2025-06-0${1 + Math.floor(h / 24)},${pad2(h % 24)}:${pad2(qq * 15)},0.250,0.000,0.250`);
+  }
+  const s15 = GB.parse(sd.join("\n"));
+  assert.equal(s15.meta.intervalMinutes, 15);
+  assert.doesNotMatch(s15.meta.notes.join(" | "), /duplicated/);
+  assert.ok(Math.abs(s15.meta.totalKwh - 72) < 1e-9);
 });

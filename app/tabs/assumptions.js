@@ -80,7 +80,8 @@ export function render(state, ctx) {
 function renderQuality(state, ctx) {
   const node = clear($("quality-kv"));
   const meta = (ctx.loadSet && ctx.loadSet.meta) || {};
-  const years = meta.nHours ? meta.nHours / 8760 : 0;
+  const usable = meta.quality && Number.isFinite(meta.quality.usableHours) ? meta.quality.usableHours : meta.nHours;
+  const years = usable ? usable / 8760 : 0;
   const solarMeta = firstSolarModel(state);
 
   const pairs = [
@@ -120,6 +121,39 @@ function renderQuality(state, ctx) {
         notes.map((n) => el("li", { style: "font-size:12px;color:var(--ink-2);margin-bottom:3px", text: n }))),
     ]));
   }
+}
+
+/**
+ * One sentence per substitution flagged in the engine's result.tariffTerms.
+ * Every field is read defensively: an older engine bundle may not carry the
+ * plan fields yet, and a missing flag is treated as "no substitution".
+ */
+export function fallbackSentences(state, ctx) {
+  const d = ctx && ctx.detail;
+  const tt = (d && d.tariffTerms) || (d && d.baselineSameFlex && d.baselineSameFlex.tariffTerms) || null;
+  if (!tt) return [];
+  const t = ctx.tariff || {};
+  const providerName = (id) => (id && t.providers && t.providers[id] && t.providers[id].name) || id || "an unnamed provider";
+  const planName = (id) => {
+    const pl = id && Array.isArray(t.plans) ? t.plans.find((x) => x && x.id === id) : null;
+    return (pl && pl.name) || id || "an unnamed plan";
+  };
+  const out = [];
+  if (tt.providerFallback === true) {
+    const req = tt.providerRequested || (state && state.tariff && state.tariff.providerId);
+    out.push(`Generation provider: you asked for ${providerName(req)}, which this rate book does not price, `
+      + `so the run used ${providerName(tt.providerId)} instead.`);
+  }
+  if (tt.planFallback === true) {
+    const req = tt.planRequested || (state && state.tariff && state.tariff.planId);
+    out.push(`Rate plan: ${planName(req)} is not in this utility's rate book, so the run used ${planName(tt.planId)} instead.`);
+  }
+  if (tt.baselineRegionFallback === true) {
+    const req = state && state.site && state.site.baselineRegion;
+    out.push((req ? `Baseline region ${req} is not one this utility lists, so the` : "No baseline region is set, so the")
+      + ` run used region ${tt.baselineRegion ?? "default"} (the tariff file's default); pick yours on the Bills tab.`);
+  }
+  return out;
 }
 
 function firstSolarModel(state) {
@@ -183,6 +217,14 @@ function renderMethod(state, ctx) {
   const h = (t) => el("h3", { text: t });
   const p = (t) => el("p", { text: t });
   const ul = (items) => el("ul", {}, items.map((x) => el("li", { text: x })));
+
+  // What the engine had to substitute: shown only when it did.
+  const subs = fallbackSentences(state, ctx);
+  if (subs.length) {
+    node.append(h("What this run substituted"),
+      el("div", { style: "display:flex;flex-direction:column;gap:6px;margin-bottom:10px" },
+        subs.map((t) => el("div.banner", { text: t }))));
+  }
 
   node.append(
     h("What is simulated"),

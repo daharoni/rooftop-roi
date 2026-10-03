@@ -9,7 +9,12 @@
  * answer that is wrong in kind. This module says which case a ZIP is in:
  *
  *   coverageForZip(zip, lib, { city }) ->
- *     { kind: "iou", utilityId, ambiguous?, candidates? }   modelled
+ *     { kind: "iou", utilityId, ambiguous, candidates }     modelled; when the ZIP's
+ *                                                            prefix belongs to two IOUs
+ *                                                            (926, 931, 932, 935, 936)
+ *                                                            ambiguous is true, utilityId
+ *                                                            is null and the UI must ASK
+ *                                                            among candidates
  *     { kind: "muni", name, owner, shared, iouHint? }       not modelled (block)
  *     { kind: "outside" }                                    not California
  *     { kind: "unknown" }                                    a CA ZIP nobody claims
@@ -44,16 +49,20 @@ export const NON_NBT_UTILITIES = [
   { name: "Los Angeles Department of Water and Power (LADWP)", owner: "public",
     zips: ["90004", "90005", "90006", "90007", "90010", "90012", "90013", "90014", "90015", "90017",
       "90019", "90021", "90026", "90027", "90028", "90029", "90031", "90032", "90033", "90034",
-      "90035", "90036", "90037", "90038", "90039", "90041", "90042", "90045", "90047", "90049",
+      "90035", "90036", "90037", "90038", "90039", "90041", "90042", "90045", "90049",
       "90057", "90062", "90064", "90065", "90066", "90067", "90068", "90071", "90077", "90089",
-      "90094", "90095", "90272", "90293", "90710", "90731", "90732", "90744",
-      "91040", "91042", "91303", "91306", "91307", "91311", "91316", "91324", "91325", "91326",
+      "90094", "90095", "90272", "90293", "90710", "90731", "90744",
+      "91040", "91042", "91303", "91306", "91316", "91324", "91325", "91326",
       "91330", "91331", "91335", "91343", "91344", "91345", "91352", "91356", "91364", "91367",
       "91401", "91402", "91403", "91405", "91406", "91411", "91423", "91436",
       "91601", "91602", "91604", "91605", "91606", "91607"],
     shared: ["90001", "90002", "90003", "90008", "90011", "90016", "90018", "90020", "90023",
       "90024", "90025", "90043", "90044", "90046", "90048", "90059", "90061", "90291", "90292",
-      "90247", "90248", "90501", "90502", "91304", "91340", "91342"],
+      "90247", "90248", "90501", "90502", "91304", "91340", "91342",
+      // Moved out of `zips` by the 2026-10-03 review: Bell Canyon (91307, SCE), the
+      // Chatsworth hills (91311), the Harbor/Rancho Palos Verdes edge (90732) and
+      // the unincorporated Westmont strip (90047) all straddle the LADWP line.
+      "90047", "90732", "91307", "91311"],
     cities: ["los angeles"] },
   { name: "Pasadena Water and Power", owner: "public",
     zips: ["91101", "91103", "91105", "91106", "91125", "91126"], shared: ["91104", "91107"], cities: ["pasadena"] },
@@ -65,7 +74,9 @@ export const NON_NBT_UTILITIES = [
   { name: "Anaheim Public Utilities", owner: "public",
     zips: ["92801", "92805", "92806", "92807", "92808"], shared: ["92802", "92804"], cities: ["anaheim"] },
   { name: "Riverside Public Utilities", owner: "public",
-    zips: ["92501", "92505", "92506", "92507"], shared: ["92503", "92504", "92508"], cities: ["riverside"] },
+    zips: ["92501", "92505", "92506"], cities: ["riverside"],
+    // 92507 reaches into unincorporated Highgrove, which SCE serves.
+    shared: ["92503", "92504", "92507", "92508"] },
   { name: "Azusa Light & Water", owner: "public", shared: ["91702"], cities: ["azusa"] },
   { name: "Colton Electric Utility", owner: "public", shared: ["92324"], cities: ["colton"] },
   { name: "Banning Electric Utility", owner: "public", shared: ["92220"], cities: ["banning"] },
@@ -173,7 +184,10 @@ function iouFor(zip, lib) {
     if (list.includes(p3)) hits.push(id);
   }
   if (!hits.length) return null;
-  return { utilityId: hits[0], ambiguous: hits.length > 1, candidates: hits };
+  // Two IOUs share the prefix (92672 San Clemente is SDG&E, 92630 Lake Forest is
+  // SCE): there is no default to fall back on, so name nobody and let the UI ask.
+  if (hits.length > 1) return { utilityId: null, ambiguous: true, candidates: hits };
+  return { utilityId: hits[0], ambiguous: false, candidates: hits };
 }
 
 function muni(u, shared, iou) {
@@ -231,4 +245,84 @@ export function coverageMessage(cov) {
   return "";
 }
 
-export default { NON_NBT_UTILITIES, coverageForZip, coverageMessage, isCaliforniaZip };
+/** Sentinel answers to a coverage question that are not a modelled utility. */
+export const ANSWER_MUNI = "__muni";
+export const ANSWER_OTHER = "__other";
+
+/**
+ * Turn a coverage answer into what the UI must do, without touching the UI:
+ *   { utilityId }                         go on with this modelled utility
+ *   { block: message }                    stop, and say why
+ *   { ask: { tone, text, options } }      put a question with these options
+ *                                         ({ label, value, primary? }) to the
+ *                                         person; feed the answer to answerCoverage
+ *
+ * `prior` is a utility the person already chose for this same location in an
+ * earlier session (a reload); it settles a question only when it is one of the
+ * answers the question would have offered, so a reload does not re-ask, and a
+ * NEW location never silently inherits it (callers pass prior only on reload).
+ *
+ * @param cov   coverageForZip's answer
+ * @param o     { zip, ids: string[], nameOf(id) -> string, prior }
+ */
+export function coverageDecision(cov, o = {}) {
+  const ids = o.ids || [];
+  const nameOf = o.nameOf || ((id) => String(id).toUpperCase());
+  const prior = o.prior && ids.includes(o.prior) ? o.prior : null;
+  const zipText = o.zip ? `ZIP ${o.zip}` : "This area";
+  const msg = coverageMessage(cov);
+  const other = { label: "Another utility", value: ANSWER_OTHER };
+  if (!cov || cov.kind === "outside") return { block: msg || "California only for now." };
+  if (cov.kind === "iou") {
+    if (!cov.ambiguous) return { utilityId: cov.utilityId };
+    const cands = (cov.candidates || []).filter((id) => ids.includes(id));
+    if (prior && cands.includes(prior)) return { utilityId: prior };
+    return { ask: {
+      tone: "warn",
+      text: `${zipText} is served by more than one utility (${cands.map(nameOf).join(" or ")}). `
+        + "Who sends your electricity bill?",
+      options: [...cands.map((id) => ({ label: nameOf(id), value: id })), other],
+    } };
+  }
+  if (cov.kind === "muni" && !cov.shared) return { block: msg };
+  if (cov.kind === "muni") {
+    const hint = cov.iouHint || null;
+    const ious = hint ? (hint.candidates || [hint.utilityId]).filter((id) => id && ids.includes(id)) : ids.slice();
+    if (prior && ious.includes(prior)) return { utilityId: prior };
+    return { ask: {
+      tone: "warn",
+      text: `Part of this area is served by ${cov.name}, a publicly owned utility that is not on Net Billing; `
+        + "this tool does not model it yet. Who sends your electricity bill?",
+      options: [
+        { label: cov.name, value: ANSWER_MUNI },
+        ...ious.map((id) => ({ label: nameOf(id), value: id, primary: ious.length === 1 })),
+      ],
+    } };
+  }
+  // unknown: the person picks explicitly, with a warning.
+  if (prior) return { utilityId: prior };
+  return { ask: {
+    tone: "warn",
+    text: msg || "This ZIP is not in any utility list this tool has.",
+    options: [...ids.map((id) => ({ label: nameOf(id), value: id })), other],
+    handPicked: true,
+  } };
+}
+
+/**
+ * The person's answer to a coverageDecision question:
+ *   { utilityId }      a modelled utility they picked
+ *   { block: message } they named a utility this tool does not model
+ *   { superseded }     the question was replaced before they answered (null)
+ */
+export function answerCoverage(cov, answer) {
+  if (answer === null || answer === undefined) return { superseded: true };
+  if (answer === ANSWER_MUNI) return { block: coverageMessage(cov) };
+  if (answer === ANSWER_OTHER) return { block: "This tool only models SCE, PG&E and SDG&E under Net Billing for now." };
+  return { utilityId: String(answer) };
+}
+
+export default {
+  NON_NBT_UTILITIES, coverageForZip, coverageMessage, isCaliforniaZip,
+  coverageDecision, answerCoverage, ANSWER_MUNI, ANSWER_OTHER,
+};

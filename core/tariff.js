@@ -421,10 +421,14 @@ export function arecr(t) {
   return typeof n.eec_adjustment_per_kwh === "number" ? n.eec_adjustment_per_kwh : null;
 }
 
-/** Default true-up (settlement) month 1-12 when the user has not given a PTO month. */
+/**
+ * Default true-up (settlement) month 1-12 when the user has not given a PTO month:
+ * nbt.true_up_month when it is a NUMBER that is an integer 1-12 (a numeric string is
+ * rejected, as validate() does), else 10.  core/engine.js resolveTrueUpMonth() mirrors it.
+ */
 export function trueUpMonth(t) {
   const v = t && t.nbt && t.nbt.true_up_month;
-  return Number.isInteger(v) && v >= 1 && v <= 12 ? v : 4;
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 12 ? v : 10;
 }
 
 /**
@@ -719,8 +723,9 @@ export function validate(t) {
     if (hasCca && !isFiniteNonNeg(n.cca_export_adder_per_kwh)) {
       E("nbt.cca_export_adder_per_kwh must be a number >= 0 (0 is a real value) when non-bundled providers are listed");
     }
-    if (!(Number.isInteger(n.true_up_month) && n.true_up_month >= 1 && n.true_up_month <= 12)) {
-      E("nbt.true_up_month must be an integer month 1-12");
+    if (!(typeof n.true_up_month === "number" && Number.isInteger(n.true_up_month) &&
+          n.true_up_month >= 1 && n.true_up_month <= 12)) {
+      E("nbt.true_up_month must be an integer month 1-12 (a number, not a string)");
     }
     const es = n.eec_adjustment_source;
     if (es && es._confidence && ["high", "medium", "low"].indexOf(es._confidence) < 0) {
@@ -778,11 +783,17 @@ export function fromBill(spec, lib) {
       const cell = p.rates[season][pid];
       if (typeof given === "number" && isFinite(given) && given > 0) {
         // Keep every provider column in step so a later provider switch still works:
-        // shift each other provider by the same delta the user implied for theirs.
+        // shift each other provider by the same delta the user implied for theirs.  The
+        // diagnostic `<utility>_generation` column is NOT shifted: the delta lands on
+        // `delivery` (a rate change on the bill is read as a delivery change, as the
+        // engine's as-billed replay does), so `<utility> = delivery + <utility>_generation`
+        // still holds after the override and the generation share a municipal surcharge
+        // is levied on stays as shipped.  Shifting both would break that sum by delta.
         const was = cell[providerId];
         const delta = typeof was === "number" ? given - was : 0;
         for (const prov of Object.keys(cell)) {
           if (typeof cell[prov] !== "number") continue;
+          if (prov !== providerId && /_generation$/.test(prov)) continue;
           cell[prov] = prov === providerId ? given : Math.max(0.0001, +(cell[prov] + delta).toFixed(6));
         }
         substituted.push(season + "." + pid);
