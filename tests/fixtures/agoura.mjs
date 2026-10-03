@@ -27,6 +27,10 @@ const read = (p) => JSON.parse(fs.readFileSync(path.join(ROOT, p), "utf8"));
 export const RAW_LOAD = read("tests/fixtures/load-agoura-hills.json");
 export const SOLAR = read("tests/fixtures/solar-agoura-hills.json");
 export const TARIFF = read("data/tariffs/sce.json");
+// Frozen copy of sce.json at the 2026-06-01 rates the prototype's reference numbers were
+// computed on.  SCE repriced every residential TOU plan on 2026-10-01, so anything pinned
+// to REFERENCE must use this, not the live file.
+export const TARIFF_FROZEN = read("tests/fixtures/sce-2026-06-01.json");
 
 /** LoadSet per docs/ARCHITECTURE.md - the whole-house series, EV included in it. */
 export function loadSet() {
@@ -120,10 +124,16 @@ export function plane(panels, over = {}) {
 }
 
 /** The prototype's default scenario: one roof, the detected EV, the pool pump. */
+// Agoura Hills levies a generation municipal surcharge (sce.json meta.bill_validation).
+// It is city-specific, so the engine applies it only when asked; the reference
+// household lives there, so its params ask.
+export const AGOURA_MUNICIPAL_FACTOR = TARIFF.meta.bill_validation.generation_municipal_surcharge_factor;
+
 export function refParams(panels = 20, batteries = 1, over = {}) {
   return {
     planes: [plane(panels)], flex: [evFlex(), poolFlex()],
     batteries, planId: "TOU-D-PRIME", providerId: "cpa_green", weatherKey: "tmy",
+    municipalSurchargeFactor: AGOURA_MUNICIPAL_FACTOR,
     ...over,
   };
 }

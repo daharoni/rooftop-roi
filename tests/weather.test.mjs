@@ -410,7 +410,7 @@ test("the request only ever carries rounded coordinates, dates and variable name
 // Live archive — skipped offline
 // ---------------------------------------------------------------------------
 
-test("live: one real year from the Open-Meteo archive matches the stored fixture", async (t) => {
+test("live: one real year from the Open-Meteo archive matches the stored fixture", { skip: process.env.SKIP_LIVE ? "SKIP_LIVE set" : false }, async (t) => {
   const gz = path.join(FIXTURES, "weather-agoura-hills.json.gz");
   if (!fs.existsSync(gz)) {
     t.skip("weather fixture missing");

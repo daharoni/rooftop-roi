@@ -13,11 +13,21 @@
  * of STC nameplate for a modern module on a microinverter; `acFactor` is that
  * ratio, exposed as a knob because the exact figure depends on the quote.
  *
- * Source: SCE Solar Billing Plan FAQ and SCE's Supplemental Webinar FAQ.
+ * Source: SCE Solar Billing Plan FAQ and SCE's Supplemental Webinar FAQ; the
+ * Schedule NBT "Oversized Generating Facility Attestation" (estimated annual
+ * production <= 150% of the last 12 months' usage).  The "suspended" 150% rule
+ * in SCE's materials is the old NEM one, not this NBT limit.  Verified 2026-10-03:
+ * https://www.sce.com/customer-service-center/help-center/solar/solar-billing-plan/solar-billing-plan-faqs
  * Pure arithmetic, no I/O; shared by the dashboard and the copied summary.
  * ========================================================================== */
 
 export const SCE_KWH_PER_AC_KW = 720 * 0.20 * 12;      // 1,728
+
+/** The single gate for the sizing line: only SCE enforces it. */
+export function sizingCapFor(utilityId, recentAnnualKwh, { panelW, acFactor } = {}) {
+  if (utilityId !== "sce" || !(recentAnnualKwh > 0)) return null;
+  return sceCap({ annualKwh: recentAnnualKwh, panelW, acFactor });
+}
 
 /**
  * Panel counts at SCE's 100% and 150% lines for a given 12-month usage.
@@ -48,15 +58,18 @@ export function recentAnnualKwh(loadSet, days = 365) {
   const spanDays = (last - first) / 86400000 + 1 / 24;
   if (spanDays < 30) return null;
   const from = last - days * 86400000;
-  let sum = 0;
+  let sum = 0, usable = 0, total = 0;
   for (let i = ts.length - 1; i >= 0; i--) {
     const t = Date.parse(ts[i]);
     if (t <= from) break;
     const v = kwh[i];
-    if (isFinite(v)) sum += v;
+    total++;
+    if (isFinite(v)) { sum += v; usable++; }
   }
+  if (!usable) return null;
+  sum *= total / usable;                  // NaN gaps are missing, not zero use
   return spanDays < days ? sum * (days / spanDays) : sum;
 }
 
-const SolarSizing = { SCE_KWH_PER_AC_KW, sceCap, recentAnnualKwh };
+const SolarSizing = { SCE_KWH_PER_AC_KW, sceCap, sizingCapFor, recentAnnualKwh };
 export default SolarSizing;

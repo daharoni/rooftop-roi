@@ -16,56 +16,102 @@ export const CLAIM = "Your data never leaves this browser.";
 export const EXPLANATION =
   "Your meter readings are parsed, simulated and charted here, on this device. "
   + "There is no server to upload them to — this page is a folder of static files on GitHub Pages. "
-  + "Here is every network request the page can make, and what is in it.";
+  + "The page does make a few network requests, listed here with exactly what is in each; your meter "
+  + "data is never in any of them.";
 
 /**
- * Each entry: who is called, what is sent, when, and whether it is avoidable.
- * `avoidable` entries get a way out in the UI, named in `escape`.
+ * Each entry: who is called (`hosts`, exactly as they appear in a URL), what is
+ * sent, when, and whether it is avoidable.  `avoidable` entries get a way out in
+ * the UI, named in `escape`.  tests/privacy-hosts.test.mjs greps app/, core/ and
+ * index.html for every URL hostname and fails if one is missing here, or if a
+ * host listed here is no longer used.
  */
 export const CALLS = [
   {
-    who: "Open-Meteo",
-    what: "Your rounded latitude and longitude, to fetch eleven years of hourly sunlight for that spot.",
-    when: "Once per roof location. The answer is cached in this browser, so moving a slider never calls again.",
+    who: "Google Fonts",
+    hosts: ["fonts.googleapis.com", "fonts.gstatic.com"],
+    what: "A request for the IBM Plex typefaces. Like any web request it carries your IP address, and the browser tells Google which page asked.",
+    when: "On first load; your browser caches the fonts afterwards.",
     avoidable: false,
   },
   {
-    who: "Esri",
-    what: "Map tile coordinates, if you open the map to trace your roof or pick a location.",
-    when: "Only while a map is on screen. Tiles are images; nothing of yours goes with the request.",
-    avoidable: true,
-    escape: "Skip the map and type a ZIP code, or enter tilt and azimuth by hand on the Roof tab.",
+    who: "cdnjs (Cloudflare)",
+    hosts: ["cdnjs.cloudflare.com"],
+    what: "The Chart.js charting library, and the Leaflet map library. Nothing of yours is in the request beyond your IP address.",
+    when: "Chart.js on first load; Leaflet only when you open the map.",
+    avoidable: false,
   },
   {
     who: "OpenStreetMap",
-    what: "The address you type, sent to their Nominatim geocoder to turn it into coordinates. The answer is kept to about 1 km before it is stored or put in a share link.",
-    when: "Only when you type an address and press Find. This is the one request that contains something you wrote.",
+    hosts: ["nominatim.openstreetmap.org"],
+    what: "The address you type, sent to their Nominatim geocoder to turn it into coordinates.",
+    when: "Only when you type an address and press Find.",
     avoidable: true,
-    escape: "Click your roof on the map or enter a ZIP code instead — neither sends an address anywhere.",
+    escape: "Enter a ZIP code instead, or, once your meter file is loaded, set the location on the Roof tab's map.",
   },
   {
-    who: "cdnjs",
-    what: "The charting library and the map library, plus the two IBM Plex fonts from Google Fonts.",
-    when: "On first load, like any script tag. Standard CDN requests, cached by your browser afterwards.",
+    who: "Open-Meteo place search",
+    hosts: ["geocoding-api.open-meteo.com"],
+    what: "The ZIP code you type, to find its approximate centre.",
+    when: "Only when you use the ZIP box (or when an address lookup falls back to its ZIP).",
+    avoidable: true,
+    escape: "Load your meter file first, then set the location on the Roof tab's map or type coordinates there.",
+  },
+  {
+    who: "Open-Meteo elevation",
+    hosts: ["api.open-meteo.com"],
+    what: "Your coordinates rounded to 0.05° (about 5 km), to get the ground elevation there.",
+    when: "Once each time you set a location.",
     avoidable: false,
   },
   {
+    who: "Open-Meteo weather archive",
+    hosts: ["archive-api.open-meteo.com"],
+    what: "Your coordinates rounded to 0.05° (about 5 km), to fetch eleven years of hourly sunlight and temperature.",
+    when: "Once per location: eleven requests, then cached in this browser so moving a slider or editing the roof never calls again.",
+    avoidable: false,
+  },
+  {
+    who: "Esri satellite tiles",
+    hosts: ["server.arcgisonline.com"],
+    what: "Requests for map image tiles. The tile coordinates at the zoom used for tracing reveal roughly which block you are looking at (to about 75 m), along with your IP address.",
+    when: "Only while a map is on screen.",
+    avoidable: true,
+    escape: "Skip the map: type a ZIP code, and enter tilt and direction by hand on the Roof tab.",
+  },
+  {
     who: "Nothing else",
+    hosts: [],
     what: "No analytics, no telemetry, no error reporting, no cookies, no uploads, no accounts.",
-    when: "Ever. Your meter file is read with the browser's own FileReader and never crosses the network.",
+    when: "Your meter file is read by the browser itself and never crosses the network.",
     none: true,
   },
 ];
 
+/**
+ * URLs that appear in the code but are never requested: an XML namespace, a
+ * plain link the visitor may click, and the User-Agent text Node sends in tests.
+ */
+export const NOT_REQUESTS = {
+  "www.w3.org": "the SVG namespace identifier, not a request",
+  "github.com": "the 'Source on GitHub' link and the geocoder's User-Agent string; never fetched",
+};
+
+/** Every host the page can contact, for tests and for a future CSP connect-src. */
+export const HOSTS = CALLS.flatMap((c) => c.hosts || []);
+
 export const STORAGE_NOTE =
-  "What stays on this device: your meter readings in IndexedDB, and your settings in localStorage "
-  + "and in the page's URL. “Forget my data” erases all three. A street address you type is "
-  + "never written to either store.";
+  "What stays on this device: your meter readings and the downloaded weather in IndexedDB, and "
+  + "your settings in localStorage and in the page's URL. localStorage also keeps the roof outline "
+  + "you traced and your location at full precision (share links round it to about 1 km). "
+  + "“Forget my data” erases all of it. A street address you type is never written to either store.";
 
 /** Replaced at boot by core/geocode.js's own wording when that module exists. */
 export let GEOCODE_NOTE =
   "Typing an address sends it to OpenStreetMap's Nominatim geocoder to get coordinates back. "
-  + "Click the map or enter a ZIP code instead and nothing you typed is sent anywhere.";
+  + "A ZIP code goes to Open-Meteo's place search instead. To send neither, load your meter file "
+  + "first and set the location on the Roof tab, by clicking the map (which loads Esri satellite "
+  + "tiles) or typing coordinates.";
 
 /**
  * INTEGRATION: core/geocode.js may export PRIVACY_NOTE. Until it lands, the
@@ -76,9 +122,8 @@ export async function adoptGeocodeNote() {
     const mod = await import("../core/geocode.js");
     const note = mod.PRIVACY_NOTE || (mod.default && mod.default.PRIVACY_NOTE);
     if (typeof note === "string" && note.trim()) {
+      // The note under the address box; the CALLS entry keeps its own short wording.
       GEOCODE_NOTE = note.trim();
-      const call = CALLS.find((c) => c.who === "OpenStreetMap");
-      if (call) call.what = GEOCODE_NOTE;
     }
   } catch {
     /* module not built yet, or offline: the wording above is already accurate */
@@ -86,4 +131,4 @@ export async function adoptGeocodeNote() {
   return GEOCODE_NOTE;
 }
 
-export default { CLAIM, EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote };
+export default { CLAIM, EXPLANATION, CALLS, HOSTS, NOT_REQUESTS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote };

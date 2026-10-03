@@ -13,20 +13,35 @@ Live site: https://daharoni.github.io/rooftop-roi/
 ## Your data never leaves this browser
 
 The whole tool is a static page. There is no server and no account. Your meter data is parsed
-and simulated in your browser and stored only in your browser's local storage until you press
-"Forget my data". The page makes exactly these network requests:
+and simulated in your browser and never sent anywhere. The page does make these network
+requests, and this list is kept in step with the code by `tests/privacy-hosts.test.mjs`
+(the single source is `app/privacy.js`):
 
-- hourly weather for your coordinates (rounded to 0.05°) from Open-Meteo; the coordinates themselves are kept to two decimals (~1 km), so a share link never places a specific house;
-- satellite map tiles from Esri, only if you use the map to trace your roof;
-- an address you type is sent to OpenStreetMap's Nominatim geocoder, unless you enter a ZIP
-  or click your house on the map instead;
-- the page's own files and the Chart.js and Leaflet libraries from a CDN.
+- **Google Fonts** (`fonts.googleapis.com`, `fonts.gstatic.com`): the IBM Plex typefaces on
+  first load. Like any request it carries your IP address and the referring page.
+- **cdnjs** (`cdnjs.cloudflare.com`): Chart.js on first load, and Leaflet when you open the map.
+- **OpenStreetMap Nominatim** (`nominatim.openstreetmap.org`): the address you type, only if you
+  use the address box.
+- **Open-Meteo place search** (`geocoding-api.open-meteo.com`): the ZIP code you type, only if
+  you use the ZIP box (or an address lookup falls back to its ZIP).
+- **Open-Meteo elevation** (`api.open-meteo.com`): your coordinates rounded to 0.05° (~5 km).
+- **Open-Meteo weather archive** (`archive-api.open-meteo.com`): the same rounded coordinates,
+  eleven requests per location, then cached in this browser.
+- **Esri satellite tiles** (`server.arcgisonline.com`): only while a map is on screen. Tile
+  requests at tracing zoom reveal roughly which block you are looking at (about 75 m), along
+  with your IP address.
 
 No analytics, no uploads, no cookies.
 
+**What is stored on this device.** Your meter readings and the downloaded weather are kept in
+IndexedDB; your settings are kept in localStorage and in the URL. localStorage also holds the
+roof outline you traced and your location at full precision (share links round it to two
+decimals, ~1 km). A street address you type is never stored. "Forget my data" erases all of it.
+
 **Sharing a scenario.** Every setting you change — prices, financing, roof faces, load schedules —
-is packed into the URL after `#`, so the address bar is always a link that reproduces your exact
-dashboard. "Share link" copies it. The link never contains your meter data; someone opening it adds
+is packed into the URL after `#`, so the address bar is always a link that reproduces every setting
+except traced roof outlines, custom tariffs and the existing-solar acknowledgement, which stay on this
+device. "Share link" copies it. The link never contains your meter data; someone opening it adds
 their own file, or, if you built the scenario on the demo household, the demo loads automatically.
 
 ## What you need

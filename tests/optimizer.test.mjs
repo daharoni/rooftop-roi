@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 
 import Engine from "../core/engine.js";
 import Optimizer from "../core/optimizer.js";
-import { loadSet, plane, refParams, TARIFF, REFERENCE } from "./fixtures/agoura.mjs";
+import { loadSet, plane, refParams, TARIFF, TARIFF_FROZEN, REFERENCE } from "./fixtures/agoura.mjs";
 
 const near = (a, b, tol, msg) =>
   assert.ok(Math.abs(a - b) <= tol, `${msg}: expected ${b} +-${tol}, got ${a}`);
@@ -181,6 +181,8 @@ test("pvKwhByPlane survives the sweep", () => {
 test("the reference optimum survives the new API", async () => {
   const R = REFERENCE.optimum;
   const src = Engine.flexReshapeSource();
+  // The reference was computed on the 2026-06-01 SCE rates; pin to the frozen copy.
+  const ctx = Engine.prepare({ load: loadSet(), tariffs: TARIFF_FROZEN });
   const grid = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 60, maxBatteries: 6 });
   // The prototype dated every flow at year end; the reference numbers are its.
   const best = Optimizer.priceGrid(grid, { escalation: R.escalation, midYear: false }, "npv", "sameFlex").best;

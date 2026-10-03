@@ -70,8 +70,10 @@ hour) combination to prove it.
   UI must let the user override. `baselineRegionForZip()` returns `ambiguous: true` when a
   prefix maps to more than one region.
 - Baseline only has a price effect on plans with a non-zero `baseline_credit_per_kwh`
-  (SCE TOU-D-4-9PM / 5-8PM, PG&E E-TOU-C). On every other plan the region is economically
-  irrelevant and the UI should say so rather than demanding an answer.
+  (SCE TOU-D-4-9PM / 5-8PM, PG&E E-TOU-C, SDG&E TOU-DR1 / TOU-DR2). On every other plan the
+  region is economically irrelevant and the UI should say so rather than demanding an answer.
+- The engine takes the region as the `baselineRegion` sim param; with none it uses
+  `meta.baseline_region`. `summer_months` here (not the plan's) sets the baseline season.
 
 ---
 
@@ -105,7 +107,46 @@ asserts it reproduces `model_reproduces_bill.model_total`:
 ```
 
 For SCE this lands on **$749.41** against an actual **$749.37** (0.01%, residual is kWh
-rounding). If a future rate edit breaks that, the edit is wrong.
+rounding), **when the bill's own prices are applied** (next section).
+
+**`generation_municipal_surcharge_factor` is the reference bill's city, not SCE's.** It is
+Agoura Hills' generation municipal surcharge (franchise fee / utility-user tax). City
+utility-user taxes vary — many cities levy none, others levy several percent on the whole
+bill — and they are **not modelled by default**: the engine applies a factor only when the
+caller passes `municipalSurchargeFactor`, and the bill-replay tests pass this one. The
+CPA energy surcharge (`cpa_energy_surcharge_per_kwh`) applies to every CPA customer and is
+always priced for `cpa_*` providers.
+
+#### Calibration overrides (`meta.bill_validation.bill_rates`)
+
+A bill is a snapshot of the rates in force during its billing period; the plan it anchored
+moves on when the utility changes rates (SCE did on 2026-10-01). The plan therefore carries the
+**current published** values, and the bill's printed prices live beside it as an explicit
+override that only a replay uses:
+
+```
+bill_rates: {
+  provider: "cpa_green",
+  fixed_charge_per_day: 0.76862,                       // printed Base Services Charge
+  rates:    { summer: { on: 0.66603, mid: 0.43183, off: 0.28907 } },   // all-in, provider column
+  delivery: { summer: { on: 0.29033, mid: 0.29033, off: 0.19058 } }    // printed delivery energy rate
+}
+```
+
+No new engine or sim parameter is needed: the override is applied to a cloned tariff.
+- `tests/tariff.test.mjs` uses the existing loader hook `fromBill({ periods: bill_rates.rates,
+  fixedPerDay: bill_rates.fixed_charge_per_day })`.
+- `tests/engine.test.mjs` shifts every column of each replayed cell except `sce_generation` by
+  `(bill delivery − shipped delivery)` — this restores the as-billed cell exactly, including the
+  generation share the municipal surcharge is levied on — and sets `fixed_charge_per_day`
+  from the override. `fromBill` now does the same to the diagnostic columns: it shifts
+  `delivery` with the price columns and leaves `<utility>_generation` as shipped, so
+  `sce = delivery + sce_generation` still holds after an override.
+
+A replay that only passes by editing the shipped plan back to the bill's numbers is wrong;
+update the plan to the utility's current published values and keep the bill in `bill_rates`.
+Individual published values are pinned separately in `tests/golden-rates.json`, asserted
+exactly by `tests/tariff.test.mjs`; a rate edit is therefore always a deliberate golden update.
 
 ---
 
@@ -143,6 +184,7 @@ derived number and say so in `meta.notes`.
 | `fixed_charge_per_day` | number ≥ 0 | The CPUC income-graduated fixed charge (D.24-05-028) as that utility implemented it, converted to $/day. Unavoidable, **not** offset by exports — it floors the bill. |
 | `minimum_charge_per_day` | number ≥ 0 | 0 where the fixed charge replaced the old minimum bill. A real 0, not a placeholder. |
 | `baseline_credit_per_kwh` | number ≥ 0 | Credit applied to usage up to the daily baseline allocation. Stored **positive**; the engine subtracts it. Rates in this file are **pre-credit**. |
+| `baseline_credit_pct` | number in [1, 2] | **Required.** How much of the allocation the credit covers: `1.0` = 100%. SDG&E TOU-DR1 and TOU-DR2 credit usage up to **130%** of baseline, so they carry `1.3`; every other plan `1.0`. Present (as `1.0`) even on plans with no credit. |
 | `period_ids` | string[] | The ids this plan may use, from `["on","mid","off","super_off"]`. |
 | `schedule` | object | `schedule[season][daytype][hour]` → period id. |
 | `rates` | object | `rates[season][periodId][providerId]` → total $/kWh. |
@@ -212,11 +254,15 @@ they let the Bills tab explain the split and let a CCA's total be re-derived. Th
 | `export_rates.weekday` | `[12][24]` | $/kWh export credit, month index 0=Jan, hour index 0..23 hour-beginning, local prevailing time. |
 | `export_rates.weekend` | `[12][24]` | Same, for Saturdays, Sundays **and holidays**. |
 | `export_rates.note` | string | What the numbers are and where they came from. |
-| `acc_plus_adder_per_kwh` | number | The ACC Plus adder for this vintage, paid **on top of** the matrix. Not baked in. |
+| `acc_plus_adder_per_kwh` | number ≥ 0 | **Required.** The ACC Plus adder for this vintage, paid **on top of** the matrix. Not baked in. SCE 0.016, PG&E 0.0088, SDG&E 0 (a real zero: D.22-12-056 gave SDG&E none). The engine uses it unless `accPlusAdder` is passed explicitly. |
+| `cca_export_adder_per_kwh` | number ≥ 0 | **Required when the file lists any non-bundled provider.** Per-kWh premium a CCA pays on exports above the utility's matrix. The engine adds it to the export price for **every provider whose id differs from `utility.id`**. 0.0 in all three files today (a real zero: CPA, the PG&E CCAs and SDCP/CEA all pay the ACC matrix with no adder). One key for all utilities; the old SCE-only `cpa_export_adder_per_kwh` is rejected by `validate()`. |
 | `acc_plus_schedule` | object | Optional `{ "2023": 0.04, ... }` by vintage year, non-equity residential. |
 | `net_surplus_compensation_per_kwh` | number ≥ 0 | Paid for energy left over at the annual true-up. Roughly a third of the clawback rate, which is why oversizing is penalised. |
 | `nonbypassable_charges_per_kwh` | number ≥ 0 | $/kWh of **import** that solar cannot escape. **Already inside the rate tables** — do not add it on top. Recorded only so the UI can show which part of the price is unavoidable. |
 | `true_up` | string | `"annual"`. |
+| `true_up_month` | int 1-12 (a JSON number) | **Required.** The default settlement month **when the user has not given a PTO month** (the engine's `trueUpMonth` param overrides it). All three files use **10 (October)**. The real month is the customer's PTO anniversary, which we do not know. October is the conservative default: the credit bank is at its largest right after summer, so an October settlement debits the whole summer surplus at the ARECR and pays it out at the low NSC rate before winter can draw it down at retail value. A spring settlement (April-June) is the most optimistic choice for the same reason — the winter months consume the bank first. On the reference household (24-month record, 60 panels, no battery) annual savings are $5,403 with October and $5,488 with April; a system that never banks a surplus is unaffected. October is at or near the low end of the twelve months but not always the minimum (September is $6 lower there; with a battery or a larger array, February can be lower by $15-60). A user who knows their PTO month should enter it. A string such as `"10"` is invalid here and is ignored by both `core/tariff.js` and the engine. How the record is split into relevant periods is in docs/engine.md §6. |
+| `eec_adjustment_per_kwh` | number > 0 | **Required.** The Average Retail Export Compensation Rate of Schedule NBT SC 4.e.i (published as "EEC Adjustment Pricing"): $/kWh by which the credit bank is debited for net surplus kWh at true-up, *before* NSC is paid. Generation + delivery components summed. SCE $0.05981 and SDG&E $0.11001 (both September 2026); PG&E publishes no equivalent figure (see docs/tariffs-pge.md §8), so it carries SCE's value as a low-confidence placeholder. Published monthly by true-up month. |
+| `eec_adjustment_source` | object | `{ month, _confidence: high/medium/low, note }`: which month's value and how sure we are. A `low` here means the number is a placeholder. |
 | `notes` | string | The long-form explanation: matrix shape, the lock-in trajectory, battery export caps, grid-charging prohibition. |
 
 Matrix values are the **total** export credit (generation component + delivery component).
@@ -225,9 +271,10 @@ For a CCA customer the total is unchanged; it simply arrives split across two bi
 `exportRateAt(t, date, hour)` returns the raw matrix value. Pass `{ includeAdder: true }` to
 add the ACC Plus adder.
 
-> `sce.json` has no `acc_plus_adder_per_kwh` field — its value ($0.016 for the 2026 vintage)
-> is stated in `nbt.notes` prose. That file is frozen, so `core/tariff.js` carries the value
-> in `ACC_PLUS_FALLBACK` and `validate()` warns. New files must carry the field.
+> `sce.json` now carries `acc_plus_adder_per_kwh: 0.016` explicitly (the value its `nbt.notes`
+> state in prose and the old `ACC_PLUS_FALLBACK` supplied), so all three files use the same
+> key and the fallback map is gone. Adding schema fields does not touch the bill-calibrated
+> rate values.
 
 ---
 
@@ -251,6 +298,11 @@ add the ACC Plus adder.
 | `utilityForZip(zip, lib)` | `{ utilityId, utility, ambiguous, candidates[] }` or `null`. |
 | `baselineRegionForZip(t, zip)` | `{ region, regions[], ambiguous, allocation, zipPrefix }` or `null`. |
 | `baselineAllocation(t, region)` | `{ summer, winter, … }`, falling back to `meta.baseline_kwh_per_day`. |
+| `baselineRegionList(t)` | `[{ id, label, summer, winter, summerAllElectric, winterAllElectric, isDefault }]` for a region picker. |
+| `defaultBaselineRegion(t)` | `meta.baseline_region` if it names an allocation, else the first region, else `null`. |
+| `baselineCreditPct(t, plan)` | `plan.baseline_credit_pct`, else 1. |
+| `arecr(t)` | `nbt.eec_adjustment_per_kwh`, or `null`. |
+| `trueUpMonth(t)` | `nbt.true_up_month` when it is an integer number 1-12, else 10. The engine's `resolveTrueUpMonth` applies the same rule. |
 | `plan(t, id)` | Plan object, case-insensitive on `id` then `name`; `null` if absent. `plan(t)` = default. |
 | `defaultPlan(t)` | The `default: true` plan, else `plans[0]`. |
 | `providersOf(t, plan)` | Provider ids this plan actually prices (filters the diagnostic columns). |
@@ -308,11 +360,16 @@ an empty `providers` or a provider with no name; empty `plans[]`; zero or more t
 baseline-credit; a schedule array that is not exactly 24 entries or that emits an id not in
 `period_ids`; a rate cell that is missing, non-numeric or ≤ 0 for any declared provider;
 an export matrix that is not 12×24 or contains a negative or non-numeric value; a negative
-NSC or NBC; a `zipHints` entry naming a region with no allocation.
+NSC or NBC; a `zipHints` entry naming a region with no allocation; a missing or negative
+`nbt.acc_plus_adder_per_kwh`; a missing or non-positive `nbt.eec_adjustment_per_kwh`; a missing or negative
+`nbt.cca_export_adder_per_kwh` when a non-bundled provider is listed, or the legacy
+`nbt.cpa_export_adder_per_kwh` key; a
+`nbt.true_up_month` that is not an integer 1-12; a `baseline_credit_pct` missing or outside
+[1, 2].
 
 **Warnings** (reported, do not fail unless `--strict`): no `meta.confidence`; no
 `utility.website`; a source with no `used_for`; no `baselineRegions`; a rate outside
-$0.03–$2.00/kWh; an export value above $3/kWh; a missing `acc_plus_adder_per_kwh`.
+$0.03–$2.00/kWh; an export value above $3/kWh; an `eec_adjustment_per_kwh` above $0.50/kWh.
 
 `tests/validate-tariffs.mjs` additionally sweeps every (plan × provider × month × sampled day
 × hour) and every export-matrix cell through the real lookup functions, so a hole that the

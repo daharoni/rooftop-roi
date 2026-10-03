@@ -36,6 +36,22 @@ export function formatValue(spec, v) {
   return fmtNum(Number(v), dp) + (spec.unit || "");
 }
 
+/**
+ * A typed number, clamped to the control's min/max and snapped to an integer
+ * when the step is whole.  null for blank or unparseable input, which the
+ * caller treats as "keep the previous value" (never as 0).
+ */
+export function clampNumber(spec, raw) {
+  const text = String(raw == null ? "" : raw).trim();
+  if (text === "") return null;
+  let n = Number(text);
+  if (!Number.isFinite(n)) return null;
+  if (spec.min !== undefined && n < spec.min) n = spec.min;
+  if (spec.max !== undefined && n > spec.max) n = spec.max;
+  if (spec.step !== undefined && Number.isInteger(spec.step) && spec.step >= 1) n = Math.round(n);
+  return n;
+}
+
 /** Two option lists are the same list if they name the same values in order. */
 function sameOptions(a, b) {
   if (a === b) return true;
@@ -59,6 +75,7 @@ export class ControlRail {
   build(groups, state) {
     this.groups = groups || [];
     this.widgets = [];
+    this.state = state;
     clear(this.root);
     const wide = typeof window === "undefined" || window.innerWidth > 1000;
     // The rail is an accordion: one group open at a time, so a long list of
@@ -121,7 +138,17 @@ export class ControlRail {
       w.control = el("input", {
         type: spec.kind, id, min: spec.min, max: spec.max, step: spec.step,
         placeholder: spec.placeholder, value: value ?? "",
-        on: { change: (e) => emit(spec.kind === "number" ? Number(e.target.value) : e.target.value) },
+        on: {
+          change: (e) => {
+            if (spec.kind !== "number") { emit(e.target.value); return; }
+            const v = clampNumber(spec, e.target.value);
+            const prev = getPath(this.state || state, spec.path);
+            // Blank or unparseable: put the previous value back rather than writing 0.
+            if (v === null) { e.target.value = prev ?? ""; return; }
+            if (String(v) !== e.target.value) e.target.value = String(v);
+            emit(v);
+          },
+        },
       });
       wrap.appendChild(w.control);
     } else if (spec.kind === "button") {
@@ -164,6 +191,7 @@ export class ControlRail {
 
   /** Re-sync every widget's value, visibility, warning and footnote. */
   refresh(state) {
+    this.state = state;
     for (const w of this.widgets) {
       const spec = w.spec;
       w.wrap.hidden = !!(spec.show && !spec.show(state));
@@ -184,7 +212,7 @@ export class ControlRail {
         if (spec.opts && !spec.opts.some((o) => String(o.v) === String(w.control.value))) {
           this._fillSelect(w.control, spec, v);
         }
-        w.control.value = String(v);
+        w.control.value = v === null || v === undefined ? "" : String(v);
       } else {
         if (document.activeElement !== w.control) w.control.value = v ?? "";
         if (w.value) w.value.textContent = formatValue(spec, v);
@@ -205,8 +233,8 @@ export class ControlRail {
   _fillSelect(node, spec, value) {
     clear(node);
     for (const o of spec.opts || []) node.appendChild(el("option", { value: String(o.v), text: o.t }));
-    node.value = String(value);
+    node.value = value === null || value === undefined ? "" : String(value);
   }
 }
 
-export default { ControlRail, formatValue, defaultReason };
+export default { ControlRail, formatValue, defaultReason, clampNumber };

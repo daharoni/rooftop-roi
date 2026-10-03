@@ -14,11 +14,14 @@ Agoura Hills selected 100% Green Power as its *default* CPA product, so a househ
 
 | period | cpa_green (actual) | sce bundled | difference |
 |---|---|---|---|
-| summer on-peak | $0.66603 | $0.58532 | **+$0.0807/kWh** |
-| summer mid-peak | $0.43183 | $0.39601 | +$0.0358/kWh |
+| summer on-peak | $0.68603 | $0.60532 | **+$0.0807/kWh** |
+| summer mid-peak | $0.42183 | $0.38601 | +$0.0358/kWh |
 | summer off-peak | $0.28907 | $0.26149 | +$0.0276/kWh |
-| winter mid-peak | $0.63324 | $0.56000 | +$0.0732/kWh |
-| winter off/super-off | $0.26501 | $0.24000 | +$0.0250/kWh |
+| winter mid-peak | $0.52324 | $0.45000 | +$0.0732/kWh |
+| winter off-peak | $0.32501 | $0.30000 | +$0.0250/kWh |
+| winter super-off | $0.26501 | $0.24000 | +$0.0250/kWh |
+
+*(Rates effective 2026-10-01, see §2a. The differences are unchanged from the 2026-06-01 rates because they are pure CPA-vs-SCE generation and surcharge gaps; CPA had not repriced as of 2026-10-03.)*
 
 Even CPA **Clean** Power costs $0.01102/kWh more than SCE bundled at every hour, and CPA **Lean** is only marginally cheaper (and cheaper than SCE only in some periods). This contradicts SCE's own published SCE/CPA Joint Rate Comparison, which shows SCE and CPA Clean Power as *exactly equal*. The reason is documented in §3 — the comparison assumes a CCA surcharge of $0.02433/kWh while the customer's actual stack is $0.03535/kWh. **Trust the bill.** A dashboard that models this household as "SCE" will understate their current bill; one that offers a provider switch should show tier choice as a real, immediate lever worth roughly $0.03–0.08/kWh.
 
@@ -47,13 +50,13 @@ Agoura Hills straddles the region 6 / region 9 boundary, so the city maps to **b
 
 Summer = June 1 – September 30. Medical Baseline adds 16.5 kWh/day.
 
-**Why this barely matters here:** baseline allocation only has a price effect on TOU-D-4-9PM and TOU-D-5-8PM, which carry a $0.10/kWh baseline credit. **TOU-D-PRIME has no baseline credit at all**, so on the customer's current plan the region 6 vs 9 ambiguity is economically irrelevant. It only becomes material if the dashboard recommends switching to 4-9PM or 5-8PM — and note that if the premises is actually region 6, the summer allocation drops from 16.9 to 11.4 kWh/day, which cuts the value of that credit by about a third in summer.
+**Why this barely matters here:** baseline allocation only has a price effect on TOU-D-4-9PM and TOU-D-5-8PM, which carry a $0.09/kWh baseline credit ($0.10 before 2026-10-01). **TOU-D-PRIME has no baseline credit at all**, so on the customer's current plan the region 6 vs 9 ambiguity is economically irrelevant. It only becomes material if the dashboard recommends switching to 4-9PM or 5-8PM — and note that if the premises is actually region 6, the summer allocation drops from 16.9 to 11.4 kWh/day, which cuts the value of that credit by about a third in summer.
 
 ---
 
 ## 2. SCE rate plans — TOU periods and bundled rates — confidence **HIGH**
 
-**Source:** SCE *Time-of-Use Residential Rate Plans*, https://www.sce.com/save-money/rates-financing/residential-rate-plans/time-of-use-plans — page states **"Current rates as of 6/1/26"**. Period definitions independently corroborated by the CPA rate sheet (§4) and by the customer's bill, which prints "Summer weekdays On 4–9 PM / Off 12 AM–4 PM & 9 PM–12 AM; Weekends & holidays Mid 4–9 PM".
+**Source:** SCE *Time-of-Use Residential Rate Plans*, https://www.sce.com/save-money/rates-financing/residential-rate-plans/time-of-use-plans — page stated **"Current rates as of 6/1/26"** when this file was built; on 2026-10-03 it shows the **2026-10-01** rate set (§2a). Period definitions independently corroborated by the CPA rate sheet (§4) and by the customer's bill, which prints "Summer weekdays On 4–9 PM / Off 12 AM–4 PM & 9 PM–12 AM; Weekends & holidays Mid 4–9 PM".
 
 Seasons: **Summer = June–September**, **Winter = October–May**, for all three plans.
 
@@ -67,7 +70,17 @@ Neither season uses all four period ids: **summer has no super-off-peak, winter 
 
 **Holidays use the weekend schedule.** SCE's eight: New Year's Day, Presidents' Day, Memorial Day, Independence Day, Labor Day, Veterans Day, Thanksgiving, Christmas. This is recorded in `meta.notes`.
 
-### SCE bundled totals as published (whole cents, eff. 6/1/26)
+### SCE bundled totals as published (whole cents)
+
+**Current — effective 2026-10-01** (SCE TOU page read 2026-10-03; effective date from the SCE Rate Advisory, https://www.sce.com/save-money/rates-financing/sce-rate-advisory):
+
+| Plan | S-on | S-mid | S-off | W-mid | W-off | W-super-off | Basic charge | Baseline credit |
+|---|---|---|---|---|---|---|---|---|
+| TOU-D-PRIME | 61¢ | 39¢ | 26¢ | **45¢** | **30¢** | 24¢ | $0.79/day | **none** |
+| TOU-D-4-9PM | 59¢ | 44¢ | 33¢ | 50¢ | 36¢ | 32¢ | $0.79/day | $0.09/kWh |
+| TOU-D-5-8PM | 72¢ | 51¢ | 34¢ | 55¢ | 37¢ | 32¢ | $0.79/day | $0.09/kWh |
+
+**Superseded — effective 2026-06-01 through 2026-09-30** (the values this file was first built on; confirmed unchanged on SCE's page in a Wayback snapshot of 2026-09-13, https://web.archive.org/web/20260913023934/https://www.sce.com/save-money/rates-financing/residential-rate-plans/time-of-use-plans):
 
 | Plan | S-on | S-mid | S-off | W-mid | W-off | W-super-off | Basic charge | Baseline credit |
 |---|---|---|---|---|---|---|---|---|
@@ -95,7 +108,33 @@ Two consequences:
 - **The minimum charge is gone.** SCE: *"The minimum charge is no longer applicable. If you have 0 usage, you will still receive the Base Services Charge."* `minimum_charge_per_day` is **0.00 as a real value**, not a placeholder.
 - The BSC is **not offset by solar exports**, so it puts a hard floor of roughly $280/year on the bill no matter how large the system.
 
-**`fixed_charge_per_day` in the JSON is $0.76862, not $0.79** — that is the exact figure on the customer's bill (29 days × $0.76862 = $22.29). The CCA customer's BSC is slightly below SCE's posted bundled figure. The bill wins.
+**`fixed_charge_per_day` in the JSON is $0.79343** = $24.15 × 12 / 365.25 (changed 2026-10-03 from $0.76862). SCE does not post its exact daily figure — the TOU page shows "$0.79 per day", the BSC page "approximate daily charge of $0.80" — so the published monthly figure is converted the way PG&E and SDG&E print it in their own tariff sheets for the same CPUC $24.15 ($0.79343/day, PG&E E-TOU-C sheet eff. 2026-06-01; SDG&E electric-billing page). Confidence **MEDIUM** on the fifth decimal.
+
+The earlier value, $0.76862, was the figure printed on the customer's summer 2026 bill (29 days × $0.76862 = $22.29). SCE's BSC page says the charge applies to CCA customers on the same terms, so the earlier note that "the CCA customer's BSC is slightly below SCE's posted bundled figure" is unsupported; why the bill shows $23.38/month-equivalent is unexplained (possibly a billing-period proration). The bill value now lives only in `meta.bill_validation.bill_rates`, the calibration override the bill-replay tests apply (docs/tariff-schema.md, "Calibration overrides").
+
+---
+
+## 2a. The 2026-10-01 rate change and how the file was re-derived — confidence **MEDIUM**
+
+*Added 2026-10-03.* The public-launch review (docs/REVIEW-2026-10-02.md, P0 #12) flagged TOU-D-PRIME winter 56/24/24¢ as implausible against SCE's page (45/30/24¢). It was **not** a derivation error: 56/24/24 was SCE's published rate from 2026-06-01, still on SCE's page on 2026-09-13 (Wayback snapshot above). SCE then changed **every** residential TOU rate on **2026-10-01** — 2025 GRC Phase 2 (D.26-04-033), Woolsey/recovery-bond revenue and 2022 ERRA; average residential rate 34.4 → 34.5¢ (SCE Rate Advisory). The baseline credit fell from $0.10 to $0.09/kWh.
+
+**What could not be read.** SCE's TOU-D tariff sheet (the per-period delivery/generation split) is linked from https://www.sce.com/regulatory/tariff-books/rates-pricing-choices only through an Edison SharePoint folder that requires a Microsoft login; the old `library.sce.com` and `custom-files/PDF_Files/ELECTRIC_SCHEDULES_TOU-D.pdf` URLs are gone (404 / unresolvable). The SCE/CPA Joint Rate Comparison still shows SCE rates "as of June 1, 2026", and CPA's rate page still lists its 2026-07-01 books. So the 2026-10-01 delivery/generation split is not public as of 2026-10-03, and the per-period totals below rest on SCE's whole-cent page values (**confidence MEDIUM**).
+
+**Derivation (same identities as §5, applied to the new totals):**
+
+```
+sce_generation[p] = cpa_clean_gen[p] + 0.02433          (unchanged: CPA has not repriced)
+delivery[p]       = SCE_total_2026-10-01[p] − sce_generation[p]
+cpa_X[p]          = delivery[p] + cpa_X_gen[p] + 0.03535
+```
+
+TOU-D-PRIME **summer** keeps its bill anchor: `delivery = bill delivery + (new whole-cent total − old whole-cent total)` = on 0.29033 + 0.02, mid 0.29033 − 0.01, off 0.19058 + 0.00.
+
+Worked example — TOU-D-PRIME winter mid-peak: sce_generation = 0.23918 + 0.02433 = 0.26351; delivery = 0.45 − 0.26351 = **0.18649**; cpa_green = 0.18649 + 0.30140 + 0.03535 = **0.52324**. Off-peak: delivery = 0.30 − 0.06011 = 0.23989, cpa_green 0.32501. Super-off: delivery 0.17989 (unchanged), cpa_green 0.26501.
+
+**The caveat, stated plainly.** Holding `sce_generation` fixed puts the entire 2026-10-01 change into delivery, so the CPA columns move cent-for-cent with SCE's totals. That is right only if SCE's generation component did not change. For TOU-D-PRIME winter it produces a delivery rate *lower* at 4–9 p.m. (0.186) than overnight (0.240), which is structurally odd and suggests GRC Phase 2 reshaped the **generation** TOU differential. If so, a CPA customer's real 2026-10-01 winter rates are closer to the old CPA columns (mid 0.63324, off 0.26501) than to the new ones — a spread of up to ~$0.11/kWh on winter mid-peak. Re-derive when SCE's TOU-D sheet or the next SCE/CPA Joint Rate Comparison becomes readable. The CCA surcharge stack ($0.03535, from the summer bill) may also have moved on 2026-10-01 (new recovery-bond charges).
+
+**Spot-check of TOU-D-4-9 and TOU-D-5-8 (review task 7).** Deltas, 2026-10-01 minus 2026-06-01, ¢/kWh — 4-9: S-on +1, S-mid −2, S-off −1, W-mid −1, W-off −1, W-super −1; 5-8: S-on −2, S-mid −3, S-off 0, W-mid −5, W-off −1, W-super 0. Several exceed 1¢, and a mixed-vintage table would be worse than either, so all cells were moved to 2026-10-01.
 
 ---
 
@@ -137,8 +176,8 @@ Running the exact printed kWh through the finished file:
 
 | line | model |
 |---|---|
-| 436.488 kWh × `rates.summer.on.cpa_green` + 175.596 × `.mid` + 1361.73 × `.off` | $760.18 |
-| 29 × `fixed_charge_per_day` | $22.29 |
+| 436.488 kWh × `bill_rates.rates.summer.on` + 175.596 × `.mid` + 1361.73 × `.off` | $760.18 |
+| 29 × `bill_rates.fixed_charge_per_day` | $22.29 |
 | Generation Municipal Surcharge (0.009294 × CPA generation) | $2.35 |
 | CPA Energy Surcharge | $0.59 |
 | California Climate Credit | −$36.00 |
@@ -146,7 +185,7 @@ Running the exact printed kWh through the finished file:
 | **actual bill** | **$749.37** |
 | **error** | **$0.04 — 0.01%** |
 
-The residual is kWh rounding. This is recorded as `meta.bill_validation.model_reproduces_bill` so the dashboard can display the check.
+The residual is kWh rounding. Since 2026-10-03 the replay uses the bill's printed prices from `meta.bill_validation.bill_rates` (the plan carries SCE's 2026-10-01 rates); see docs/tariff-schema.md "Calibration overrides". This is recorded as `meta.bill_validation.model_reproduces_bill` so the dashboard can display the check.
 
 **Independent confirmation:** the CPA generation rates on the bill ($0.34035 / $0.10615 / $0.06314) match the published CPA 2018-Vintage rate sheet effective 2026-07-01 **to the fifth decimal**. Two independent sources agree exactly, which is a strong validation of both.
 
@@ -187,7 +226,7 @@ The bill states: *"Starting in 2026, the bills you receive in August and Septemb
 | | | Off | 0.06906 | 0.07547 | 0.09793 |
 | | | Super-off | 0.04174 | 0.04626 | 0.06207 |
 
-Note CPA's TOU-D-PRIME winter off-peak and super-off-peak are **identical**, mirroring SCE's bundled 24¢/24¢.
+Note CPA's TOU-D-PRIME winter off-peak and super-off-peak are **identical**, mirroring SCE's bundled 24¢/24¢ of 2026-06-01. SCE's 2026-10-01 rates split them (30¢/24¢); CPA had not repriced as of 2026-10-03.
 
 ---
 
@@ -257,40 +296,43 @@ Two small bill items are left out so the rate tables stay clean; both are record
 
 Together under 0.4% of the bill. Apply them on top if you need to reproduce the bill to the cent.
 
-### Final rate tables as written to `tariffs.json`
+### Final rate tables as written to `tariffs.json` (effective 2026-10-01)
+
 
 ### TOU-D-PRIME
 
 | season | period | delivery | sce_generation | **sce** | cpa_lean | cpa_clean | **cpa_green** | delivery source |
 |---|---|---|---|---|---|---|---|---|
-| summer | on | 0.29033 | 0.29499 | **0.58532** | 0.57643 | 0.59634 | **0.66603** | bill |
-| summer | mid | 0.29033 | 0.10568 | **0.39601** | 0.39994 | 0.40703 | **0.43183** | bill |
-| summer | off | 0.19058 | 0.07091 | **0.26149** | 0.26778 | 0.27251 | **0.28907** | bill |
-| winter | mid | 0.29649 | 0.26351 | **0.56000** | 0.55324 | 0.57102 | **0.63324** | derived |
-| winter | off | 0.17989 | 0.06011 | **0.24000** | 0.24702 | 0.25102 | **0.26501** | derived |
-| winter | super_off | 0.17989 | 0.06011 | **0.24000** | 0.24702 | 0.25102 | **0.26501** | derived |
+| summer | on | 0.31033 | 0.29499 | **0.60532** | 0.59643 | 0.61634 | **0.68603** | bill + published delta |
+| summer | mid | 0.28033 | 0.10568 | **0.38601** | 0.38994 | 0.39703 | **0.42183** | bill + published delta |
+| summer | off | 0.19058 | 0.07091 | **0.26149** | 0.26778 | 0.27251 | **0.28907** | bill + published delta |
+| winter | mid | 0.18649 | 0.26351 | **0.45000** | 0.44324 | 0.46102 | **0.52324** | derived (§2a) |
+| winter | off | 0.23989 | 0.06011 | **0.30000** | 0.30702 | 0.31102 | **0.32501** | derived (§2a) |
+| winter | super_off | 0.17989 | 0.06011 | **0.24000** | 0.24702 | 0.25102 | **0.26501** | derived (§2a) |
 
 ### TOU-D-4-9
 
 | season | period | delivery | sce_generation | **sce** | cpa_lean | cpa_clean | **cpa_green** | delivery source |
 |---|---|---|---|---|---|---|---|---|
-| summer | on | 0.32806 | 0.25194 | **0.58000** | 0.57477 | 0.59102 | **0.64787** | derived |
-| summer | mid | 0.32690 | 0.13310 | **0.46000** | 0.46247 | 0.47102 | **0.50094** | derived |
-| summer | off | 0.26565 | 0.07435 | **0.34000** | 0.34628 | 0.35102 | **0.36763** | derived |
-| winter | mid | 0.33103 | 0.17897 | **0.51000** | 0.50950 | 0.52102 | **0.56134** | derived |
-| winter | off | 0.26742 | 0.10258 | **0.37000** | 0.37445 | 0.38102 | **0.40402** | derived |
-| winter | super_off | 0.24519 | 0.08481 | **0.33000** | 0.33560 | 0.34102 | **0.36000** | derived |
+| summer | on | 0.33806 | 0.25194 | **0.59000** | 0.58477 | 0.60102 | **0.65787** | derived (§2a) |
+| summer | mid | 0.30690 | 0.13310 | **0.44000** | 0.44247 | 0.45102 | **0.48094** | derived (§2a) |
+| summer | off | 0.25565 | 0.07435 | **0.33000** | 0.33628 | 0.34102 | **0.35763** | derived (§2a) |
+| winter | mid | 0.32103 | 0.17897 | **0.50000** | 0.49950 | 0.51102 | **0.55134** | derived (§2a) |
+| winter | off | 0.25742 | 0.10258 | **0.36000** | 0.36445 | 0.37102 | **0.39402** | derived (§2a) |
+| winter | super_off | 0.23519 | 0.08481 | **0.32000** | 0.32560 | 0.33102 | **0.35000** | derived (§2a) |
 
 ### TOU-D-5-8
 
 | season | period | delivery | sce_generation | **sce** | cpa_lean | cpa_clean | **cpa_green** | delivery source |
 |---|---|---|---|---|---|---|---|---|
-| summer | on | 0.33119 | 0.40881 | **0.74000** | 0.72451 | 0.75102 | **0.84377** | derived |
-| summer | mid | 0.32950 | 0.21050 | **0.54000** | 0.53740 | 0.55102 | **0.59866** | derived |
-| summer | off | 0.27653 | 0.06347 | **0.34000** | 0.34697 | 0.35102 | **0.36522** | derived |
-| winter | mid | 0.32569 | 0.27431 | **0.60000** | 0.59326 | 0.61102 | **0.67318** | derived |
-| winter | off | 0.28020 | 0.09980 | **0.38000** | 0.38461 | 0.39102 | **0.41348** | derived |
-| winter | super_off | 0.24941 | 0.07059 | **0.32000** | 0.32650 | 0.33102 | **0.34683** | derived |
+| summer | on | 0.31119 | 0.40881 | **0.72000** | 0.70451 | 0.73102 | **0.82377** | derived (§2a) |
+| summer | mid | 0.29950 | 0.21050 | **0.51000** | 0.50740 | 0.52102 | **0.56866** | derived (§2a) |
+| summer | off | 0.27653 | 0.06347 | **0.34000** | 0.34697 | 0.35102 | **0.36522** | derived (§2a) |
+| winter | mid | 0.27569 | 0.27431 | **0.55000** | 0.54326 | 0.56102 | **0.62318** | derived (§2a) |
+| winter | off | 0.27020 | 0.09980 | **0.37000** | 0.37461 | 0.38102 | **0.40348** | derived (§2a) |
+| winter | super_off | 0.24941 | 0.07059 | **0.32000** | 0.32650 | 0.33102 | **0.34683** | derived (§2a) |
+
+The 2026-06-01 tables these replaced are in git history (commit a2f3445) and frozen in `tests/fixtures/sce-2026-06-01.json`, which the prototype-parity tests run on.
 
 ---
 
@@ -385,7 +427,7 @@ Sources: https://www.sce.com/regulatory/regulatory-information/ferc-Standards-co
 
 ### Does CPA pay an adder above ACC? **No.**
 
-`cpa_export_adder_per_kwh` = **0.0**. CPA's Net Billing Tariff derives its Energy Export Credit from the **same** CPUC ACC, splits each hourly price into a generation component (paid by CPA) and a delivery component (paid by SCE), and locks it for the same 9 years for PTO dates through 2027-12-31. **The total export credit is identical whether generation comes from CPA or SCE — only who pays it changes.** The one place CPA does pay a premium is Net Surplus Compensation (10% above SCE), and CPA also offers a Renewable Attribute Adder on net surplus if the customer certifies and transfers the RECs.
+`cca_export_adder_per_kwh` = **0.0** (renamed 2026-10-03 from `cpa_export_adder_per_kwh`; one key across all three utility files, applied by the engine to any non-bundled provider). CPA's Net Billing Tariff derives its Energy Export Credit from the **same** CPUC ACC, splits each hourly price into a generation component (paid by CPA) and a delivery component (paid by SCE), and locks it for the same 9 years for PTO dates through 2027-12-31. **The total export credit is identical whether generation comes from CPA or SCE — only who pays it changes.** The one place CPA does pay a premium is Net Surplus Compensation (10% above SCE), and CPA also offers a Renewable Attribute Adder on net surplus if the customer certifies and transfers the RECs.
 
 ### Non-bypassable charges on imports — **corrected**
 
@@ -411,7 +453,7 @@ Two further cautions: CARE and Medical Baseline customers are exempt from the WF
 
 The cap (Schedule NBT SC 5.c) is (CSI EPBB production factor for that month and CEC climate zone, kWh/kW) × (installed PV kW). **SC 5.c.vii is the sting:** export above the cap *"is not eligible for Energy Export Credits and is forfeited,"* and the forfeited kWh *"are assumed to have occurred during the Customer's highest priced billing period, regardless of when the excess energy was actually exported,"* cascading to the next-highest. Forfeited kWh also do not count toward Net Surplus Energy. **Over-export is penalised at the most valuable hours by construction.** The applicable month is set by the **first day** of the billing period.
 
-A sub-10 kW system can escape the cap by **opting into NGOM metering at the start of a Relevant Period** (metering cost capped at **$600**). For a battery intended to discharge to the grid in August evenings, this is very likely worth doing — it is the difference between capturing and forfeiting the $1.00+/kWh hours. Systems over 10 kW AC storage must have an NGOM or certified power control, with storage output limited to 150% of the renewable generator's capacity. There is **no limit on storage kWh capacity**, and the old NEM 150% PV sizing rule is suspended.
+A sub-10 kW system can escape the cap by **opting into NGOM metering at the start of a Relevant Period** (metering cost capped at **$600**). For a battery intended to discharge to the grid in August evenings, this is very likely worth doing — it is the difference between capturing and forfeiting the $1.00+/kWh hours. Systems over 10 kW AC storage must have an NGOM or certified power control, with storage output limited to 150% of the renewable generator's capacity. There is **no limit on storage kWh capacity**, and the old NEM 150% PV sizing rule is suspended. (Note: that suspension is the NEM rule; the NBT oversizing attestation, estimated annual production <= 150% of the last 12 months' usage, still applies and is what `core/sizing.js` enforces for SCE only.)
 
 **(2) Grid-charging then exporting is PROHIBITED — there is no arbitrage path.** SCE FAQ: *"As a SBP customer, can I charge my battery from the grid? Battery systems in a Paired Storage agreement are charged by a renewable generator i.e., solar, wind, etc., but are not permitted to charge from the grid."* Schedule NBT SC 5.b.ii.B permits certified power-control firmware in lieu of an NGOM, explicitly including equipment *"that prevents electricity imported from the grid to charge the storage device"* (open-loop response ≤ 10 s). So buying cheap off-peak energy to resell into the evening peak is barred by the interconnection agreement — and even if it occurred, the export cap means it would earn nothing. **Model the battery as solar-charged only.**
 
@@ -558,14 +600,14 @@ Also note: the old "$850/kWh residential equity" figure is stale — $0.85/Wh no
 | Baseline region 6 vs 9 | **MEDIUM** | SCE lists both for Agoura Hills; region 9 assumed. Economically irrelevant on TOU-D-PRIME (no baseline credit). |
 | Baseline allocation values | **HIGH** | SCE's published table |
 | SCE TOU period definitions | **HIGH** | Three independent sources agree (SCE site, CPA rate sheet, customer bill) |
-| SCE bundled totals | **HIGH** (±$0.005 rounding) | SCE published, eff. 6/1/26 |
-| Base Services Charge / fixed charge | **HIGH** | Bill + SCE published |
+| SCE bundled totals | **HIGH** (±$0.005 rounding) | SCE published, eff. 2026-10-01 (§2a) |
+| Base Services Charge / fixed charge | **MEDIUM** | $24.15/mo published; daily $0.79343 converted as PG&E/SDG&E print it; the bill's $0.76862 is kept only as a calibration override |
 | Minimum charge = $0 | **HIGH** | SCE explicitly states it no longer applies |
 | CPA generation rates | **HIGH** | Published sheet matches the bill to 5 decimals |
 | Agoura Hills default = 100% Green | **HIGH** | CPA rate book + bill |
 | CCA surcharge stack $0.03535 | **HIGH** | Itemised on the bill; full bill reconciles to the cent |
-| TOU-D-PRIME **summer** delivery & CPA totals | **HIGH** | Measured on the bill; `cpa_green` matches exactly |
-| TOU-D-PRIME **winter**, and TOU-D-4-9 / 5-8 all periods | **MEDIUM-HIGH** | Derived; method validated against the bill to ±$0.005 |
+| TOU-D-PRIME **summer** delivery & CPA totals | **MEDIUM-HIGH** | Bill-measured delivery shifted by SCE's published whole-cent 2026-10-01 change |
+| TOU-D-PRIME **winter**, and TOU-D-4-9 / 5-8 all periods | **MEDIUM** | Derived from 2026-10-01 totals with SCE generation held fixed; split not public (§2a) |
 | SCE generation split per period | **MEDIUM-HIGH** | Derived from SCE's own published gen-vs-CPA-Clean relationship |
 | NBT 12x24 export matrices | **VERY HIGH** | SCE's own EEC factor file, dual-validated against its MIDAS CSV; real hourly data |
 | 9-year lock-in trajectory | **VERY HIGH** | Same source file, all years 2026-2046 |

@@ -123,7 +123,7 @@ export function hardware(open = false) {
   return { group: "Hardware", open, items: [
     item.panelW(),
     { path: "system.acFactor", kind: "range", label: "Panel AC rating vs nameplate", min: 0.8, max: 0.95, step: 0.01, pct: 0,
-      reason: "ui",
+      reason: "ui", show: (s) => s.site.utilityId === "sce",
       footnote: () => "PTC rating × inverter efficiency. Only used for the SCE sizing line: SCE counts CEC-AC kW × 1,728 kWh/yr "
         + "against your last 12 months and refuses an application above 150%." },
     { path: "system.battKWh", kind: "range", label: "Battery size, usable", min: 5, max: 20, step: 0.5, unit: " kWh each" },
@@ -180,6 +180,12 @@ export function household(open = false) {
   ] };
 }
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+  "October", "November", "December"];
+/** "" = unknown: the tariff file's default true-up month (October). */
+const TRUE_UP_OPTIONS = [{ v: "", t: "Unknown (utility default, October)" }]
+  .concat(MONTHS.map((m, i) => ({ v: i + 1, t: m })));
+
 export function rate(ctx, open = false) {
   return { group: "Your rate", open, items: [
     { path: "tariff.planId", kind: "select", label: "Rate plan",
@@ -190,6 +196,14 @@ export function rate(ctx, open = false) {
         + "while the utility still delivers it. Switching is free and changes the answer." },
     { path: "site.utilityId", kind: "select", label: "Utility",
       opts: ctx.utilityOptions && ctx.utilityOptions.length ? ctx.utilityOptions : [{ v: "sce", t: "Southern California Edison" }] },
+    { path: "site.baselineRegion", kind: "select", label: "Baseline region", reason: "sim",
+      opts: ctx.baselineRegionOptions && ctx.baselineRegionOptions.length
+        ? ctx.baselineRegionOptions : [{ v: "", t: "Utility default" }],
+      note: "The climate zone printed on your bill. It sets how many kWh a day get the baseline credit." },
+    { path: "fin.trueUpMonth", kind: "select", label: "True-up month", reason: "sim",
+      opts: TRUE_UP_OPTIONS,
+      note: "The month your annual Net Billing statement settles: the anniversary of your permission to "
+        + "operate. Unknown uses the utility default (October)." },
   ] };
 }
 

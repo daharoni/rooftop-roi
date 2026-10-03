@@ -24,6 +24,8 @@ export const id = "roof";
 export const label = "Roof";
 
 let builderHandle = null;
+/** Bumped on every mount and unmount; a builder import that resolves late checks it. */
+let mountToken = 0;
 
 export function rail(state, ctx) {
   return [
@@ -69,11 +71,16 @@ export function mount(pane, state, ctx) {
 async function mountBuilder(state, ctx) {
   const host = $("roof-builder");
   if (!host) return;
+  const token = ++mountToken;
+  // The tab was left (or re-mounted) while the builder module was loading: the
+  // host is detached, so mounting into it would leak a live map.
+  const stale = () => token !== mountToken || !host.isConnected;
   try {
     const mod = await import("../roof/roofBuilder.js");
+    if (stale()) return;
     const mountRoofBuilder = mod.mountRoofBuilder || (mod.default && mod.default.mountRoofBuilder);
     if (typeof mountRoofBuilder !== "function") throw new Error("no mountRoofBuilder export");
-    builderHandle = mountRoofBuilder(host, {
+    const handle = mountRoofBuilder(host, {
       planes: state.roof.planes,
       site: state.site.lat === null ? null : { lat: state.site.lat, lon: state.site.lon },
       panel: { w: state.system.panelW },
@@ -81,10 +88,15 @@ async function mountBuilder(state, ctx) {
       onSiteChange: (site) => ctx.actions.setSite(site),
       onCalibration: (cal) => ctx.actions.setCalibration(cal),
     });
+    if (stale()) {
+      if (handle && typeof handle.destroy === "function") handle.destroy();
+      return;
+    }
+    builderHandle = handle;
     const tag = $("roof-source-tag");
     if (tag) tag.textContent = "roof builder";
   } catch {
-    simpleBuilder(host, state, ctx);
+    if (!stale()) simpleBuilder(host, state, ctx);
   }
 }
 
@@ -213,6 +225,7 @@ export function render(state, ctx) {
 }
 
 export function unmount() {
+  mountToken++;
   if (builderHandle && typeof builderHandle.destroy === "function") builderHandle.destroy();
   builderHandle = null;
 }
