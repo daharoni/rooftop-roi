@@ -495,7 +495,7 @@ test("fixture: the JS model reproduces the reference profiles (3 stored years, o
   compareToFixture(t, wys, "offline 3-year fixture comparison (kWh/kW):");
 });
 
-test("fixture: eleven-year comparison (needs the weather cache or the network)", async (t) => {
+test("fixture: eleven-year comparison (needs the weather cache or the network)", { skip: process.env.SKIP_LIVE ? "SKIP_LIVE set" : false }, async (t) => {
   const { fetchYears, fileCache, WeatherUnavailableError } = await import("../core/weather.js");
   // Kept out of the repo on purpose: eleven years is ~3.7 MB of JSON.
   const dir =

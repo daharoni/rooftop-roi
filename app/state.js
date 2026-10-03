@@ -117,6 +117,11 @@ export const DEFAULTS = {
  */
 const STRATEGIES = ["self_consumption", "tou_arbitrage", "export_arbitrage", "backup_only"];
 const ID_RE = /^[A-Za-z0-9_.-]+$/;
+/** Identifiers from a link are used as object keys; never let them name the prototype chain. */
+const PROTO_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const isSafeId = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max && ID_RE.test(v) && !PROTO_KEYS.has(v);
+/** A link may list at most this many roof faces or flexible loads; more is a damaged or hostile link. */
+export const MAX_LIST = 12;
 const SCALARS = [
   ["lat", "site.lat", "num", { min: -90, max: 90 }],
   ["lon", "site.lon", "num", { min: -180, max: 180 }],
@@ -226,6 +231,7 @@ function parseScalar(kind, rule, raw) {
   if (raw === null || raw === undefined || typeof raw === "object") return INVALID;
   const str = String(raw);
   if (rule.enum) return rule.enum.includes(str) ? str : INVALID;
+  if (PROTO_KEYS.has(str)) return INVALID;          // ids become object keys downstream
   if (!str || (rule.max && str.length > rule.max) || (rule.re && !rule.re.test(str))) return INVALID;
   return str;
 }
@@ -273,7 +279,7 @@ function planeToToken(p) {
 
 /** `fields` are already decoded; anything unreadable falls back to the plane default. */
 function planeFromFields(f, i) {
-  const id = f[0] && ID_RE.test(f[0]) && f[0].length <= 24 ? f[0] : "p" + (i + 1);
+  const id = isSafeId(f[0], 24) ? f[0] : "p" + (i + 1);
   return {
     id,
     name: cleanName(f[6], "Roof face"),
@@ -301,7 +307,7 @@ function flexToToken(f) {
 function flexFromFields(p, i) {
   const pick = (v, list, d) => (list.includes(v) ? v : d);
   return {
-    id: p[0] && ID_RE.test(p[0]) && p[0].length <= 40 ? p[0] : "f" + (i + 1),
+    id: isSafeId(p[0], 40) ? p[0] : "f" + (i + 1),
     kind: pick(p[1], ["ev", "pool", "custom"], "custom"),
     annualKwh: inRange(p[2], 0, 0, 200000),
     source: pick(p[3], ["detected", "manual"], "manual"),
@@ -325,7 +331,9 @@ function flexFromFields(p, i) {
  */
 function splitTokens(raw, report, key) {
   if (!raw) return [];
-  return String(raw).split(";").filter((t) => t !== "").map((tok) => tok.split(":").map((f) => {
+  let toks = String(raw).split(";").filter((t) => t !== "");
+  if (toks.length > MAX_LIST) { flag(report, key); toks = toks.slice(0, MAX_LIST); }
+  return toks.map((tok) => tok.split(":").map((f) => {
     const d = safeDecode(f);
     if (d === null) { flag(report, key); return ""; }
     return d;
@@ -407,7 +415,7 @@ export function fromHash(hash, base, report) {
     if (key === "ovp") {
       const map = {};
       for (const [id, n] of splitTokens(raw, report, key)) {
-        if (id && /^[A-Za-z0-9_.-]{1,24}$/.test(id)) map[id] = inRange(n, 0, 0, 200, true);
+        if (isSafeId(id, 24)) map[id] = inRange(n, 0, 0, 200, true);
       }
       state.system.override.panelsByPlane = Object.keys(map).length ? map : null;
       continue;

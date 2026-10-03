@@ -303,10 +303,13 @@ function renderMethod(state, ctx) {
       "Backup power is the usable storage divided by the house's average daily draw with the flexible loads "
         + "off - nobody charges the cars from a battery in a blackout. A real outage runs longer, since the panels "
         + "recharge the pack by day and people trim load; without a battery a grid-tied array gives no backup at all.",
-      "SCE sizing line. SCE accepts a system up to 150% of your previous 12 months of usage (an affidavit above "
-        + "100%, refused above 150%) and estimates production as CEC-AC kW × 720 × 0.20 × 12, a flat 20% capacity "
-        + "factor. CEC-AC per panel is the PTC rating times inverter efficiency, about 0.90 of nameplate; the "
-        + "Hardware knob sets it. Columns past the line are faded on the grid. Other utilities' rules differ.",
+      state.site.utilityId === "sce"
+        ? "SCE sizing line. SCE accepts a system up to 150% of your previous 12 months of usage (an attestation above "
+          + "100%, refused above 150%) and estimates production as CEC-AC kW × 720 × 0.20 × 12, a flat 20% capacity "
+          + "factor. CEC-AC per panel is the PTC rating times inverter efficiency, about 0.90 of nameplate; the "
+          + "Hardware knob sets it. Columns past the line are faded on the grid."
+        : "System size limit. Each utility caps interconnection relative to your past usage; only SCE's 150% "
+          + "line is drawn on the grid so far. Check your utility's Net Billing rules before oversizing.",
       "Break-even price is the $/W or $/kWh at which NPV is exactly zero, solved directly — NPV is linear in both.",
     ]),
 

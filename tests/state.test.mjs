@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULTS, freshState, clone, getPath, setPath,
   toHash, fromHash, toStorage, fromStorage,
+  MAX_LIST,
 } from "../app/state.js";
 
 /** A state with something changed at every level of nesting. */
@@ -387,4 +388,23 @@ test("legacy unversioned links still parse", () => {
   assert.equal(s.fin.costPerW, 2.1);
   assert.equal(s.roof.planes[0].name, "South face");
   assert.equal(s.roof.planes[0].azimuth, 169);
+});
+
+test("a hostile link cannot name prototype keys or flood the roof and flex lists", () => {
+  const rep = {};
+  const planes = Array.from({ length: 30 }, (_, i) => `__proto__:20:180:200:0:0:n${i}`).join(";");
+  const h = "v=1&util=constructor&plan=__proto__&prov=prototype&roof=" + planes
+    + "&ovp=__proto__:5;constructor:7&flex=" + Array.from({ length: 20 }, (_, i) => `constructor:ev:3000:manual`).join(";");
+  const st = fromHash(h, freshState(), rep);
+  assert.equal(st.site.utilityId, null);
+  assert.equal(st.tariff.planId, null);
+  assert.equal(st.tariff.providerId, null);
+  assert.equal(st.roof.planes.length, MAX_LIST);
+  assert.equal(st.flex.length, MAX_LIST);
+  for (const p of st.roof.planes) assert.match(p.id, /^p\d+$/);
+  for (const f of st.flex) assert.match(f.id, /^f\d+$/);
+  assert.equal(st.system.override.panelsByPlane, null);
+  assert.equal(rep.damaged, true);
+  assert.equal(typeof ({}).polluted, "undefined");
+  assert.equal(Object.getPrototypeOf(st.system.override), Object.prototype);
 });

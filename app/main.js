@@ -38,6 +38,10 @@ import * as loadsTab from "./tabs/loads.js";
 import * as billsTab from "./tabs/bills.js";
 import * as assumptionsTab from "./tabs/assumptions.js";
 
+/** Hash- and storage-supplied ids are looked up in plain objects; never walk the prototype chain. */
+const hasOwn = (obj, key) => !!obj && typeof key === "string" && Object.prototype.hasOwnProperty.call(obj, key);
+const utilityOf = (id) => (ctx.tariffLib && hasOwn(ctx.tariffLib.utilities, id) ? ctx.tariffLib.utilities[id] : null);
+
 const TAB_MODULES = {
   dashboard: dashboardTab, roof: roofTab, loads: loadsTab, bills: billsTab, assumptions: assumptionsTab,
 };
@@ -527,7 +531,7 @@ function planLabel() {
   const s = State.get();
   if (!ctx.tariff) return s.tariff.planId || "";
   const plan = Core.tariff ? Core.tariff.plan(ctx.tariff, s.tariff.planId) : null;
-  const prov = (ctx.tariff.providers || {})[s.tariff.providerId];
+  const prov = hasOwn(ctx.tariff.providers, s.tariff.providerId) ? ctx.tariff.providers[s.tariff.providerId] : null;
   return [(plan && plan.name) || s.tariff.planId, prov && prov.name].filter(Boolean).join(" · ");
 }
 
@@ -659,7 +663,7 @@ function onControlSet(path, value, spec) {
  * plan and provider fall back to that utility's defaults.
  */
 async function switchUtility(utilityId) {
-  if (!ctx.tariffLib || !ctx.tariffLib.utilities[utilityId]) return;
+  if (!utilityOf(utilityId)) return;
   State.update((s) => {
     s.site.utilityId = utilityId;
     s.tariff.planId = null;
@@ -1077,7 +1081,7 @@ async function chooseTariff(zip, opts = {}) {
   }));
 
   const s = State.get();
-  let utilityId = s.site.utilityId && ctx.tariffLib.utilities[s.site.utilityId] ? s.site.utilityId : null;
+  let utilityId = utilityOf(s.site.utilityId) ? s.site.utilityId : null;
   const geo = opts.geo || {};
   if (zip || geo.city || geo.state) {
     const cov = Core.coverage
@@ -1094,7 +1098,7 @@ async function chooseTariff(zip, opts = {}) {
     utilityId = picked;
   }
 
-  const t = ctx.tariffLib.utilities[utilityId];
+  const t = utilityOf(utilityId);
   if (!t) { ctx.coverageOk = false; return false; }
   ctx.coverageOk = true;
   ctx.blockReason = "";
@@ -1123,7 +1127,7 @@ async function chooseTariff(zip, opts = {}) {
   return true;
 }
 
-const utilityName = (id) => ((ctx.tariffLib && ctx.tariffLib.utilities[id] && ctx.tariffLib.utilities[id].utility) || {}).name
+const utilityName = (id) => ((utilityOf(id) || {}).utility || {}).name
   || String(id).toUpperCase();
 
 /** If core/coverage.js failed to load, still never guess: unknown unless the tariff prefixes match. */
