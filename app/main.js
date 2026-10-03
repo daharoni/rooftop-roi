@@ -1087,8 +1087,16 @@ async function adoptLoadSet(loadSet, zipHint) {
       const pool = Core.flexload.detectPool(loadSet, { evKwhByHour: ev ? ev.kwhByHour : null });
       const found = [ev, pool].filter(Boolean);
       State.update((s) => {
+        // A share link (or a saved session) may already describe this household's
+        // detected loads with the schedule the person chose.  The detector owns the
+        // hourly slice and its provenance; the schedule, scale and name stay theirs.
+        const prior = s.flex.filter((f) => f.source === "detected");
+        const merged = found.map((d) => {
+          const keep = prior.find((f) => f.kind === d.kind && (f.id === d.id || prior.filter((g) => g.kind === d.kind).length === 1));
+          return keep ? { ...d, id: keep.id, name: keep.name || d.name, schedule: keep.schedule || d.schedule, scale: keep.scale ?? d.scale } : d;
+        });
         const manual = s.flex.filter((f) => f.source === "manual");
-        s.flex = found.concat(manual);
+        s.flex = merged.concat(manual);
       }, "silent");
     } catch (err) { console.warn("Flexible-load detection failed:", err && err.message); }
   }
