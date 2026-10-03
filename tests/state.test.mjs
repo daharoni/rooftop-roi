@@ -560,3 +560,17 @@ test("storage: ovp, customTariff and scalars that are the wrong shape are flagge
   assert.equal(s.fin.costPerW, 2.4, "an unreadable stored scalar keeps the base value");
   assert.ok(["ovp", "customTariff", "cw"].every((k) => rep.keys.includes(k)));
 });
+
+test("a link whose roof list is unreadable keeps the stored roof instead of a blank default", () => {
+  const base = freshState();
+  base.roof.planes = [{ id: "p1", name: "Kept face", tilt: 25, azimuth: 170, maxPanels: 22,
+    shading: { annual: 0 }, costAdder: 0, polygon: [[34.1, -118.7], [34.1, -118.6]], gutterEdge: null }];
+  const rep = {};
+  const s = fromHash("v=1&roof=%&ovp=p1:%", clone(base), rep);
+  assert.equal(s.roof.planes.length, 1);
+  assert.equal(s.roof.planes[0].name, "Kept face");
+  assert.ok(Array.isArray(s.roof.planes[0].polygon), "the traced outline survives");
+  assert.equal(s.system.override.panelsByPlane, null);
+  assert.equal(rep.damaged, true);
+  assert.deepEqual([...new Set(rep.keys)].sort(), ["ovp", "roof"]);
+});

@@ -442,15 +442,27 @@ function storedOverride(obj, report) {
  * Split a raw (still percent-encoded) list value on `;` then `:`, and decode each
  * field exactly once.  A field that will not decode becomes "" and is reported.
  */
+/**
+ * Split a `;`-separated list of `:`-separated tokens, decoding each field exactly once.
+ * A field that will not decode becomes "" (the per-field coercion then falls back to its
+ * default) and the key is flagged.  A token with fewer than two readable fields carries
+ * no usable information and is dropped; when nothing survives from a non-empty list the
+ * result is null and the caller keeps whatever it already had rather than replacing a
+ * stored roof or load list with blank defaults.
+ */
 function splitTokens(raw, report, key) {
   if (!raw) return [];
   let toks = String(raw).split(";").filter((t) => t !== "");
   if (toks.length > MAX_LIST) { flag(report, key); toks = toks.slice(0, MAX_LIST); }
-  return toks.map((tok) => tok.split(":").map((f) => {
+  let damaged = false;
+  const out = toks.map((tok) => tok.split(":").map((f) => {
     const d = safeDecode(f);
-    if (d === null) { flag(report, key); return ""; }
+    if (d === null) { damaged = true; return ""; }
     return d;
-  }));
+  })).filter((fields) => fields.filter((f) => f !== "").length >= 2);
+  if (damaged) flag(report, key);
+  if (!out.length) { if (!damaged) flag(report, key); return null; }
+  return out;
 }
 
 function flag(report, key) {
@@ -543,16 +555,20 @@ export function fromHash(hash, base, report) {
 
   for (const [key, raw] of Object.entries(flat)) {
     if (key === "roof") {
-      state.roof.planes = splitTokens(raw, report, key).map(planeFromFields);
+      const toks = splitTokens(raw, report, key);
+      if (toks) state.roof.planes = toks.map(planeFromFields);     // damaged: keep base
       continue;
     }
     if (key === "flex") {
-      state.flex = splitTokens(raw, report, key).map(flexFromFields);
+      const toks = splitTokens(raw, report, key);
+      if (toks) state.flex = toks.map(flexFromFields);
       continue;
     }
     if (key === "ovp") {
+      const toks = splitTokens(raw, report, key);
+      if (!toks) continue;
       const map = {};
-      for (const [id, n] of splitTokens(raw, report, key)) {
+      for (const [id, n] of toks) {
         if (isSafeId(id, 24)) map[id] = inRange(n, 0, 0, 200, true);
       }
       state.system.override.panelsByPlane = Object.keys(map).length ? map : null;

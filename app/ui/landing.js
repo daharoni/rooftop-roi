@@ -161,7 +161,8 @@ function startPanel(handlers) {
   });
 
   const address = el("input", { type: "text", id: "addr-input", placeholder: "1 Main St, Agoura Hills CA" });
-  const zip = el("input", { type: "text", id: "zip-input", inputMode: "numeric", pattern: "[0-9]{5}", placeholder: "91301", maxLength: 5 });
+  const zip = el("input", { type: "text", id: "zip-input", inputMode: "numeric", pattern: "[0-9]{5}", placeholder: "91301", maxLength: 5,
+    on: { keydown: (e) => { if (e.key === "Enter") { e.preventDefault(); handlers.onZip(zip.value); } } } });
 
   return el("section.panel", {}, [
     el("h2", { text: "Start here" }),

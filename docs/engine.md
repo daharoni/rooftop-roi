@@ -298,7 +298,9 @@ record's first month and `settledAt` the first settlement it is cashed out at. B
 every month belongs to exactly one settled period, the annualised bill, `exportRevenue`,
 `forfeitedCredit` and so every `savings*` figure are computed over whole settled periods,
 divided by `usableDays / 365` as before. A system that never builds a surplus (the 27-panel
-reference) bills identically under every true-up month and every record start.
+reference) bills identically under every true-up month on a whole-year record; on a record
+with a wrapped 13-month period a few dollars of surplus can appear in that one period, so
+the match is to within about $0.50/yr there.
 
 The true-up month matters only for an array that banks a surplus. On the 24-month fixture
 (60 panels, no battery) annual savings run from $5,397 (September) and $5,403 (October) to
