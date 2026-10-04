@@ -12,8 +12,9 @@
 // Units, as returned by Open-Meteo and consumed by core/pv.js:
 //   ghi/dni/dhi/bhi  W/m^2, mean over the hour  (see "preceding hour" note below)
 //   temp             deg C
-//   wind             km/h at 10 m  (NOT m/s — see docs/solar-model.md, this matches the
-//                                   validated reference model)
+//   wind             km/h at 10 m  (Open-Meteo's unit, kept as is in the cache and the
+//                                   weatherYear; core/pv.js converts to m/s for the
+//                                   Sandia cell-temperature term — `units.wind` says which)
 //
 // "Preceding hour" convention: Open-Meteo labels an hourly radiation value with the END of
 // the averaging interval, i.e. the value at UTC label T is the mean over (T-1h, T]. Local
@@ -44,13 +45,45 @@ const HOURS_PER_YEAR = 8760;
 /** Coordinate quantisation for the cache key (~5.5 km). Also all we ever put on the wire. */
 export const CACHE_GRID_DEG = 0.05;
 
+// Network etiquette. Open-Meteo's free tier answers 429 once a client passes its per-minute
+// budget, and it WEIGHTS calls by size (roughly one call per 2 weeks x 10 variables), so an
+// 11-year site costs a few hundred weighted calls however it is split. Fewer, larger
+// requests save round-trips and per-request overhead, not quota.
+/** Timeout (fetch + body) for a ONE-year request; a multi-year request gets half as much
+ *  again per extra year (4 years: 50 s). Measured cold: ~3 s per year, a 4-year response
+ *  is ~1.7 MB of JSON and took 8-14 s from a cold archive. */
+export const REQUEST_TIMEOUT_MS = 20000;
+/** Per-attempt timeout cap for RETRIES (attempts after the first). A retry follows a fast
+ *  429/5xx answer, so it does not need a cold four-year allowance again.
+ *
+ *  Worst case for one request with the defaults (4 years, 3 retries): first attempt 50 s
+ *  + 3 retries x 20 s + backoff 1.5 + 3 + 6 s = 120.5 s; if the server sends Retry-After
+ *  at the 30 s cap every time, 50 + 60 + 90 = 200 s. Reading a final error body adds at
+ *  most ERROR_BODY_TIMEOUT_MS and never outlives the attempt's own timeout or an abort.
+ *  (Before this cap: 4 x 50 s + backoff = 210.5 s, or 290 s with Retry-After.) */
+export const RETRY_TIMEOUT_CAP_MS = 20000;
+/** A final non-OK response's body (for the server's `reason`) gets at most this long. */
+export const ERROR_BODY_TIMEOUT_MS = 5000;
+/** Retries after a 429 or 5xx, with exponential backoff (1.5 s, 3 s, 6 s). */
+export const MAX_RETRIES = 3;
+export const RETRY_BASE_DELAY_MS = 1500;
+/** A server-sent Retry-After is honoured up to this cap, so a page never hangs for long. */
+const MAX_RETRY_AFTER_MS = 30000;
+/** Consecutive uncached years fetched in ONE request (start_date..end_date spans years).
+ *  11 default years = 3 requests (4+4+3) instead of 11; each is still cached per year. */
+export const MAX_YEARS_PER_REQUEST = 4;
+/** A year whose response is more than this fraction null (in any modelled variable) is
+ *  rejected rather than silently modelled as darkness, and never cached. */
+export const MAX_NULL_FRACTION = 0.2;
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
 /**
  * The only error type `fetchYears` ever rejects with. `userMessage` is safe to show in the
- * UI verbatim; `code` is one of "offline" | "http" | "api" | "timeout" | "aborted" | "data".
+ * UI verbatim; `code` is one of "offline" | "http" | "api" | "rate-limited" | "timeout" |
+ * "aborted" | "data".
  */
 export class WeatherUnavailableError extends Error {
   constructor(message, { code = "offline", userMessage, cause, year } = {}) {
@@ -484,6 +517,11 @@ export function toWeatherYear(raw, { year, lat, lon, tz: tzOverride } = {}) {
   const ws = hourly.wind_speed_10m || [];
 
   let missing = 0;
+  // Nulls per modelled variable (bhi is fetched but unused, so it does not count). A stray
+  // null is filled (0, or 15 C) as before; a mostly-null year is an outage, not weather —
+  // modelling it would report ~0 kWh/kW and, worse, get cached for good.
+  const nulls = [0, 0, 0, 0, 0];
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   for (let i = 0; i < HOURS_PER_YEAR; i++) {
     // Radiation is the mean over the PRECEDING hour, so the local hour starting at
     // starts[i] is the sample labelled one hour later.
@@ -493,6 +531,11 @@ export function toWeatherYear(raw, { year, lat, lon, tz: tzOverride } = {}) {
       temp[i] = 15;
       continue;
     }
+    if (!isNum(sw[j])) nulls[0]++;
+    if (!isNum(dn[j])) nulls[1]++;
+    if (!isNum(df[j])) nulls[2]++;
+    if (!isNum(t2[j])) nulls[3]++;
+    if (!isNum(ws[j])) nulls[4]++;
     ghi[i] = Math.max(0, num(sw[j], 0));
     dni[i] = Math.max(0, num(dn[j], 0));
     dhi[i] = Math.max(0, num(df[j], 0));
@@ -500,6 +543,18 @@ export function toWeatherYear(raw, { year, lat, lon, tz: tzOverride } = {}) {
     temp[i] = num(t2[j], 15);
     wind[i] = Math.max(0, num(ws[j], 0));
   }
+  const nullHours = Math.max(...nulls);
+  if (nullHours > HOURS_PER_YEAR * MAX_NULL_FRACTION)
+    throw new WeatherUnavailableError(
+      `Weather response for ${year} is ${Math.round((100 * nullHours) / HOURS_PER_YEAR)}% empty (null) values`,
+      {
+        code: "data",
+        year,
+        userMessage:
+          `The weather service returned empty data for ${year}, so solar production can't ` +
+          "be estimated right now. Try again later — the rest of the tool still works.",
+      },
+    );
   if (missing > HOURS_PER_YEAR * 0.02)
     throw new WeatherUnavailableError(
       `Weather response for ${year} covers only ${HOURS_PER_YEAR - missing}/8760 hours`,
@@ -524,6 +579,7 @@ export function toWeatherYear(raw, { year, lat, lon, tz: tzOverride } = {}) {
     lat: num(raw.latitude, lat ?? null),
     lon: num(raw.longitude, lon ?? null),
     missingHours: missing,
+    nullHours,
     source: "open-meteo-archive-era5",
     units: { irradiance: "W/m2", temp: "degC", wind: "km/h" },
   };
@@ -533,14 +589,15 @@ export function toWeatherYear(raw, { year, lat, lon, tz: tzOverride } = {}) {
 // Fetching
 // ---------------------------------------------------------------------------
 
-function archiveUrl({ lat, lon, year, elevationM, today }) {
-  // One extra day either side so every local-standard hour of `year` — including the
-  // UTC+offset overhang at both ends — has a sample.
+function archiveUrl({ lat, lon, year, endYear = year, elevationM, today }) {
+  // One extra day either side so every local-standard hour of every year — including the
+  // UTC+offset overhang at both ends — has a sample. `start_date`..`end_date` may span
+  // several years; the response is then split per year (sliceYear) and cached per year.
   const start = `${year - 1}-12-31`;
   const lastAvailable = new Date(
     (today ? today.getTime() : Date.now()) - ARCHIVE_LAG_DAYS * DAY_MS,
   );
-  const wanted = Date.UTC(year + 1, 0, 1);
+  const wanted = Date.UTC(endYear + 1, 0, 1);
   const endMs = Math.min(wanted, lastAvailable.getTime());
   const e = new Date(endMs);
   const end = `${e.getUTCFullYear()}-${String(e.getUTCMonth() + 1).padStart(2, "0")}-${String(
@@ -558,69 +615,271 @@ function archiveUrl({ lat, lon, year, elevationM, today }) {
   return `${ARCHIVE_URL}?${p.toString()}`;
 }
 
-async function fetchRawYear({ lat, lon, year, elevationM, signal, fetchImpl, today }) {
-  const url = archiveUrl({ lat, lon, year, elevationM, today });
+/**
+ * Cut one year's window (Dec 31 of the year before .. Jan 1 of the year after, local labels)
+ * out of a possibly multi-year response. The result has exactly the shape a single-year
+ * request returns, so the per-year cache entries are interchangeable with older ones.
+ * Open-Meteo uses one fixed UTC offset per request, so a slice keeps a valid time axis.
+ */
+export function sliceYear(raw, year) {
+  const time = raw?.hourly?.time;
+  if (!Array.isArray(time)) return raw;
+  const from = `${year - 1}-12-31T00:00`;
+  const to = `${year + 1}-01-01T23:59`;
+  let a = 0;
+  while (a < time.length && time[a] < from) a++;
+  let b = time.length;
+  while (b > a && time[b - 1] > to) b--;
+  if (a === 0 && b === time.length) return raw; // already one year: keep it as is
+  const hourly = {};
+  for (const [k, v] of Object.entries(raw.hourly))
+    hourly[k] = Array.isArray(v) && v.length === time.length ? v.slice(a, b) : v;
+  return { ...raw, hourly };
+}
+
+const sleep = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortedError());
+    const t = setTimeout(() => {
+      signal?.removeEventListener?.("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(t);
+      reject(abortedError());
+    }
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
+
+function abortedError(year, cause, label = year) {
+  return new WeatherUnavailableError(`Weather request${label ? ` for ${label}` : ""} aborted`, {
+    code: "aborted",
+    year,
+    cause,
+    userMessage: "Weather download cancelled.",
+  });
+}
+
+/** Retry-After as milliseconds (seconds or an HTTP date), or null. */
+function retryAfterMs(res) {
+  let v = null;
+  try {
+    v = res?.headers?.get?.("retry-after") ?? null;
+  } catch {
+    return null;
+  }
+  if (v == null || v === "") return null;
+  const secs = Number(v);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const at = Date.parse(v);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
+
+/** "20 s", "1 s" for 999 ms is wrong, so sub-second spans are given in ms. */
+function formatDuration(ms) {
+  return ms < 1000 ? `${Math.max(0, Math.round(ms))} ms` : `${Math.round(ms / 1000)} s`;
+}
+
+/**
+ * Read a non-OK response's JSON `reason`, bounded: ERROR_BODY_TIMEOUT_MS, the attempt's
+ * own timeout, or an abort (all through `ctrl`) end the read, and a body that ignores the
+ * abort is abandoned rather than awaited. Never rejects; "" when there is no reason.
+ */
+async function readErrorDetail(res, ctrl, signal) {
+  const stop = ctrl ? ctrl.signal : signal;
+  let timer;
+  let onStop;
+  const giveUp = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      ctrl?.abort();
+      resolve(null);
+    }, ERROR_BODY_TIMEOUT_MS);
+    onStop = () => resolve(null);
+    if (stop?.aborted) resolve(null);
+    else stop?.addEventListener?.("abort", onStop, { once: true });
+  });
+  try {
+    const body = await Promise.race([
+      Promise.resolve()
+        .then(() => res.json())
+        .catch(() => null),
+      giveUp,
+    ]);
+    const reason = body?.reason;
+    return typeof reason === "string" ? reason.slice(0, 200) : "";
+  } finally {
+    clearTimeout(timer);
+    stop?.removeEventListener?.("abort", onStop);
+  }
+}
+
+/**
+ * ONE attempt: fetch + read the body under a timeout. The caller's `signal` is linked in,
+ * so either the user (code "aborted") or the clock (code "timeout") can stop it.
+ * Resolves `{ json }` or `{ status, res, detail }` for a non-2xx answer; rejects typed.
+ * For a non-2xx answer the caller will NOT retry (`willRetry(status)` false), the error
+ * body is read here, inside the same timeout/abort scope, so it can't hang.
+ * `label` names the request in messages ("2019" or "2019-2022").
+ */
+async function fetchOnce(url, { year, label = year, signal, doFetch, timeoutMs, willRetry }) {
+  const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+  let timedOut = false;
+  const onAbort = () => ctrl?.abort();
+  if (signal?.aborted) throw abortedError(year, undefined, label);
+  signal?.addEventListener?.("abort", onAbort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl?.abort();
+  }, timeoutMs);
+  const failed = (cause) => {
+    if (timedOut)
+      return new WeatherUnavailableError(
+        `Weather request for ${label} timed out after ${formatDuration(timeoutMs)}`,
+        {
+          code: "timeout",
+          year,
+          cause,
+          userMessage:
+            "The weather service (Open-Meteo) is taking too long to answer, so solar " +
+            "production can't be estimated right now. Try again in a minute — the rest of " +
+            "the tool still works.",
+        },
+      );
+    if (signal?.aborted || cause?.name === "AbortError") return abortedError(year, cause, label);
+    return null;
+  };
+  try {
+    let res;
+    try {
+      res = await doFetch(url, {
+        signal: ctrl ? ctrl.signal : signal,
+        headers: { Accept: "application/json" },
+      });
+    } catch (cause) {
+      throw (
+        failed(cause) ||
+        new WeatherUnavailableError(`Weather request for ${label} failed: ${cause?.message}`, {
+          code: "offline",
+          year,
+          cause,
+          userMessage:
+            "Couldn't reach the weather service (Open-Meteo). Solar production can't be " +
+            "estimated until you're back online; the rest of the tool still works.",
+        })
+      );
+    }
+    if (!res.ok) {
+      const detail = willRetry?.(res.status) ? "" : await readErrorDetail(res, ctrl, signal);
+      if (signal?.aborted) throw abortedError(year, undefined, label);
+      return { status: res.status, res, detail };
+    }
+    try {
+      return { json: await res.json() };
+    } catch (cause) {
+      throw (
+        failed(cause) ||
+        new WeatherUnavailableError(`Weather response for ${label} was not JSON`, {
+          code: "data",
+          year,
+          cause,
+        })
+      );
+    }
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.("abort", onAbort);
+  }
+}
+
+/**
+ * Fetch one archive request, retrying 429 and 5xx answers with exponential backoff
+ * (honouring Retry-After). Requests stay strictly sequential — the API asks for that.
+ */
+async function fetchRawRange({
+  lat,
+  lon,
+  year,
+  endYear = year,
+  elevationM,
+  signal,
+  fetchImpl,
+  today,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+  retries = MAX_RETRIES,
+  retryDelayMs = RETRY_BASE_DELAY_MS,
+}) {
+  const url = archiveUrl({ lat, lon, year, endYear, elevationM, today });
   const doFetch = fetchImpl || (typeof fetch === "function" ? fetch : null);
   if (!doFetch)
     throw new WeatherUnavailableError("No fetch implementation available", {
       code: "offline",
       year,
     });
-  let res;
-  try {
-    res = await doFetch(url, { signal, headers: { Accept: "application/json" } });
-  } catch (cause) {
-    const aborted = cause?.name === "AbortError";
-    throw new WeatherUnavailableError(`Weather request for ${year} failed: ${cause?.message}`, {
-      code: aborted ? "aborted" : "offline",
+  const span = endYear > year ? `${year}-${endYear}` : `${year}`;
+  const limitMs = timeoutMs * (1 + 0.5 * (endYear - year));
+  const isTransient = (status) => status === 429 || status >= 500;
+  for (let attempt = 0; ; attempt++) {
+    // Retries get at most RETRY_TIMEOUT_CAP_MS each (see its comment for the worst case).
+    const attemptMs = attempt === 0 ? limitMs : Math.min(limitMs, RETRY_TIMEOUT_CAP_MS);
+    const r = await fetchOnce(url, {
       year,
-      cause,
-      userMessage: aborted
-        ? "Weather download cancelled."
-        : "Couldn't reach the weather service (Open-Meteo). Solar production can't be " +
-          "estimated until you're back online; the rest of the tool still works.",
+      label: span,
+      signal,
+      doFetch,
+      timeoutMs: attemptMs,
+      willRetry: (status) => isTransient(status) && attempt < retries,
     });
-  }
-  if (!res.ok) {
-    let detail = "";
-    try {
-      detail = ((await res.json())?.reason || "").slice(0, 200);
-    } catch {
-      /* body was not JSON */
+    if (r.json !== undefined) {
+      const json = r.json;
+      if (json?.error)
+        throw new WeatherUnavailableError(`Weather API error for ${span}: ${json.reason}`, {
+          code: "api",
+          year,
+          userMessage: `The weather service rejected the request for ${span}: ${json.reason}`,
+        });
+      return json;
     }
+    const { status, res, detail } = r;
+    const transient = isTransient(status);
+    if (transient && attempt < retries) {
+      const backoff = retryDelayMs * 2 ** attempt;
+      const hinted = retryAfterMs(res);
+      await sleep(hinted != null ? Math.min(hinted, MAX_RETRY_AFTER_MS) : backoff, signal).catch(
+        () => {
+          throw abortedError(year, undefined, span);
+        },
+      );
+      continue;
+    }
+    const tries = transient ? ` after ${attempt + 1} attempts` : "";
     throw new WeatherUnavailableError(
-      `Weather service returned HTTP ${res.status} for ${year}${detail ? ": " + detail : ""}`,
-      {
-        code: res.status === 429 ? "api" : "http",
-        year,
-        userMessage:
-          res.status === 429
-            ? "The free weather service is rate-limiting this browser. Wait a minute and try again."
-            : `The weather service couldn't return ${year} (HTTP ${res.status}). Try again later.`,
-      },
+      `Weather service returned HTTP ${status} for ${span}${tries}${detail ? ": " + detail : ""}`,
+      status === 429
+        ? {
+            code: "rate-limited",
+            year,
+            userMessage:
+              "The free weather service (Open-Meteo) is rate-limiting this browser, so solar " +
+              "production can't be estimated right now. Wait a minute and try again — the " +
+              "rest of the tool still works.",
+          }
+        : {
+            code: "http",
+            year,
+            userMessage: `The weather service couldn't return ${span} (HTTP ${status}). Try again later.`,
+          },
     );
   }
-  let json;
-  try {
-    json = await res.json();
-  } catch (cause) {
-    throw new WeatherUnavailableError(`Weather response for ${year} was not JSON`, {
-      code: "data",
-      year,
-      cause,
-    });
-  }
-  if (json?.error)
-    throw new WeatherUnavailableError(`Weather API error for ${year}: ${json.reason}`, {
-      code: "api",
-      year,
-      userMessage: `The weather service rejected the request for ${year}: ${json.reason}`,
-    });
-  return json;
 }
 
 /**
  * Fetch (or read from cache) one weather year per entry in `years`.
+ *
+ * Cached years are read first; each run of consecutive uncached years is then fetched in
+ * requests of up to MAX_YEARS_PER_REQUEST years, one at a time, and split back into one
+ * cache entry per year. A year is validated (toWeatherYear: coverage, nulls) BEFORE it is
+ * cached, and a cached entry that no longer validates is treated as a miss and refetched,
+ * so an empty response can never poison the cache.
  *
  * @param {object} o
  * @param {number} o.lat
@@ -631,7 +890,11 @@ async function fetchRawYear({ lat, lon, year, elevationM, signal, fetchImpl, tod
  * @param {object} [o.cache]          { get(key), set(key, value) }; defaults per runtime
  * @param {Function} [o.fetchImpl]    injectable fetch (tests)
  * @param {boolean} [o.cacheOnly]     never touch the network; throw if a year is missing
- * @param {Function} [o.onProgress]   ({ year, index, total, fromCache }) => void
+ * @param {Function} [o.onProgress]   ({ year, index, total, fromCache }) => void, in year order
+ * @param {number} [o.timeoutMs]      per one-year request (+50% per extra year); default REQUEST_TIMEOUT_MS
+ * @param {number} [o.retries]        429/5xx retries; default MAX_RETRIES
+ * @param {number} [o.retryDelayMs]   first backoff; default RETRY_BASE_DELAY_MS
+ * @param {number} [o.yearsPerRequest] default MAX_YEARS_PER_REQUEST (1 = one per year)
  * @returns {Promise<object[]>} weatherYear[] in the order of `years`
  * @throws {WeatherUnavailableError} the only error type this function rejects with
  */
@@ -646,6 +909,10 @@ export async function fetchYears({
   cacheOnly = false,
   today,
   onProgress,
+  timeoutMs,
+  retries,
+  retryDelayMs,
+  yearsPerRequest = MAX_YEARS_PER_REQUEST,
 } = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon))
     throw new WeatherUnavailableError("fetchYears needs a numeric lat/lon", {
@@ -656,39 +923,58 @@ export async function fetchYears({
     .map(Number)
     .filter(Number.isFinite);
 
-  const out = [];
+  // Pass 1: everything the cache can answer (and still validates).
+  const have = new Array(list.length).fill(null);
+  const cached = new Array(list.length).fill(false);
   for (let i = 0; i < list.length; i++) {
-    const year = list[i];
-    const key = cacheKey(lat, lon, year);
     let raw = null;
-    let fromCache = false;
     try {
-      raw = await cache?.get?.(key);
-      fromCache = !!raw;
+      raw = await cache?.get?.(cacheKey(lat, lon, list[i]));
     } catch {
       raw = null; // a broken cache must never break the fetch
     }
-    if (!raw) {
+    if (!raw) continue;
+    try {
+      have[i] = toWeatherYear(raw, { year: list[i], lat, lon });
+      cached[i] = true;
+    } catch {
+      /* a stale or empty entry is a miss: refetch it below (and overwrite it) */
+    }
+  }
+
+  // Pass 2: in year order, fetching runs of consecutive missing years in one request.
+  const per = Math.max(1, Math.floor(yearsPerRequest) || 1);
+  for (let i = 0; i < list.length; i++) {
+    if (!have[i]) {
+      const year = list[i];
       if (cacheOnly)
-        throw new WeatherUnavailableError(`No cached weather for ${key}`, {
+        throw new WeatherUnavailableError(`No cached weather for ${cacheKey(lat, lon, year)}`, {
           code: "offline",
           year,
           userMessage:
             "No stored weather for this location and the network is unavailable, so solar " +
             "production can't be estimated yet.",
         });
-      raw = await fetchRawYear({ lat, lon, year, elevationM, signal, fetchImpl, today });
-      try {
-        // An abort that lands after the response (Forget my data) still skips the write.
-        if (!signal?.aborted) await cache?.set?.(key, raw);
-      } catch {
-        /* cache write failures are not user-visible */
+      let j = i + 1;
+      while (j < list.length && j - i < per && !have[j] && list[j] === list[j - 1] + 1) j++;
+      const endYear = list[j - 1];
+      const json = await fetchRawRange({
+        lat, lon, year, endYear, elevationM, signal, fetchImpl, today, timeoutMs, retries, retryDelayMs,
+      });
+      for (let k = i; k < j; k++) {
+        const raw = j - i > 1 ? sliceYear(json, list[k]) : json;
+        have[k] = toWeatherYear(raw, { year: list[k], lat, lon }); // throws BEFORE caching
+        try {
+          // An abort that lands after the response (Forget my data) still skips the write.
+          if (!signal?.aborted) await cache?.set?.(cacheKey(lat, lon, list[k]), raw);
+        } catch {
+          /* cache write failures are not user-visible */
+        }
       }
     }
-    out.push(toWeatherYear(raw, { year, lat, lon }));
-    onProgress?.({ year, index: i, total: list.length, fromCache });
+    onProgress?.({ year: list[i], index: i, total: list.length, fromCache: cached[i] });
   }
-  return out;
+  return have;
 }
 
 /**
@@ -772,6 +1058,7 @@ export default {
   latestCompleteYear,
   memoryCache,
   offsetFromLongitude,
+  sliceYear,
   standardHourStartsUtc,
   standardOffsetSeconds,
   toWeatherYear,

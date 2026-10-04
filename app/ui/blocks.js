@@ -45,3 +45,11 @@ export function kv(pairs) {
 }
 
 export default { card, tiles, tile, kv };
+
+/**
+ * The one disclaimer: under the dashboard, on the landing page and in the
+ * copied summary, in the same words everywhere.
+ */
+export const DISCLAIMER = "Estimates from a model, not a quote and not financial or tax advice. Utility rates, "
+  + "export credits and incentives change, sometimes several times a year. Before you sign anything, verify the "
+  + "rates with your utility, the price and production with an installer, and any tax treatment with a tax professional.";

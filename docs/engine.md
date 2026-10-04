@@ -1,6 +1,7 @@
 # The simulation core
 
-`core/engine.js`, `core/finance.js` and `core/optimizer.js`: what they compute, in what
+`core/engine.js`, `core/finance.js` and `core/optimizer.js` (plus `core/periods.js`, the
+shared TOU period/holiday lookup the engine imports): what they compute, in what
 order, and every approximation they make. Nothing here touches the DOM or the network.
 The contracts (`LoadSet`, `Plane`, `FlexLoad`, `Tariff`) are in
 [ARCHITECTURE.md](ARCHITECTURE.md); this file is the arithmetic.
@@ -55,8 +56,13 @@ by `usableDays / 365`, so a 60-day outage no longer reads as a smaller household
 299.04 usable days and is refused.
 
 **Holidays** use the weekend schedule: New Year's, Presidents', Memorial, Independence,
-Labor, Veterans, Thanksgiving, Christmas — on the actual date, not the observed one,
-because that is what SCE bills.
+Labor, Veterans, Thanksgiving, Christmas. A fixed-date holiday that falls on a Sunday is
+also observed the Monday after, so that Monday bills as a weekend day; a Saturday holiday
+is **not** moved to the Friday (SCE and SDG&E both say "no change will be made for
+holidays falling on Saturday"). Weekends and holidays (actual or observed) all get
+`dayType` 1. The rule lives in one place, `core/periods.js` (`holidaysForYear`, `billsAsWeekend`,
+`periodFor`, `periodGrid`), which both `core/engine.js` and `core/tariff.js` import, so
+the engine and the tariff library cannot disagree about which period an hour is in.
 
 ---
 
@@ -121,7 +127,9 @@ baselineRegion, baselineRegionFallback, baselineKwhPerDay, baselineCreditPct,
 baselineCreditPerKwh, trueUpMonth }` — so the method panel can show what was used. The
 engine mirrors the small `core/tariff.js` helpers it needs instead of importing them,
 because `tariff.js` is not in the worker bundle; `tests/engine.test.mjs` asserts the copies
-agree with the originals on all three shipped files.
+agree with the originals on all three shipped files. The period lookup is the exception:
+`core/periods.js` has no dependencies, is bundled into the worker ahead of the engine
+(as `TouPeriods`), and is shared, not mirrored.
 
 ---
 
@@ -488,11 +496,11 @@ an unknown one.
 ## 10. The worker bundle
 
 `core/worker.js` is a classic script, not a module: it expects `SolarEngine`,
-`SolarFinance`, `SolarOptimizer` and `FlexLoad` to already exist in its scope, and speaks
+`SolarFinance`, `SolarOptimizer`, `FlexLoad` and `TouPeriods` to already exist in its scope, and speaks
 the `init` / `grid` / `detail` / `validate` / `progress` protocol documented at the top of
 the file.
 
-`node core/bundle-for-worker.mjs` concatenates `core/flexload.js`, `core/engine.js`,
+`node core/bundle-for-worker.mjs` concatenates `core/flexload.js`, `core/periods.js`, `core/engine.js`,
 `core/finance.js`, `core/optimizer.js` and `core/worker.js` into **`app/worker-bundle.js`,
 the one generated file in the repo — and it is committed**, so the site stays a no-build
 static deploy. Each module becomes an IIFE assigned to its namespace; three mechanical

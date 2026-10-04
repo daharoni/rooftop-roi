@@ -18,11 +18,14 @@ import {
   WeatherUnavailableError,
   cacheKey,
   defaultYears,
+  ERROR_BODY_TIMEOUT_MS,
+  RETRY_TIMEOUT_CAP_MS,
   fetchYears,
   fileCache,
   latestCompleteYear,
   memoryCache,
   offsetFromLongitude,
+  sliceYear,
   standardHourStartsUtc,
   standardOffsetSeconds,
   toWeatherYear,
@@ -284,23 +287,326 @@ test("an aborted download is reported as 'aborted', not as an outage", async () 
   assert.equal(err.code, "aborted");
 });
 
-test("HTTP failures are typed, and rate limiting says so", async () => {
-  const mk = (status) => async () => ({
-    ok: false,
-    status,
-    json: async () => ({ reason: "nope" }),
-  });
-  const e429 = await fetchYears({ ...site, cache: memoryCache(), fetchImpl: mk(429) }).then(
+// Retries use a 1 ms backoff here so the suite stays fast; production waits 1.5/3/6 s.
+const FAST = { retryDelayMs: 1, timeoutMs: 2000 };
+const okResponse = (raw) => ({ ok: true, status: 200, json: async () => raw });
+const httpResponse = (status, headers = {}) => ({
+  ok: false,
+  status,
+  headers: { get: (h) => headers[h.toLowerCase()] ?? null },
+  json: async () => ({ reason: "nope" }),
+});
+/** A fetch that answers from a script of responses, one per call, and counts calls. */
+function scripted(...steps) {
+  const f = async (url, init) => {
+    const step = steps[Math.min(f.calls++, steps.length - 1)];
+    return typeof step === "function" ? step(url, init) : step;
+  };
+  f.calls = 0;
+  return f;
+}
+
+test("HTTP failures are typed: 429 retried 3 times then 'rate-limited', 4xx not retried", async () => {
+  const f429 = scripted(httpResponse(429));
+  const e429 = await fetchYears({ ...site, ...FAST, cache: memoryCache(), fetchImpl: f429 }).then(
     null,
     (e) => e,
   );
-  assert.equal(e429.code, "api");
+  assert.ok(e429 instanceof WeatherUnavailableError);
+  assert.equal(e429.code, "rate-limited");
   assert.match(e429.userMessage, /rate-limit/i);
-  const e500 = await fetchYears({ ...site, cache: memoryCache(), fetchImpl: mk(500) }).then(
+  assert.equal(f429.calls, 4, "one try plus three retries");
+
+  const f400 = scripted(httpResponse(400));
+  const e400 = await fetchYears({ ...site, ...FAST, cache: memoryCache(), fetchImpl: f400 }).then(
     null,
     (e) => e,
   );
-  assert.equal(e500.code, "http");
+  assert.equal(e400.code, "http");
+  assert.equal(f400.calls, 1, "a client error is not retried");
+});
+
+test("rate limiting: a 429 followed by success recovers transparently", async () => {
+  const raw = fakeResponse({ year: 2020 });
+  const f = scripted(httpResponse(429, { "retry-after": "0" }), okResponse(raw));
+  const cache = memoryCache();
+  const years = await fetchYears({ ...site, ...FAST, cache, fetchImpl: f });
+  assert.equal(f.calls, 2);
+  assert.equal(years[0].ghi.length, 8760);
+  assert.ok(await cache.get(cacheKey(34.15, -118.75, 2020)), "the recovered year is cached");
+});
+
+test("server errors: 500 three times then success recovers; 500 forever is 'http' after 4 tries", async () => {
+  const raw = fakeResponse({ year: 2020 });
+  const f = scripted(httpResponse(500), httpResponse(502), httpResponse(503), okResponse(raw));
+  const years = await fetchYears({ ...site, ...FAST, cache: memoryCache(), fetchImpl: f });
+  assert.equal(f.calls, 4);
+  assert.equal(years.length, 1);
+
+  const dead = scripted(httpResponse(500));
+  const err = await fetchYears({ ...site, ...FAST, cache: memoryCache(), fetchImpl: dead }).then(
+    null,
+    (e) => e,
+  );
+  assert.equal(err.code, "http");
+  assert.equal(dead.calls, 4);
+  assert.match(err.message, /HTTP 500/);
+});
+
+/** A fetch that never answers, but rejects like the real one when its signal aborts. */
+const hangingFetch = () =>
+  scripted((url, init) =>
+    new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => {
+        const e = new Error("This operation was aborted");
+        e.name = "AbortError";
+        reject(e);
+      });
+    }),
+  );
+
+test("a request that never answers times out as 'timeout' (and is not mistaken for a cancel)", async () => {
+  const f = hangingFetch();
+  const t0 = Date.now();
+  const err = await fetchYears({ ...site, retryDelayMs: 1, timeoutMs: 40, cache: memoryCache(), fetchImpl: f }).then(
+    null,
+    (e) => e,
+  );
+  assert.ok(err instanceof WeatherUnavailableError);
+  assert.equal(err.code, "timeout");
+  assert.match(err.userMessage, /too long/);
+  assert.equal(f.calls, 1, "a timeout is surfaced, not retried");
+  assert.ok(Date.now() - t0 < 1500);
+});
+
+test("a user abort mid-request or mid-backoff is 'aborted', not 'timeout'", async () => {
+  const ctrl = new AbortController();
+  const p = fetchYears({ ...site, timeoutMs: 5000, signal: ctrl.signal, cache: memoryCache(), fetchImpl: hangingFetch() });
+  setTimeout(() => ctrl.abort(), 10);
+  assert.equal((await p.then(null, (e) => e)).code, "aborted");
+
+  const ctrl2 = new AbortController();
+  const f = scripted(httpResponse(429));
+  const p2 = fetchYears({ ...site, retryDelayMs: 5000, signal: ctrl2.signal, cache: memoryCache(), fetchImpl: f });
+  setTimeout(() => ctrl2.abort(), 10);
+  assert.equal((await p2.then(null, (e) => e)).code, "aborted");
+  assert.equal(f.calls, 1, "the abort cut the backoff short");
+});
+
+/** A non-OK response whose body never finishes. `honoursAbort` = rejects when the signal
+ *  aborts (like a real fetch body); false = ignores it entirely (the worst case). */
+const stalledErrorResponse = (status, honoursAbort, init) => ({
+  ok: false,
+  status,
+  headers: { get: () => null },
+  json: () =>
+    new Promise((_, reject) => {
+      if (!honoursAbort) return;
+      init.signal.addEventListener("abort", () => {
+        const e = new Error("This operation was aborted");
+        e.name = "AbortError";
+        reject(e);
+      });
+    }),
+});
+
+test("a final error response whose body stalls can't hang: abort and timeout both end it", async () => {
+  assert.equal(ERROR_BODY_TIMEOUT_MS, 5000);
+  // User abort while the 400's body is stalled: 'aborted', promptly.
+  const ctrl = new AbortController();
+  const t0 = Date.now();
+  const p = fetchYears({
+    ...site, timeoutMs: 10000, signal: ctrl.signal, cache: memoryCache(),
+    fetchImpl: scripted((url, init) => stalledErrorResponse(400, true, init)),
+  });
+  setTimeout(() => ctrl.abort(), 20);
+  const e1 = await p.then(null, (e) => e);
+  assert.equal(e1.code, "aborted");
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+
+  // A body that ignores the abort altogether: the attempt's timeout still ends the read,
+  // and the HTTP status (not a timeout) is what is reported.
+  const t1 = Date.now();
+  const f = scripted((url, init) => stalledErrorResponse(400, false, init));
+  const e2 = await fetchYears({ ...site, timeoutMs: 60, cache: memoryCache(), fetchImpl: f }).then(null, (e) => e);
+  assert.equal(e2.code, "http");
+  assert.match(e2.message, /HTTP 400 for 2020$/);
+  assert.equal(f.calls, 1);
+  assert.ok(Date.now() - t1 < 1000, `took ${Date.now() - t1} ms`);
+
+  // A body that is fine still contributes the server's reason.
+  const e3 = await fetchYears({ ...site, ...FAST, cache: memoryCache(), fetchImpl: scripted(httpResponse(400)) }).then(null, (e) => e);
+  assert.match(e3.message, /HTTP 400 for 2020: nope$/);
+});
+
+test("timeout messages name the whole year span and never say '0 s'", async () => {
+  const years = [2019, 2020, 2021, 2022];
+  const err = await fetchYears({
+    ...site, years, timeoutMs: 40, cache: memoryCache(), fetchImpl: hangingFetch(),
+    today: new Date("2026-09-16T00:00:00Z"),
+  }).then(null, (e) => e);
+  assert.equal(err.code, "timeout");
+  // 40 ms per year, +50% per extra year: 100 ms for four.
+  assert.match(err.message, /for 2019-2022 timed out after 100 ms$/);
+  assert.equal(err.year, 2019);
+
+  const ctrl = new AbortController();
+  const p = fetchYears({ ...site, years, timeoutMs: 5000, signal: ctrl.signal, cache: memoryCache(), fetchImpl: hangingFetch(), today: new Date("2026-09-16T00:00:00Z") });
+  setTimeout(() => ctrl.abort(), 10);
+  assert.match((await p.then(null, (e) => e)).message, /for 2019-2022 aborted$/);
+});
+
+test("retries after the first attempt get at most RETRY_TIMEOUT_CAP_MS each", async () => {
+  assert.equal(RETRY_TIMEOUT_CAP_MS, 20000);
+  // Record every timer the module arms; run them fast so the test stays quick.
+  const realSetTimeout = globalThis.setTimeout;
+  const armed = [];
+  globalThis.setTimeout = (fn, ms, ...a) => {
+    armed.push(ms);
+    return realSetTimeout(fn, Math.min(ms, 5), ...a);
+  };
+  let err;
+  try {
+    const hang = hangingFetch();
+    const f = scripted(httpResponse(503), (url, init) => hang(url, init));
+    err = await fetchYears({
+      ...site, years: [2019, 2020, 2021, 2022], retryDelayMs: 1, cache: memoryCache(), fetchImpl: f,
+      today: new Date("2026-09-16T00:00:00Z"),
+    }).then(null, (e) => e);
+    assert.equal(f.calls, 2);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+  assert.equal(err.code, "timeout");
+  assert.match(err.message, /2019-2022 timed out after 20 s$/);
+  // First attempt 50 s (20 s + 50% per extra year), the retry capped at 20 s.
+  assert.equal(armed.filter((ms) => ms === 50000).length, 1, `timers ${armed}`);
+  assert.ok(armed.includes(20000), `timers ${armed}`);
+});
+
+test("an all-null (or mostly null) response is a typed 'data' error and is never cached", async () => {
+  const allNull = fakeResponse({ year: 2020 });
+  for (const k of Object.keys(allNull.hourly)) if (k !== "time") allNull.hourly[k] = allNull.hourly[k].map(() => null);
+  const cache = memoryCache();
+  const err = await fetchYears({ ...site, ...FAST, cache, fetchImpl: scripted(okResponse(allNull)) }).then(
+    null,
+    (e) => e,
+  );
+  assert.ok(err instanceof WeatherUnavailableError);
+  assert.equal(err.code, "data");
+  assert.equal(err.year, 2020);
+  assert.match(err.userMessage, /empty data/);
+  assert.equal(await cache.get(cacheKey(34.15, -118.75, 2020)), null, "nothing was cached");
+
+  // 25% of hours null in one variable: rejected. 10%: tolerated (filled), and reported.
+  const mostly = fakeResponse({ year: 2020 });
+  const n = mostly.hourly.time.length;
+  mostly.hourly.shortwave_radiation = mostly.hourly.shortwave_radiation.map((v, i) => (i < n * 0.25 ? null : v));
+  assert.throws(() => toWeatherYear(mostly, { year: 2020 }), (e) => e.code === "data");
+  const some = fakeResponse({ year: 2020 });
+  some.hourly.temperature_2m = some.hourly.temperature_2m.map((v, i) => (i % 10 === 0 ? null : v));
+  const wy = toWeatherYear(some, { year: 2020 });
+  assert.ok(wy.nullHours > 800 && wy.nullHours < 900, `nullHours ${wy.nullHours}`);
+});
+
+test("a poisoned (all-null) cache entry is treated as a miss and refetched", async () => {
+  const bad = fakeResponse({ year: 2020 });
+  bad.hourly.shortwave_radiation = bad.hourly.shortwave_radiation.map(() => null);
+  const good = fakeResponse({ year: 2020 });
+  const cache = memoryCache();
+  await cache.set(cacheKey(34.15, -118.75, 2020), bad);
+  const f = scripted(okResponse(good));
+  const seen = [];
+  const [wy] = await fetchYears({ ...site, ...FAST, cache, fetchImpl: f, onProgress: (p) => seen.push(p.fromCache) });
+  assert.equal(f.calls, 1);
+  assert.deepEqual(seen, [false]);
+  assert.ok(wy.ghi.some((v) => v > 0));
+  assert.equal(await cache.get(cacheKey(34.15, -118.75, 2020)), good, "the bad entry was replaced");
+  // ... and with cacheOnly it is a clean miss, not a zero-production year.
+  await cache.set(cacheKey(34.15, -118.75, 2020), bad);
+  const err = await fetchYears({ ...site, cache, cacheOnly: true }).then(null, (e) => e);
+  assert.equal(err.code, "offline");
+});
+
+/**
+ * A fake multi-year archive response with REAL-looking local labels: the request's first
+ * label is `${y0 - 1}-12-31T00:00` local, the last `${y1 + 1}-01-01T23:00` (or the archive
+ * edge), one fixed offset throughout, and each GHI value encodes its UTC hour.
+ */
+function fakeRange(y0, y1, { off = -28800, endMs } = {}) {
+  const t0 = Date.UTC(y0 - 1, 11, 31) - off * 1000;
+  const t1 = endMs ?? Date.UTC(y1 + 1, 0, 1, 23) - off * 1000;
+  const time = [];
+  const stamp = [];
+  for (let t = t0; t <= t1; t += 3600000) {
+    time.push(new Date(t + off * 1000).toISOString().slice(0, 16));
+    stamp.push(t / 3600000);
+  }
+  const k = (v) => stamp.map(() => v);
+  return {
+    latitude: 34.13, longitude: -118.72, elevation: 280,
+    timezone: "America/Los_Angeles", utc_offset_seconds: off,
+    hourly: {
+      time, shortwave_radiation: stamp, direct_normal_irradiance: k(1), diffuse_radiation: k(2),
+      direct_radiation: k(3), temperature_2m: k(20), wind_speed_10m: k(5),
+    },
+  };
+}
+
+test("multi-year requests: 11 uncached years take 3 requests, split and cached per year", async () => {
+  const years = Array.from({ length: 11 }, (_, i) => 2015 + i);
+  const urls = [];
+  const f = scripted((url) => {
+    urls.push(url);
+    const q = new URL(url).searchParams;
+    return okResponse(fakeRange(Number(q.get("start_date").slice(0, 4)) + 1, Number(q.get("end_date").slice(0, 4)) - 1));
+  });
+  const cache = memoryCache();
+  const progress = [];
+  const out = await fetchYears({
+    ...site, years, cache, fetchImpl: f, today: new Date("2026-09-16T00:00:00Z"),
+    onProgress: (p) => progress.push(p.index),
+  });
+  assert.equal(f.calls, 3, "was 11 one-year requests");
+  assert.deepEqual(
+    urls.map((u) => { const q = new URL(u).searchParams; return `${q.get("start_date")}..${q.get("end_date")}`; }),
+    ["2014-12-31..2019-01-01", "2018-12-31..2023-01-01", "2022-12-31..2026-01-01"],
+  );
+  assert.deepEqual(progress, years.map((_, i) => i), "progress still arrives once per year, in order");
+  assert.deepEqual(out.map((w) => w.year), years);
+  for (const y of years) {
+    const entry = await cache.get(cacheKey(34.15, -118.75, y));
+    assert.ok(entry, `year ${y} cached on its own key`);
+    // Each cached slice is exactly what a one-year request would have returned...
+    const single = fakeRange(y, y);
+    assert.deepEqual(entry.hourly.time, single.hourly.time, `${y} slice window`);
+    // ...and models identically.
+    const a = toWeatherYear(entry, { year: y });
+    const b = toWeatherYear(single, { year: y });
+    assert.deepEqual(Array.from(a.ghi), Array.from(b.ghi));
+  }
+
+  // A second pass is all cache; a gap re-fetches only the gap (2 contiguous runs -> 2 calls).
+  const again = scripted(() => assert.fail("no network on a warm cache"));
+  await fetchYears({ ...site, years, cache, fetchImpl: again });
+  const gappy = memoryCache();
+  for (const y of [2017, 2018, 2019]) await gappy.set(cacheKey(34.15, -118.75, y), await cache.get(cacheKey(34.15, -118.75, y)));
+  const g = scripted((url) => {
+    const q = new URL(url).searchParams;
+    return okResponse(fakeRange(Number(q.get("start_date").slice(0, 4)) + 1, Number(q.get("end_date").slice(0, 4)) - 1));
+  });
+  await fetchYears({ ...site, years: [2015, 2016, 2017, 2018, 2019, 2020, 2021], cache: gappy, fetchImpl: g });
+  assert.equal(g.calls, 2, "2015-16 and 2020-21");
+});
+
+test("sliceYear leaves a one-year response untouched and clips a range to the year window", () => {
+  const one = fakeRange(2020, 2020);
+  assert.equal(sliceYear(one, 2020), one);
+  const s = sliceYear(fakeRange(2019, 2021), 2020);
+  assert.equal(s.hourly.time[0], "2019-12-31T00:00");
+  assert.equal(s.hourly.time.at(-1), "2021-01-01T23:00");
+  assert.equal(s.hourly.time.length, s.hourly.shortwave_radiation.length);
+  assert.equal(s.timezone, "America/Los_Angeles");
 });
 
 test("an API-level error object is surfaced with its reason", async () => {

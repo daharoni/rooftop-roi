@@ -197,27 +197,78 @@ test("NBT billing on a hand-computed 2-day example", () => {
   near(out.monthly[0].energy, 12.00, 1e-9, "monthly energy line");
   near(out.monthly[0].exportCreditUsed, -1.60, 1e-9, "export credit line");
 
-  // Now make exports big enough to hit the minimum-charge floor and roll credits.
+  // Now make exports big enough to hit the credit floor and roll credits.  Export credit
+  // may offset energy only down to the fixed charge ($1.00) PLUS the non-bypassable
+  // charges on the month's imports (40 kWh x $0.02 = $0.80): Schedule NBT lets credits
+  // offset generation and delivery, never NBCs or the fixed charge.
   const m2 = miniData({ exportRate: 1.50 });
   const p2 = miniParams(m2);
   const out2 = Engine.runHours(Engine.buildScenario(m2.ctx, p2), p2, true);
   const total2 = out2.bill * (m2.ctx.nDays / 365);
-  near(out2.monthly[0].exportCreditUsed, -12.00, 1e-6, "credits offset only down to the minimum charge");
-  near(out2.monthly[0].trueUp, -0.40, 1e-6, "leftover 8 kWh cashed out at NSC $0.05/kWh");
-  near(total2, 1.00 - 0.40, 1e-6, "bill floors at $1.00 then true-up pays $0.40 => $0.60");
-  assert.ok(out2.monthly[0].bill >= 1.00 - 0.40 - 1e-9, "bill never falls below the floor before true-up");
+  near(out2.monthly[0].nonBypassable, 0.80, 1e-9, "NBCs on 40 imported kWh at $0.02");
+  near(out2.monthly[0].exportCreditUsed, -(13.00 - 1.80), 1e-6, "credits offset only down to fixed + NBCs");
+  // 16 kWh earned $24; $11.20 used leaves $12.80.  But 16 kWh exported against 40 kWh
+  // imported is no Net Surplus Electricity: no ARECR debit, no NSC, and the $12.80
+  // carries into the next relevant period.
+  near(out2.monthly[0].trueUp, 0, 1e-12, "a net importer (16 out, 40 in) gets no NSC");
+  near(out2.monthly[0].forfeitedCredit, 0, 1e-12, "...and no ARECR debit");
+  // (The 2-day record is a one-month cycle, so the balance also holds the carry from the
+  // previous pass round it; the point is that nothing was taken from the $12.80.)
+  assert.ok(out2.monthly[0].creditBalance >= 12.80 - 1e-9, "the unused $12.80 carries forward whole");
+  near(total2, 1.80, 1e-6, "bill floors at fixed + NBCs ($1.80)");
 
-  // ACC Plus: paid on every exported kWh, and the one credit that may go below the floor.
+  // Net surplus is kWh exported minus kWh imported over the relevant period, whatever
+  // happened to the dollars (Schedule NBT SC 5.d, PG&E; SC 4.e.i, SCE).  Load 0.2 kWh/h:
+  // export 2 x 4 x 2.8 = 22.4 kWh, import 2 x 20 x 0.2 = 8 kWh, surplus 14.4 kWh.
+  // Subtotal $1.00 + 8 x $0.30 = $3.40, floor $1.00 + 8 x $0.02 = $1.16, room $2.24.
+  const ms = miniData({ exportRate: 1.50, load: 0.2 });
+  const ps = miniParams(ms);
+  const outS = Engine.runHours(Engine.buildScenario(ms.ctx, ps), ps, true);
+  const mS = outS.monthly[0];
+  near(mS.exportKwh - mS.importKwh, 14.4, 1e-9, "14.4 kWh of net surplus");
+  near(mS.exportCreditUsed, -2.24, 1e-9, "credit fills the room down to fixed + NBCs");
+  near(mS.trueUp, -14.4 * 0.05, 1e-9, "NSC on the 14.4 net surplus kWh");
+  near(mS.forfeitedCredit, 14.4 * (0.05981 - 0.05), 1e-9,
+       "the bank is debited ARECR x 14.4 kWh; net of the NSC that is the credit lost");
+  near(mS.bill, 3.40 - 2.24 - 0.72, 1e-9, "the bill is the floor less the NSC payout");
+  // A bank already spent still gets NSC on its surplus kWh; the ARECR debit stops at zero.
+  const me = miniData({ exportRate: 0.01, load: 0.2 });
+  const pe = miniParams(me);
+  const mE = Engine.runHours(Engine.buildScenario(me.ctx, pe), pe, true).monthly[0];
+  near(mE.exportCreditUsed, -0.224, 1e-9, "all $0.224 of credit is used on the month");
+  near(mE.trueUp, -14.4 * 0.05, 1e-9, "NSC is paid on the kWh even with an empty bank");
+  near(mE.creditBalance, 0, 1e-12, "the debit never takes the bank below zero");
+  near(mE.bill, 3.40 - 0.224 - 0.72, 1e-9, "and never becomes a charge");
+  // The ARECR debits export credit only, never the ACC Plus adder (PG&E NBT SC 5.d).
+  // $0.10 exports: $2.24 of export credit fills the $2.24 room exactly, so the adder
+  // (22.4 x $0.016 = $0.3584) is banked whole; the $0.86 debit finds no export credit.
+  const ma = miniData({ exportRate: 0.10, load: 0.2 });
+  const pa = miniParams(ma, { accPlusAdder: 0.016 });
+  const mA = Engine.runHours(Engine.buildScenario(ma.ctx, pa), pa, true).monthly[0];
+  near(mA.exportCreditUsed, -2.24, 1e-9, "export credit fills the room");
+  near(mA.accPlus, 0, 1e-12, "no room is left for the adder");
+  near(mA.trueUp, -0.72, 1e-9, "NSC on the 14.4 surplus kWh");
+  assert.ok(mA.creditBalance >= 22.4 * 0.016 - 1e-9, "the banked adder survives the true-up untouched");
+
+  // ACC Plus: earned on every exported kWh and applied like export credit.
   const m3 = miniData();
   const p3 = miniParams(m3, { accPlusAdder: 0.016 });
   const out3 = Engine.runHours(Engine.buildScenario(m3.ctx, p3), p3, true);
-  near(out3.monthly[0].accPlus, -16 * 0.016, 1e-9, "ACC Plus pays $0.016 on each of 16 exported kWh");
-  near(out3.bill * (m3.ctx.nDays / 365), 11.40 - 0.256, 1e-6, "ACC Plus comes straight off the bill");
+  near(out3.monthly[0].accPlusEarned, -16 * 0.016, 1e-9, "ACC Plus earns $0.016 on each of 16 exported kWh");
+  near(out3.monthly[0].accPlus, -16 * 0.016, 1e-9, "...and all of it fits on this bill");
+  near(out3.bill * (m3.ctx.nDays / 365), 11.40 - 0.256, 1e-6, "ACC Plus comes off the bill above the floor");
+  near(out3.accPlusRevenue, 0.256 / (m3.ctx.nDays / 365), 1e-9, "accPlusRevenue annualises the adder applied");
 
+  // ...but it is a bill credit, not cash: it never takes the month below fixed + NBCs.
   const m4 = miniData({ exportRate: 1.50 });
   const p4 = miniParams(m4, { accPlusAdder: 0.016 });
   const out4 = Engine.runHours(Engine.buildScenario(m4.ctx, p4), p4, true);
-  assert.ok(out4.monthly[0].bill < 1.00, "ACC Plus can take the bill below the fixed-charge floor");
+  near(out4.monthly[0].accPlusEarned, -0.256, 1e-9, "the adder is still earned");
+  near(out4.monthly[0].accPlus, 0, 1e-12, "...but no room is left above the floor for it");
+  near(out4.bill, out2.bill, 1e-9, "so the bill is the no-adder bill: ACC Plus is never paid out as cash");
+  near(out4.accPlusRevenue, 0, 1e-12, "and the adder realises nothing");
+  assert.ok(out4.monthly[0].bill - out4.monthly[0].trueUp >= 1.80 - 1e-9, "the month stays at or above fixed + NBCs");
+  assert.ok(out4.accPlusRevenue <= out4.exportRevenue, "accPlusRevenue is a subset of exportRevenue");
 
   // Creditable export capped at modelled PV for paired storage with no NGOM.
   const m5 = miniData();
@@ -571,8 +622,13 @@ test("strategies behave the way the UI claims they do", () => {
 test("the CA Climate Credit lands in both arms and cancels out of savings", () => {
   const withCC = Engine.simulate(ctx, P({ panels: 20, batteries: 1 }), { detail: true });
   const ccMonths = withCC.monthly.filter((m) => m.climateCredit !== 0);
-  assert.ok(ccMonths.length > 0 && ccMonths.every((m) => Math.abs(m.climateCredit + 36) < 1e-9),
-            `CA Climate Credit of $36 applied in ${ccMonths.length} monthly bills`);
+  const last = withCC.monthly[withCC.monthly.length - 1];
+  assert.equal(last.key, "2026-09", "the record ends in September 2026...");
+  assert.equal(last.days, 9, "...nine days into it");
+  near(last.climateCredit, -36 * 9 / 30, 1e-9, "a partial edge month gets the credit prorated by days present");
+  const whole = ccMonths.filter((m) => m !== last);
+  assert.ok(whole.length > 0 && whole.every((m) => Math.abs(m.climateCredit + 36) < 1e-9),
+            `CA Climate Credit of $36 applied in ${whole.length} whole monthly bills`);
   assert.ok(ccMonths.every((m) => [8, 9].includes(+m.key.slice(5, 7))),
             "climate credit lands only in August and September");
   const noCC = Engine.simulate(ctx, P({ panels: 20, batteries: 1, climateCreditOff: true }), {});
@@ -618,8 +674,15 @@ test("the engine's fallback reshape reproduces the prototype's spreadEV exactly"
     assert.equal(Engine.flexReshapeSource(), "engine-fallback", "the fallback can be forced");
     const fallback = Engine.simulate(ctxFrozen, p, {});
     // The prototype's numbers, to the cent.
-    near(fallback.bill, 686.21198, 0.005, "prototype bill for 27 panels + 1 battery");
-    near(fallback.baselineSameFlex.bill, 5469.59251, 0.01, "prototype same-flex baseline bill");
+    // Two deliberate departures from the prototype, both pinned here:
+    //  - the climate credit in the record's 9-day final September is prorated (9/30 of
+    //    $36), which raises BOTH bills by $25.20 over the record;
+    //  - net surplus is kWh exported minus kWh imported over each relevant period, not
+    //    the kWh "left behind" unused bank dollars, so this net-exporting system
+    //    (about 8,000 kWh out, 2,800 in) is paid NSC on its surplus kWh.
+    const ccDelta = 36 * (1 - 9 / 30) / ctxFrozen.years;
+    near(fallback.baselineSameFlex.bill, 5469.59251 + ccDelta, 0.01, "prototype same-flex baseline bill + prorated climate credit");
+    near(fallback.bill, 593.25709, 0.005, "27 panels + 1 battery (prototype $686.21 before the two changes)");
     // core/flexload.js spreads a manual load over 52.18 weeks instead of 365/7 days,
     // which moves the pool pump by ~1 kWh/yr and nothing else.
     near(withFlexload.bill, fallback.bill, 2.0, "flexload.js agrees with the fallback to ~$2/yr");
@@ -681,9 +744,13 @@ for (const id of ["pge", "sdge"]) {
       assert.equal(terms.arecr, Tariff.arecr(t), "...and agrees with core/tariff.js");
       assert.equal(terms.trueUpMonth, t.nbt.true_up_month, "true-up month comes from the file");
       assert.equal(terms.baselineRegion, Tariff.defaultBaselineRegion(t), "default baseline region");
-      const accLines = res.monthly.reduce((a, m) => a - m.accPlus, 0);
+      const accLines = res.monthly.reduce((a, m) => a - m.accPlusEarned, 0);
       const accWant = res.monthly.reduce((a, m) => a + m.exportKwh, 0) * t.nbt.acc_plus_adder_per_kwh;
-      near(accLines, accWant, 1e-6, "every ACC Plus bill line is the file's adder x creditable export");
+      near(accLines, accWant, 1e-6, "every month earns the file's adder x creditable export");
+      const accUsed = res.monthly.reduce((a, m) => a - m.accPlus, 0);
+      assert.ok(accUsed <= accLines + 1e-9, "no more adder reaches the bills than was earned");
+      near(res.accPlusRevenue, accUsed / res.years, 1e-9, "accPlusRevenue = the adder that reached a bill, per year");
+      assert.ok(res.accPlusRevenue <= res.exportRevenue + 1e-9, "accPlusRevenue is a subset of exportRevenue");
     }
     // An explicit override still wins over the file.
     const over = Engine.simulate(c, Engine.withDefaults(refParams(30, 1,
@@ -782,9 +849,20 @@ test("a NaN inside a flexible load's kwhByHour is treated as 0 and counted", () 
   const ev = evFlex();
   ev.kwhByHour = Float64Array.from(ev.kwhByHour);
   ev.kwhByHour[500] = NaN; ev.kwhByHour[501] = Infinity;
+  ev.kwhByHour[502] = -Infinity;
   const res = Engine.simulate(ctx, P({ flex: [ev, poolFlex()] }), {});
-  assert.ok(Number.isFinite(res.bill), "the bill stays finite");
-  assert.ok(res.flexNanHours >= 2, `bad flex hours are counted (${res.flexNanHours})`);
+  assertAllFinite(res, "result with a NaN flex hour");
+  assert.ok(res.flexNanHours >= 3, `bad flex hours are counted (${res.flexNanHours})`);
+  // Exactly as if those hours had read 0 kWh, in both arms.
+  const zeroed = evFlex();
+  zeroed.kwhByHour = Float64Array.from(ev.kwhByHour, (v) => (Number.isFinite(v) ? v : 0));
+  const ref = Engine.simulate(ctx, P({ flex: [zeroed, poolFlex()] }), {});
+  near(res.bill, ref.bill, 1e-9, "bill = the same load with 0 in the bad hours");
+  near(res.baselineAsRecorded.bill, ref.baselineAsRecorded.bill, 1e-9, "...and the as-recorded arm too");
+  assert.equal(ref.flexNanHours, 0, "a clean load reports none");
+  // The optimizer's per-cell runs (runHours) carry the count too, so the app can warn.
+  const q = P({ flex: [ev] });
+  assert.ok(Engine.runHours(Engine.buildScenario(ctx, q), q, false).flexNanHours >= 3, "runHours reports it");
 });
 
 // ================================================================== 12. provider fallback
@@ -868,15 +946,20 @@ test("true-up: a 24-month record settles two whole 12-month years for any true-u
 });
 
 test("true-up: the month moves an oversized array's savings, and October is the conservative default", () => {
-  const sav = (tum) => Engine.simulate(ctx24, P({ panels: 60, batteries: 0, trueUpMonth: tum }), {}).savingsVsSameFlex;
+  // ACC Plus off: the adder is a bill credit that only fills room above the credit floor
+  // (fixed + NBCs), and a 60-panel array's banked adder never runs out, so with it every
+  // month sits on the floor whatever the true-up month and only the NSC payout differs -
+  // which favours October.  This test is about the ARECR wiping a scarce bank.
+  const sav = (tum) => Engine.simulate(ctx24, P({ panels: 60, batteries: 0, trueUpMonth: tum, accPlusAdder: 0 }), {}).savingsVsSameFlex;
   const apr = sav(4), oct = sav(10);
   assert.ok(Math.abs(apr - oct) > 1, `the true-up month matters (${apr.toFixed(0)} vs ${oct.toFixed(0)})`);
   assert.ok(oct < apr, "October (bank largest after summer, paid at NSC) is below April");
   assert.equal(TARIFF.nbt.true_up_month, 10, "sce.json defaults to October");
   const def = runTU(ctx, {});
   assert.equal(def.tariffTerms.trueUpMonth, 10, "the default comes from the file");
-  // A 27-panel system never builds a surplus, so the true-up month cannot move it.
-  const small = (tum) => Engine.simulate(ctx24, P({ panels: 27, batteries: 1, trueUpMonth: tum }), {}).bill;
+  // A system that imports more kWh than it exports in every period (15 panels + 1
+  // battery) never has net surplus, so the true-up month cannot move it.
+  const small = (tum) => Engine.simulate(ctx24, P({ panels: 15, batteries: 1, trueUpMonth: tum }), {}).bill;
   near(small(4), small(10), 1e-6, "no surplus, no true-up effect");
 });
 
@@ -903,7 +986,8 @@ test("true-up: 12- and 13-month records settle once, in the true-up month, with 
   assert.equal(aug.trueUp.trailing.bankDollars, 0);
   // A 12-month record's true-up month now matters (it used to settle only at the end).
   // (80 panels: this year's 60-panel bank is fully consumed by winter whatever the month.)
-  const s12 = (tum) => Engine.simulate(c12, P({ panels: 80, batteries: 0, trueUpMonth: tum }), {}).bill;
+  // (ACC Plus off for the same reason as the 24-month test above.)
+  const s12 = (tum) => Engine.simulate(c12, P({ panels: 80, batteries: 0, trueUpMonth: tum, accPlusAdder: 0 }), {}).bill;
   assert.ok(s12(10) - s12(4) > 50, "a 12-month record's bill depends on the true-up month");
 });
 
@@ -984,4 +1068,163 @@ test("usable days count a partial day by its share of 24 hours", () => {
                 "minUsableDays: null means the default bar, not 0");
   // A spring-forward day has 23 hours and is a whole day.
   near(full.usableDays, full.nDays, 1e-9, "a complete record (with its two 23-hour days) is all usable");
+});
+
+// ================================================================== 13. one TOU lookup
+/**
+ * A wall-clock hourly LoadSet from `from` to `to` inclusive with real DST days: the
+ * spring-forward Sunday has no 02:00 slot, the fall-back Sunday keeps 24 (the repeated
+ * hour is summed into one slot, as core/greenbutton.js does).
+ */
+function clockYear(from, to, kwh = 1) {
+  const ts = [], k = [];
+  const springFwd = (y) => { const f = new Date(Date.UTC(y, 2, 1)).getUTCDay(); return 1 + ((7 - f) % 7) + 7; };
+  for (let d = new Date(from + "T00:00Z"); d <= new Date(to + "T00:00Z"); d = new Date(d.getTime() + 864e5)) {
+    const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1, dd = d.getUTCDate();
+    const day = `${y}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    for (let h = 0; h < 24; h++) {
+      if (m === 3 && dd === springFwd(y) && h === 2) continue;
+      ts.push(`${day}T${String(h).padStart(2, "0")}:00`); k.push(kwh);
+    }
+  }
+  return { meta: {}, ts, kwh: Float64Array.from(k), exportKwh: null };
+}
+
+test("engine buildRates and tariff.periodAt agree on every hour of a year, every plan, all three utilities", () => {
+  // Dec 2022 - Nov 2023: Christmas 2022 and New Year's 2023 fall on SUNDAYS (observed on
+  // the Mondays after), Veterans Day 2023 on a SATURDAY (not moved), July 4 2023 on a
+  // Tuesday; March/April carry SDG&E EV-TOU-2's schedule_overrides window.  The review
+  // measured 356 differing hours on EV-TOU-2 before the two lookups were merged.
+  const load = clockYear("2022-12-01", "2023-11-30");
+  const PID = Engine._internal.PERIOD_IDS;
+  let overrideHours = 0, sundayHolidayHours = 0;
+  for (const id of ["sce", "pge", "sdge"]) {
+    const t = readTariff(id);
+    const c = Engine.prepare({ load, tariffs: t }, { minUsableDays: 0 });
+    const prov = Tariff.defaultProvider(t);
+    for (const plan of t.plans) {
+      const r = Engine.buildRates(c, plan.id, prov, false, null, 0, false);
+      const bad = [];
+      for (let i = 0; i < c.N; i++) {
+        const at = Tariff.periodAt(plan, load.ts[i]);
+        if (PID[r.period[i]] !== at.period) { bad.push(load.ts[i] + " engine " + PID[r.period[i]] + " tariff " + at.period); continue; }
+        if ((c.dayType[i] === 1) !== (at.dayType === "weekend")) bad.push(load.ts[i] + " day type");
+        if ((r.summer[i] === 1) !== (at.season === "summer")) bad.push(load.ts[i] + " season");
+        // Prices follow the period: the engine's hourly import price is the tariff's.
+        if (Math.abs(r.imp[i] - Tariff.rateAt(t, plan, prov, load.ts[i])) > 1e-12) bad.push(load.ts[i] + " price");
+        // ...and the export table follows the same day type.
+        const wantExp = Tariff.exportRateAt(t, load.ts[i]) + (prov !== t.utility.id ? (t.nbt.cca_export_adder_per_kwh || 0) : 0);
+        if (Math.abs(r.exp[i] - wantExp) > 1e-12) bad.push(load.ts[i] + " export price");
+        if (at.overridden) overrideHours++;
+        if (at.holiday && (load.ts[i].startsWith("2022-12-26") || load.ts[i].startsWith("2023-01-02"))) sundayHolidayHours++;
+      }
+      assert.equal(bad.length, 0, `${id} ${plan.id}: ${bad.length} hours differ, e.g. ${bad.slice(0, 3).join("; ")}`);
+    }
+    // Spot-check the calendar the comparison ran on.
+    const at = (s) => c.dayType[load.ts.indexOf(s)];
+    assert.equal(at("2023-01-02T17:00"), 1, "New Year's 2023 (Sunday) observed Monday bills as weekend");
+    assert.equal(at("2022-12-26T17:00"), 1, "Christmas 2022 (Sunday) observed Monday bills as weekend");
+    assert.equal(at("2023-11-10T17:00"), 0, "Friday before Saturday Veterans Day 2023 is a weekday");
+    assert.equal(at("2023-07-04T17:00"), 1, "July 4 2023 (Tuesday) bills as weekend");
+  }
+  assert.ok(overrideHours > 0, "the comparison exercised schedule_overrides");
+  assert.ok(sundayHolidayHours > 0, "the comparison exercised Sunday-observed holidays");
+});
+
+// ================================================================== 14. credit floor, ACC Plus
+test("no export credit or ACC Plus ever offsets the fixed charge or the non-bypassable charges", () => {
+  for (const id of ["sce", "pge", "sdge"]) {
+    const t = readTariff(id);
+    const c = Engine.prepare({ load: loadSet(), tariffs: t });
+    const plan = Tariff.defaultPlan(t), prov = Tariff.defaultProvider(t);
+    for (const [panels, batteries] of [[30, 1], [60, 0], [40, 2]]) {
+      const q = Engine.withDefaults(refParams(panels, batteries, { planId: plan.id, providerId: prov }));
+      const out = Engine.runHours(Engine.buildScenario(c, q), q, true);
+      for (const m of out.monthly) {
+        near(m.nonBypassable, t.nbt.nonbypassable_charges_per_kwh * m.importKwh, 1e-9, `${id} ${m.key} NBC line`);
+        // The bill before the true-up payout and the climate credit (both of which may go
+        // lower) never drops under fixed + NBCs.
+        const beforeTrueUp = m.bill - m.trueUp - m.climateCredit;
+        assert.ok(beforeTrueUp >= m.fixed + m.nonBypassable - 1e-9,
+                  `${id} ${panels}p/${batteries}b ${m.key}: $${beforeTrueUp.toFixed(2)} < fixed + NBC $${(m.fixed + m.nonBypassable).toFixed(2)}`);
+      }
+    }
+  }
+});
+
+test("accPlusRevenue is exactly the adder's marginal value, and a subset of exportRevenue", () => {
+  for (const id of ["sce", "pge"]) {                    // SDG&E pays no adder
+    const t = readTariff(id);
+    const c = Engine.prepare({ load: loadSet(), tariffs: t });
+    const plan = Tariff.defaultPlan(t), prov = Tariff.defaultProvider(t);
+    for (const [panels, batteries] of [[20, 1], [30, 1], [40, 2], [60, 0]]) {
+      const base = { planId: plan.id, providerId: prov };
+      const w = Engine.simulate(c, Engine.withDefaults(refParams(panels, batteries, base)), {});
+      const wo = Engine.simulate(c, Engine.withDefaults(refParams(panels, batteries, { ...base, accPlusAdder: 0 })), {});
+      const tag = `${id} ${panels}p/${batteries}b`;
+      assert.ok(w.accPlusRevenue >= 0 && w.accPlusRevenue <= w.exportRevenue + 1e-9, `${tag}: subset of exportRevenue`);
+      // Once the adder expires (finance, year 10) the year looks exactly like no adder.
+      near(wo.bill - w.bill, w.accPlusRevenue, 1e-6, `${tag}: bill without - with adder`);
+      near(w.exportRevenue - w.accPlusRevenue, wo.exportRevenue, 1e-6, `${tag}: export revenue net of the adder`);
+      // Never more than the adder earned on creditable export.
+      assert.ok(w.accPlusRevenue <= w.exportKwh * t.nbt.acc_plus_adder_per_kwh + 1e-6, `${tag}: <= adder x export`);
+    }
+  }
+  const plans = Engine.billOnAllPlans(ctx, P({ panels: 30, batteries: 1 }));
+  assert.ok(plans.every((p) => typeof p.accPlusRevenue === "number" && p.accPlusRevenue <= p.exportRevenue + 1e-9),
+            "billOnAllPlans carries accPlusRevenue alongside exportRevenue");
+});
+
+test("credit that survives a true-up carries round the cycle into the months before it", () => {
+  // June 29-30 (no sun) + July 1-2 (sun, $1.50 exports), true-up in July.  The cycle
+  // starts in June with an empty bank, so a single pass leaves June's bill uncovered;
+  // in steady state the residual July carries over its true-up pays June.
+  const m = miniData({ exportRate: 1.50 });
+  const prof = Float64Array.from(m.profile);
+  for (const doy of [180, 181]) for (let h = 0; h < 24; h++) prof[(doy - 1) * 24 + h] = 0;
+  const c = Engine.prepare({ load: clockYear("2025-06-29", "2025-07-02"), tariffs: m.ctx.tariffs }, { minUsableDays: 0 });
+  const q = miniParams({ profile: prof });
+  const out = Engine.runHours(Engine.buildScenario(c, q), q, true);
+  const [jun, jul] = out.monthly;
+  near(jun.exportKwh, 0, 1e-12, "June exports nothing");
+  // July: $24 earned, $13.00 - $1.80 = $11.20 used, $12.80 left.  The period exported
+  // 16 kWh and imported 88, so there is no net surplus: no ARECR, no NSC, and the whole
+  // $12.80 is carried round to June (room $15.40 - $1.96 = $13.44, so all of it fits).
+  near(jul.exportCreditUsed, -11.2, 1e-9, "July's own credit fills July down to fixed + NBCs");
+  near(jul.trueUp, 0, 1e-12, "no NSC for a net importer");
+  near(jun.exportCreditUsed, -12.8, 1e-9, "June's bill is paid by the credit carried over July's true-up");
+  assert.ok(jun.bill >= jun.fixed + jun.nonBypassable, "and never below fixed + NBCs");
+});
+
+test("the credit bank: NSC rides on kWh alone, ACC Plus escapes the ARECR, the draw order only splits", () => {
+  // Swap the monthly draw order (adder pools before export pools) with the test-only
+  // r.bankDrawOrder hook.  The net surplus kWh, and so the NSC payout, never depend on
+  // which dollars were drawn.  The ARECR debit falls on export credit only (PG&E NBT
+  // SC 5.d: "The ACC Plus paid ... on Net Surplus Electricity will not be debited"), so
+  // drawing the adder first can only leave more export credit exposed to it: the
+  // tariff's own order (export credit applied to the month's energy charges, the adder
+  // to what remains) is never worse for the customer.  With no ARECR debit binding (no
+  // adder, or no surplus) the total bill is identical in either order.
+  let surplusSeen = 0;
+  for (const id of ["sce", "pge"]) {
+    const t = readTariff(id);
+    const c = Engine.prepare({ load: loadSet(), tariffs: t });
+    const plan = Tariff.defaultPlan(t), prov = Tariff.defaultProvider(t);
+    for (const [panels, batteries] of [[15, 1], [27, 1], [40, 0], [60, 2]]) for (const tum of [4, 10]) {
+      for (const adder of [undefined, 0]) {
+        const q = Engine.withDefaults(refParams(panels, batteries, { planId: plan.id, providerId: prov, trueUpMonth: tum,
+          ...(adder === 0 ? { accPlusAdder: 0 } : {}) }));
+        const scn = Engine.buildScenario(c, q);
+        const a = Engine.runHours(scn, q, true);
+        scn.rates.bankDrawOrder = "adderFirst";
+        const b = Engine.runHours(scn, q, true);
+        const tag = `${id} ${panels}p/${batteries}b tum ${tum} adder ${adder === 0 ? "off" : "on"}`;
+        for (let m = 0; m < a.monthly.length; m++) near(a.monthly[m].trueUp, b.monthly[m].trueUp, 1e-9, `${tag} ${a.monthly[m].key}: NSC is order-free`);
+        assert.ok(b.bill >= a.bill - 1e-9, `${tag}: the tariff's order is never worse`);
+        if (adder === 0) near(a.bill, b.bill, 1e-9, `${tag}: no adder, no order effect`);
+        if (a.monthly.some((m) => m.trueUp < 0)) surplusSeen++;
+      }
+    }
+  }
+  assert.ok(surplusSeen > 4, "the sweep includes systems with net surplus");
 });

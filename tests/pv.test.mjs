@@ -324,21 +324,54 @@ test("hourlyProfile: returns a Float64Array of 8760 and needs coordinates", () =
 // Bias correction
 // ---------------------------------------------------------------------------
 
-test("bias correction: 'auto' applies the SoCal table only inside its box", () => {
-  assert.equal(resolveBias("auto", { lat: 34.15, lon: -118.75 }).id, "pvgis-nsrdb-socal");
-  assert.equal(resolveBias("auto", { lat: 37.77, lon: -122.42 }).id, "none"); // San Francisco
-  assert.equal(resolveBias("auto", { lat: 42.36, lon: -71.06 }).id, "none"); // Boston
+test("bias correction: no regional table ships, so 'auto' is uncorrected everywhere", () => {
+  // The SoCal table was removed 2026-10-03 (like for like, ERA5 is within ~1% of NSRDB at
+  // the reference site; see BIAS_CORRECTIONS in core/pv.js).
+  assert.deepEqual(Object.keys(BIAS_CORRECTIONS), []);
+  assert.ok(Object.isFrozen(BIAS_CORRECTIONS));
+  const id = (lat, lon) => resolveBias("auto", { lat, lon }).id;
+  assert.equal(id(34.15, -118.75), "none"); // the reference site, formerly inside the box
+  assert.equal(id(34.05, -118.25), "none"); // downtown LA
+  assert.equal(id(34.2, -119.18), "none"); // Oxnard
+  assert.equal(id(32.72, -117.16), "none"); // San Diego
+  assert.equal(id(37.34, -121.89), "none"); // San Jose
+  assert.equal(id(42.36, -71.06), "none"); // Boston
+  assert.ok(resolveBias("auto", { lat: 34.15, lon: -118.75 }).factors.every((f) => f === 1));
   assert.equal(resolveBias("none", { lat: 34.15, lon: -118.75 }).id, "none");
+  assert.throws(() => resolveBias("pvgis-nsrdb-socal", {}), RangeError); // gone, not silent
   assert.throws(() => resolveBias("no-such-table", {}), RangeError);
   assert.throws(() => resolveBias([1, 2, 3], {}), RangeError);
 });
 
-test("bias correction: scales each month by exactly its factor", () => {
+test("bias correction: the default model output equals the explicitly uncorrected one", () => {
+  const { wy } = clearSkyYear();
+  const auto = hourlyProfile(wy, { ...SITE });
+  const none = hourlyProfile(wy, { ...SITE, biasCorrection: "none" });
+  assert.deepEqual(Array.from(auto), Array.from(none));
+});
+
+test("wind: km/h weather is converted to m/s before the Sandia term", () => {
+  // Same sky, wind given as 18 km/h and as 5 m/s: identical output.
+  const { wy: kmh } = clearSkyYear({ wind: 18 });
+  const { wy: ms } = clearSkyYear({ wind: 5 });
+  ms.units = { ...ms.units, wind: "m/s" };
+  const o = { ...SITE, biasCorrection: "none" };
+  const a = annualTotal(hourlyProfile(kmh, o));
+  const b = annualTotal(hourlyProfile(ms, o));
+  assert.ok(Math.abs(a / b - 1) < 1e-12, `${a} vs ${b}`);
+  // The prototype's bug (18 read as m/s) cooled the modules and over-produced by a few %.
+  const bug = annualTotal(hourlyProfile({ ...kmh, units: { ...kmh.units, wind: "m/s" } }, o));
+  const over = 100 * (bug / a - 1);
+  assert.ok(over > 2 && over < 6, `unconverted wind over-produces by ${over.toFixed(2)}%`);
+});
+
+test("bias correction: a custom 12-factor array scales each month by exactly its factor", () => {
   const { wy } = clearSkyYear(); // June only
+  const factors = [1, 1, 1, 1, 1, 1.0289, 1, 1, 1, 1, 1, 1];
   const off = monthlyTotals(hourlyProfile(wy, { ...SITE, biasCorrection: "none" }));
-  const on = monthlyTotals(hourlyProfile(wy, { ...SITE, biasCorrection: "pvgis-nsrdb-socal" }));
-  const f = BIAS_CORRECTIONS["pvgis-nsrdb-socal"].factors[5]; // June
-  assert.ok(Math.abs(on[5] / off[5] - f) < 1e-9, `${on[5] / off[5]} vs ${f}`);
+  const on = monthlyTotals(hourlyProfile(wy, { ...SITE, biasCorrection: factors }));
+  assert.equal(resolveBias(factors).id, "custom");
+  assert.ok(Math.abs(on[5] / off[5] - factors[5]) < 1e-9, `${on[5] / off[5]} vs ${factors[5]}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -394,7 +427,7 @@ test("orientationFactor: identity is 1.0, and winter punishes an east-facing roo
   // Months with no sun in this synthetic year return 0, not NaN.
   assert.equal(east[0], 0);
   // Bias corrections cancel in the ratio.
-  const biased = orientationFactor({ ...SITE, biasCorrection: "pvgis-nsrdb-socal" }, 20, 90, 20, 180, wy);
+  const biased = orientationFactor({ ...SITE, biasCorrection: [0.9, 1.1, 1, 1, 1, 1.05, 1, 1, 1, 1, 1, 0.97] }, 20, 90, 20, 180, wy);
   assert.ok(Math.abs(biased[11] - east[11]) < 1e-12);
 });
 
@@ -416,6 +449,18 @@ test("shadeFactor: annual and monthly forms both return retained fractions", () 
 
 const ANNUAL_TOL_PCT = 3;
 const MONTHLY_TOL_PCT = 10;
+
+// The fixture is the PROTOTYPE's output, which fed km/h wind into the m/s Sandia term and
+// used the yield-fitted bias table below. Replaying exactly that (a weather year flagged
+// as m/s skips the conversion) must still reproduce it — that pins every other link of
+// the chain. The fixed model is then checked against the fixture at the expected offset.
+const PROTOTYPE_BIAS = [1.022, 0.967, 1.0378, 1.0002, 1.0379, 1.0311, 1.014, 1.0531, 1.0134, 0.9926, 1.0034, 0.984];
+const asPrototype = (wy) => ({ ...wy, units: { ...wy.units, wind: "m/s" } });
+// Fixed wind (-3.1..-3.6%/yr) and no bias table (the prototype's table added ~+1.5%/yr):
+// the fixed model sits 4.5-5.0% below the prototype each year (2015/16 -5.2/-5.4%, a
+// further 0.6-0.7% from the upstream ERA5 revision of those years). Measured 2026-10-03:
+// -4.46% (2023) .. -5.38% (2016).
+const FIXED_VS_PROTOTYPE_PCT = [-6.0, -4.0];
 
 function loadFixtureWeather() {
   const file = path.join(FIXTURES, "weather-agoura-hills.json.gz");
@@ -457,9 +502,17 @@ function compareToFixture(t, weatherYears, label) {
   let worstMonthly = 0;
   for (const wy of weatherYears) {
     const key = String(wy.year);
-    const mine = hourlyProfile(wy, { ...SITE, tilt: 20, azimuth: 180 });
-    const annual = annualTotal(mine);
     const refAnnual = ref.meta.annual_kwh_per_kw[key];
+    // The fixed model (the default chain at this site) against the prototype.
+    const fixed = annualTotal(hourlyProfile(wy, { ...SITE, tilt: 20, azimuth: 180 }));
+    const dF = 100 * (fixed / refAnnual - 1);
+    assert.ok(
+      dF >= FIXED_VS_PROTOTYPE_PCT[0] && dF <= FIXED_VS_PROTOTYPE_PCT[1],
+      `${key}: fixed model ${fixed.toFixed(1)} is ${dF.toFixed(2)}% from the prototype, expected ${FIXED_VS_PROTOTYPE_PCT.join("..")}%`,
+    );
+
+    const mine = hourlyProfile(asPrototype(wy), { ...SITE, tilt: 20, azimuth: 180, biasCorrection: PROTOTYPE_BIAS });
+    const annual = annualTotal(mine);
     const dA = 100 * (annual / refAnnual - 1);
 
     const mm = monthlyTotals(mine);
@@ -470,7 +523,7 @@ function compareToFixture(t, weatherYears, label) {
       const d = 100 * (mm[k] / refM[k] - 1);
       if (Math.abs(d) > Math.abs(wm)) { wm = d; wmMonth = k + 1; }
     }
-    rows.push(`  ${key}  ${annual.toFixed(1)} vs ${refAnnual}  ${dA.toFixed(2)}%   worst month ${wmMonth}: ${wm.toFixed(2)}%`);
+    rows.push(`  ${key}  prototype replay ${annual.toFixed(1)} vs ${refAnnual}  ${dA.toFixed(2)}%   worst month ${wmMonth}: ${wm.toFixed(2)}%   fixed model ${fixed.toFixed(1)} (${dF.toFixed(2)}%)`);
     if (Math.abs(dA) > Math.abs(worstAnnual)) worstAnnual = dA;
     if (Math.abs(wm) > Math.abs(worstMonthly)) worstMonthly = wm;
 
@@ -520,15 +573,30 @@ test("fixture: eleven-year comparison (needs the weather cache or the network)",
   }
   compareToFixture(t, wys, "full 11-year comparison (kWh/kW):");
 
-  const sp = profilesForPlane(wys, { tilt: 20, azimuth: 180 }, SITE);
   const refPct = JSON.parse(
     fs.readFileSync(path.join(FIXTURES, "solar-agoura-hills.json"), "utf8"),
   ).meta.percentiles;
-  assert.equal(sp.percentiles.p10Year, refPct.p10_year);
-  assert.equal(sp.percentiles.p50Year, refPct.p50_year);
+  // Percentile years: the prototype replay must pick exactly the prototype's years.
+  const proto = profilesForPlane(wys.map(asPrototype), { tilt: 20, azimuth: 180 }, { ...SITE, biasCorrection: PROTOTYPE_BIAS });
+  assert.equal(proto.percentiles.p10Year, refPct.p10_year);
+  assert.equal(proto.percentiles.p50Year, refPct.p50_year);
+  assert.equal(proto.percentiles.p90Year, refPct.p90_year);
+  // The fixed model (uncorrected): same low year; 2015/2016 are a 0.1% near-tie for P10 and
+  // 2017/2018 a 0.1% near-tie for P50, so those may flip. 11-year mean 1548.8 kWh/kW
+  // (2026-10-03), inside the reviewers' PVWatts-style band of 1,514-1,668.
+  const sp = profilesForPlane(wys, { tilt: 20, azimuth: 180 }, SITE);
+  assert.equal(sp.model.biasCorrection, "none");
+  assert.ok(["2017", "2018"].includes(sp.percentiles.p50Year), `P50 ${sp.percentiles.p50Year}`);
   assert.equal(sp.percentiles.p90Year, refPct.p90_year);
+  assert.ok(["2015", "2016"].includes(sp.percentiles.p10Year));
+  assert.ok(sp.percentiles.mean > 1514 && sp.percentiles.mean < 1668, `mean ${sp.percentiles.mean}`);
+  assert.ok(Math.abs(sp.percentiles.mean / 1548.8 - 1) < 0.02, `mean ${sp.percentiles.mean} drifted from 1548.8`);
   const tmyDelta = 100 * (sp.annualPerKw.tmy / refPct.p50_kwh_per_kw - 1);
-  t.diagnostic(`TMY ${sp.annualPerKw.tmy} kWh/kW (P50 ${refPct.p50_kwh_per_kw}, ${tmyDelta.toFixed(2)}%)`);
+  t.diagnostic(
+    `fixed model: mean ${sp.percentiles.mean}, TMY ${sp.annualPerKw.tmy} kWh/kW ` +
+      `(prototype P50 ${refPct.p50_kwh_per_kw}, ${tmyDelta.toFixed(2)}%); P10/P50/P90 ` +
+      `${sp.percentiles.p10Year}/${sp.percentiles.p50Year}/${sp.percentiles.p90Year}`,
+  );
 });
 
 test("fixture: orientation factors match the reference grid (needs weather)", async (t) => {
@@ -555,4 +623,46 @@ test("fixture: orientation factors match the reference grid (needs weather)", as
   }
   t.diagnostic(`orientation grid worst deviation ${worst.toFixed(2)}% at ${worstKey}`);
   assert.ok(Math.abs(worst) <= MONTHLY_TOL_PCT, `orientation factor off by ${worst.toFixed(2)}%`);
+});
+
+// ---------------------------------------------------------------------------
+// Other California sites (live; skipped offline)
+// ---------------------------------------------------------------------------
+
+// Recorded 2026-10-03 from Open-Meteo 2015-2025, tilt 20 az 180, 14% losses, no bias table
+// (these sites were always outside the removed SoCal box, so removing it moves nothing).
+// "before" is the prototype's km/h-wind chain; PVGIS is v5.2 PVcalc on PVGIS-NSRDB with
+// mountingplace=building, 14% loss — whose 14% INCLUDES the inverter, so a PVWatts-style
+// chain (14% + 96% inverter + clipping) should land ~3-4% under it on identical sun.
+// The band is +-2% around the recorded value: wide enough for upstream ERA5 revisions,
+// tight enough to catch a units regression (which moves these by 3-4%).
+const OUTSIDE_BOX = [
+  { name: "San Jose", lat: 37.34, lon: -121.89, before: 1582.8, after: 1525.3, pvgis: 1555.4 },
+  { name: "Sacramento", lat: 38.58, lon: -121.49, before: 1487.5, after: 1443.4, pvgis: 1541.0 },
+];
+
+test("live: San Jose and Sacramento sit below PVGIS-NSRDB with the fixed, uncorrected model", { skip: process.env.SKIP_LIVE ? "SKIP_LIVE set" : false }, async (t) => {
+  const { fetchYears, fileCache, WeatherUnavailableError } = await import("../core/weather.js");
+  const dir =
+    process.env.ROOFTOP_ROI_WEATHER_CACHE || path.join(os.tmpdir(), "rooftop-roi-weather");
+  const years = Array.from({ length: 11 }, (_, i) => 2015 + i);
+  const rows = [];
+  for (const s of OUTSIDE_BOX) {
+    let wys;
+    try {
+      wys = await fetchYears({ lat: s.lat, lon: s.lon, years, cache: fileCache({ dir }) });
+    } catch (err) {
+      assert.ok(err instanceof WeatherUnavailableError, "weather failures must be typed");
+      t.skip(`Open-Meteo unreachable (${err.code}) and ${s.name} is not cached in ${dir}`);
+      return;
+    }
+    const sp = profilesForPlane(wys, { tilt: 20, azimuth: 180 }, { lat: s.lat, lon: s.lon });
+    assert.equal(sp.model.biasCorrection, "none");
+    const mean = sp.percentiles.mean;
+    rows.push(`  ${s.name}: ${mean} kWh/kW (was ${s.before}; PVGIS-NSRDB ${s.pvgis}, ${(100 * (mean / s.pvgis - 1)).toFixed(2)}%)`);
+    assert.ok(Math.abs(mean / s.after - 1) < 0.02, `${s.name} ${mean} drifted from ${s.after}`);
+    assert.ok(mean < s.pvgis, `${s.name} ${mean} should sit below PVGIS-NSRDB ${s.pvgis}`);
+    assert.ok(mean < s.before * 0.98, `${s.name} ${mean}: the wind fix should cost 3-4%`);
+  }
+  t.diagnostic(`other sites, 11-year mean:\n${rows.join("\n")}`);
 });

@@ -11,7 +11,7 @@
  * ========================================================================== */
 
 import { el, clear, $, T } from "../ui/dom.js";
-import { card, tiles, tile } from "../ui/blocks.js";
+import { card, tiles, tile, DISCLAIMER } from "../ui/blocks.js";
 import { fmtCompact, fmtMoney, fmtNum, fmtPct, fmtYears, fmtKwh, fmtHour, plural } from "../ui/format.js";
 import { OBJ_LABEL, plateau, renderHeatmap, sliceFmt } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
@@ -33,7 +33,7 @@ export function rail(state, ctx) {
     K.household(false),
     K.rate(ctx, false),
     K.incentives(false),
-    K.future(ctx, false),
+    K.future(ctx, false, state),
     K.wear(false),
   ];
 }
@@ -152,7 +152,10 @@ export function mount(pane, state, ctx) {
   ]);
 
   pane.appendChild(el("div.dash-cols", {}, [left, right]));
+
+  pane.appendChild(el("p.disclaimer", { id: "dash-disclaimer", text: DISCLAIMER }));
 }
+
 
 export function render(state, ctx) {
   const cell = ctx.selected;
@@ -297,9 +300,12 @@ function verdictFor(npv) {
  * what the convenience of not paying up front costs.
  */
 function outlayTile(mode, fin, f, cell, ctx) {
+  // The roof faces' "Extra cost $" for the faces this system uses (main.js roofAdderFor),
+  // already inside f.gross / f.netCost; named here so the price is not a mystery.
+  const roof = cell.roofCostAdder > 0 && cell.panels > 0 ? ` · incl. ${fmtCompact(cell.roofCostAdder)} roof work` : "";
   if (mode === "cash") {
     return { k: "Cash up front", v: fmtCompact(f.netCost),
-      d: f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtCompact(f.gross)}` : "no incentive applied" };
+      d: (f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtCompact(f.gross)}` : "no incentive applied") + roof };
   }
   const gap = typeof ctx.cashNpv === "number" ? cell.npv - ctx.cashNpv : null;
   const vsCash = gap === null ? "" : ` · vs paying cash ${gap >= 0 ? "+" : "−"}${fmtCompact(Math.abs(gap))}`;
@@ -308,7 +314,7 @@ function outlayTile(mode, fin, f, cell, ctx) {
       d: `${fin.financing.lease.termYears} yr, ${fmtPct(fin.financing.lease.escalatorPct, 1)} escalator${vsCash}` };
   }
   return { k: "Loan payment", v: fmtMoney(f.monthlyPayment || 0) + "/mo",
-    d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr${vsCash}` };
+    d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr${vsCash}${roof}` };
 }
 
 /** SCE's sizing lines for this household; null for other utilities or before any meter data is loaded. */
@@ -370,22 +376,39 @@ function renderCapLine(state, ctx, cap) {
   }
 }
 
-/** With nothing paid up front the cash flow never changes sign, so there is no IRR. */
+/** core/finance's `irrReason` codes, as the tile's small print. */
+const IRR_REASON = {
+  "never repays": "savings never repay the price",
+  "no money down": "no money down, so no rate of return",
+  "no unique rate": "cash flow changes sign more than once, so no single rate",
+};
+
 /**
  * The IRR shown is the project IRR: what the system earns on its cash price,
  * whoever pays it.  Under a loan the useful comparison is the APR - if the
- * system earns more than the loan costs, borrowing was the right call.  The
+ * system earns more than the loan costs, financing it does not drag the return
+ * below the loan rate (whether cash or the loan has the higher NPV is a separate question).  The
  * levered IRR on the household's own cash flows is undefined with nothing down
  * and inflated with a little down, so it is not shown as a tile.
  */
 function irrTile(cell, fin, f) {
   const v = cell.projectIrr;
   const mode = fin.financing.mode;
-  if (v === null || v === undefined) return { k: "IRR", v: "—", d: "savings never repay the price" };
+  // No IRR (null, undefined, NaN): never print a number.  core/finance says why
+  // in `irrReason`, a short code about the levered `irr`; for cash the levered and
+  // project returns are the same cash flow, so its reason stands for this tile.
+  // Under a loan or lease "no money down" is about the household's cash, not the
+  // system, so only a `projectIrrReason` (if finance ever adds one) is used there.
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    const code = f.projectIrrReason || (mode === "cash" ? f.irrReason || cell.irrReason : null);
+    const why = !(f.netCost > 0) && mode !== "lease" ? "nothing is paid for the system, so no rate of return"
+      : IRR_REASON[code] || (typeof code === "string" && code) || "savings never repay the price";
+    return { k: mode === "cash" ? "IRR" : "IRR, system itself", v: "—", d: why };
+  }
   if (mode === "loan") {
     const apr = fin.financing.loan.apr;
     return { k: "IRR, system itself", v: fmtPct(v, 1),
-      d: `loan costs ${fmtPct(apr, 2)} · borrowing ${v > apr ? "wins" : "loses"}` };
+      d: `loan APR ${fmtPct(apr, 2)} · earns ${v > apr ? "more" : "less"} than the loan costs` };
   }
   return { k: mode === "lease" ? "IRR, system itself" : "IRR", v: fmtPct(v, 1), d: "vs " + fmtPct(fin.investReturn, 1) + " invested" };
 }

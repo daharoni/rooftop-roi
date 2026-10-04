@@ -106,7 +106,9 @@ bill). Every plan needs 24-hour period schedules for summer and winter weekdays 
 total $/kWh per period per provider, the fixed charge, and the export-rate matrices. Record
 `meta.rates_effective`, sources, and a confidence level. `node tests/validate-tariffs.mjs`
 checks the file. Utilities change rates two or three times a year, so check the effective
-date on the Assumptions tab and, if it is stale, use "Custom tariff from my bill".
+date on the Assumptions tab. Typing in your own rates from a bill is not supported yet; if the
+library is stale for your plan, pick the closest published plan and treat the results as approximate
+(or update the tariff file as above).
 
 ## Layout
 
@@ -122,12 +124,15 @@ docs/              architecture contract, model notes, tariff notes
 
 ## Disclaimer
 
-This is a planning tool, not financial or engineering advice. Utility rates, export prices,
-incentives, and equipment costs change; the model makes documented simplifications (see the
-Assumptions tab and `docs/engine.md`). Verify against installer proposals and your own bills
-before deciding.
+This is a planning tool. Its figures are estimates from a model, not a quote, and not financial,
+tax or engineering advice. Utility rates, export prices, incentives, and equipment costs change,
+sometimes several times a year; the model makes documented simplifications (see the Assumptions
+tab and `docs/engine.md`). Before deciding, verify the rates with your utility, the price and
+production with an installer's proposal and your own bills, and any tax treatment with a tax
+professional.
 
 ## License
 
 MIT. Map tiles © Esri and contributors; geocoding © OpenStreetMap contributors; weather data
-from Open-Meteo (CC BY 4.0).
+by [Open-Meteo.com](https://open-meteo.com/) under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (credited in the landing-page footer).

@@ -29,7 +29,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CALLS, HOSTS, NOT_REQUESTS } from "../app/privacy.js";
+import { CALLS, HOSTS, CONNECT_HOSTS, IMG_HOSTS, NOT_REQUESTS } from "../app/privacy.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -121,7 +121,10 @@ export function hostsIn(text, ext) {
 }
 
 function hostsInCode() {
-  const files = [...walk(join(ROOT, "app")), ...walk(join(ROOT, "core")), join(ROOT, "index.html")];
+  // app/vendor holds third-party libraries (Chart.js, Leaflet): their URLs are
+  // namespaces and links, and the CSP below is what bounds what they can request.
+  const files = [...walk(join(ROOT, "app")).filter((f) => !f.includes(`${join("app", "vendor")}/`)),
+    ...walk(join(ROOT, "core")), join(ROOT, "index.html")];
   const found = new Map();
   for (const f of files) {
     for (const host of hostsIn(readFileSync(f, "utf8"), extname(f))) {
@@ -166,8 +169,8 @@ test("every host in CALLS is still used somewhere", () => {
 });
 
 test("the hosts the 2026-10-02 review found undisclosed are all listed", () => {
-  for (const h of ["fonts.googleapis.com", "fonts.gstatic.com", "cdnjs.cloudflare.com",
-    "nominatim.openstreetmap.org", "geocoding-api.open-meteo.com", "api.open-meteo.com",
+  assert.ok(!HOSTS.includes("fonts.googleapis.com") && !HOSTS.includes("cdnjs.cloudflare.com"), "vendored assets are no longer third-party calls");
+  for (const h of ["nominatim.openstreetmap.org", "geocoding-api.open-meteo.com", "api.open-meteo.com",
     "archive-api.open-meteo.com", "server.arcgisonline.com"]) {
     assert.ok(HOSTS.includes(h), h);
   }
@@ -186,4 +189,38 @@ test("the landing page no longer promises that a ZIP or the map sends nothing", 
   assert.doesNotMatch(landing, /nothing you typed is sent anywhere/);
   assert.doesNotMatch(landing, /sends nothing but tile coordinates/);
   assert.match(landing, /github\.com\/daharoni\/rooftop-roi/);
+});
+
+/** The hosts of one CSP directive in index.html (scheme-less host sources only). */
+function cspHosts(directive) {
+  const html = readFileSync(join(ROOT, "index.html"), "utf8");
+  const m = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/);
+  assert.ok(m, "index.html has a Content-Security-Policy meta tag");
+  const d = m[1].split(";").map((x) => x.trim()).find((x) => x.startsWith(directive + " "));
+  assert.ok(d, `CSP has ${directive}`);
+  return d.split(/\s+/).slice(1).filter((t) => !t.startsWith("'") && !/^[a-z]+:$/.test(t))
+    .map((t) => t.replace(/^https:\/\//, ""));
+}
+
+test("CSP connect-src and img-src name exactly the hosts in privacy.js", () => {
+  assert.deepEqual(cspHosts("connect-src").sort(), [...CONNECT_HOSTS].sort());
+  assert.deepEqual(cspHosts("img-src").sort(), [...IMG_HOSTS].sort());
+});
+
+test("CSP keeps scripts, fonts and workers local", () => {
+  const html = readFileSync(join(ROOT, "index.html"), "utf8");
+  const csp = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/)[1];
+  assert.match(csp, /(^|; )script-src 'self'(;|$)/);
+  assert.match(csp, /(^|; )font-src 'self'(;|$)/);
+  assert.match(csp, /(^|; )default-src 'self'(;|$)/);
+  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/);
+  // No external script or stylesheet is referenced from the page.
+  assert.doesNotMatch(html, /<(script|link)\b[^>]*(src|href)="https?:\/\//);
+});
+
+test("the tile provider block in roofBuilder.js only names hosts that are in IMG_HOSTS", () => {
+  const src = readFileSync(join(ROOT, "app/roof/roofBuilder.js"), "utf8");
+  const block = src.slice(src.indexOf("TILE_PROVIDERS = {"), src.indexOf("export const TILE_PROVIDER ="));
+  const urls = [...block.matchAll(/url: 'https:\/\/([^/']+)/g)].map((m) => m[1]);
+  assert.deepEqual(urls.sort(), [...IMG_HOSTS].sort());
 });

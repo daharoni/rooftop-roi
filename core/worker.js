@@ -82,7 +82,7 @@
       }));
       var r = E.simulate(ctx, q, {});
       return { savings: r.savingsVsSameFlex, importSavings: r.importSavingsVsSameFlex,
-               exportRevenue: r.exportRevenue, bill: r.bill,
+               exportRevenue: r.exportRevenue, accPlusRevenue: r.accPlusRevenue, bill: r.bill,
                baselineBill: r.baselineSameFlex.bill };
     };
     return { label: "Flexible load kWh/yr", low: mk(0.8), high: mk(1.2) };
@@ -124,7 +124,7 @@
         var s = E.simulate(ctx, q, {});
         return { key: w.key, label: w.label, group: w.group, pvKwh: s.pvKwh, bill: s.bill,
                  savings: s.savingsVsSameFlex, importSavings: s.importSavingsVsSameFlex,
-                 exportRevenue: s.exportRevenue, baselineBill: s.baselineSameFlex.bill };
+                 exportRevenue: s.exportRevenue, accPlusRevenue: s.accPlusRevenue, baselineBill: s.baselineSameFlex.bill };
       });
       // The hourly arrays are only meaningful to the charts that ask for them.
       if (!m.wantHourly) delete res.hourly;

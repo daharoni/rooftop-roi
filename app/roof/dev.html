@@ -4,9 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roof builder — dev harness</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../vendor/fonts/plex.css">
 <link rel="stylesheet" href="../../docs/reference-styles.css">
 <link rel="stylesheet" href="./roof.css">
 <style>
@@ -51,7 +49,7 @@
   const rb = mountRoofBuilder(document.getElementById('mount'), {
     site: { lat: 34.15, lon: -118.75 },
     planes: [],
-    panel: { w: 460, widthM: 1.134, heightM: 1.762 },
+    panel: { w: 460 },   // watts alone is the normal form; widthM/heightM (both) would override the derived size
     onChange(planes) {
       emits++;
       counter.textContent = `${emits} emit${emits === 1 ? '' : 's'} · ${planes.length} plane${planes.length === 1 ? '' : 's'}`;

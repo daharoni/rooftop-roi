@@ -33,9 +33,26 @@ export function destroyAll() {
  * axis on every render.  A fresh canvas (first paint, or a tab rebuilt) gets a
  * new chart and the one-time rise.
  */
+export const CHART_FAIL_TEXT = "Charts couldn't load (the chart library is blocked or offline). "
+  + "The numbers above are unaffected.";
+
+/**
+ * Chart.js missing (an extension or network blocked app/vendor/chart.umd.min.js)
+ * or throwing on this canvas: hide the canvas and say so in its box, once, so
+ * the page never shows a silent blank.  Every figure also has a table twin and
+ * the tiles are plain DOM, so nothing else depends on the library.
+ */
+function showChartFailure(node) {
+  node.hidden = true;
+  const host = node.parentElement;
+  if (!host || host.querySelector(".chart-fail")) return;
+  host.appendChild(el("div.chart-fail", { role: "note", text: CHART_FAIL_TEXT }));
+}
+
 export function draw(id, config) {
   const node = $(id);
-  if (!node || typeof Chart === "undefined") return null;
+  if (!node) return null;
+  if (typeof Chart === "undefined") { showChartFailure(node); return null; }
   const prev = charts.get(id);
   if (prev && prev.canvas === node && prev.config.type === config.type) {
     prev.data.labels = config.data.labels;
@@ -52,7 +69,13 @@ export function draw(id, config) {
     return prev;
   }
   destroyChart(id);
-  const chart = new Chart(node.getContext("2d"), config);
+  let chart;
+  try { chart = new Chart(node.getContext("2d"), config); }
+  catch (err) {
+    console.error(`Chart ${id} could not be drawn:`, err && err.message);
+    showChartFailure(node);
+    return null;
+  }
   charts.set(id, chart);
   return chart;
 }

@@ -5,6 +5,7 @@ import G, {
   polygonAreaM2, polygonCentroid, edgeBearing, azimuthFromGutter, planeAreaFromFootprint,
   usableFraction, panelCount, layoutPanels, pitchOptions, pointInPolygonXY, localFrame,
   compassShort, compassName, edgePair, edgeIndexOf, m2ToFt2, DEFAULT_PANEL,
+  isSimplePolygon, panelDims, resolvePanel,
 } from '../app/roof/geometry.js';
 
 const LAT = 34.15;           // the reference site, Agoura Hills
@@ -265,11 +266,194 @@ test('shade steps are the documented 0 / 5 / 15 / 30 %', () => {
   assert.equal(G.shadeStepFor(0.9).key, 'heavy');
 });
 
+/* ------------------------------------------------- concave / winding */
+
+/** A thin L (4 m arms, 30 m long), counter-clockwise, in local metres. Its
+ *  centroid sits out past the inner corner, so the old "away from the
+ *  centroid" rule picked the wrong side for both notch edges (2 and 3). */
+const L_XY = [[0, 0], [30, 0], [30, 4], [4, 4], [4, 30], [0, 30]];
+
+test('azimuthFromGutter: L-shape notch edges face into the notch (CCW and CW)', () => {
+  const f = localFrame([[LAT, LON]]);
+  const ccw = L_XY.map(f.toLatLng);
+  // Confirm the centroid really is on the wrong side of edge 2, so this test bites.
+  const c = f.toXY(polygonCentroid(ccw));
+  assert.ok(c[1] > 4 && c[0] > 4, 'centroid is out in the notch, beyond the inner corner');
+  const want = [180, 90, 0, 90, 0, 270];         // outward normal of each edge
+  for (let i = 0; i < 6; i++) {
+    assert.ok(Math.abs(G.angleDelta(azimuthFromGutter(ccw, i), want[i])) < 0.5,
+      `CCW edge ${i}: got ${azimuthFromGutter(ccw, i)}, want ${want[i]}`);
+  }
+  // Same ring wound clockwise: edge k of the reversed ring is edge 4-k reversed.
+  const cw = [...ccw].reverse();
+  for (let i = 0; i < 6; i++) {
+    const orig = (6 + 4 - i) % 6;
+    assert.ok(Math.abs(G.angleDelta(azimuthFromGutter(cw, i), want[orig])) < 0.5,
+      `CW edge ${i}: got ${azimuthFromGutter(cw, i)}, want ${want[orig]}`);
+  }
+  assert.ok(Math.abs(azimuthFromGutter(cw, [3, 2]) - 0) < 0.5 ||
+            Math.abs(azimuthFromGutter(cw, [3, 2]) - 360) < 0.5, 'pair form on a CW ring');
+});
+
+test('azimuthFromGutter: rectangle unchanged in both windings (no regression)', () => {
+  const r = rectAt(LAT, LON, 100, 60);
+  const rev = [...r].reverse();          // rev edge k = r edge (2-k) mod 4, reversed
+  const want = [180, 90, 0, 270];
+  for (let i = 0; i < 4; i++) {
+    assert.ok(Math.abs(G.angleDelta(azimuthFromGutter(r, i), want[i])) < 0.5);
+    assert.ok(Math.abs(G.angleDelta(azimuthFromGutter(rev, i), want[(4 + 2 - i) % 4])) < 0.5);
+  }
+});
+
+test('layoutPanels: on an L with a notch-edge gutter, rows climb away from the notch', () => {
+  const f = localFrame([[LAT, LON]]);
+  const L = [[0, 0], [30, 0], [30, 8], [8, 8], [8, 30], [0, 30]].map(f.toLatLng);
+  for (const ring of [L, [...L].reverse()]) {
+    const gutter = 2;      // the y = 8 inner edge: index 2 in both windings (k ↔ 4−k)
+    const out = layoutPanels(ring, gutter, 26.6, PANEL);
+    assert.ok(out.count > 0, 'the 8 m arm takes modules');
+    const poly = ring.map(f.toXY);
+    for (const rect of out.rects) {
+      const p = rect.map(f.toXY);
+      assert.ok(p[3][1] - p[0][1] < 0, 'uphill runs south, away from the notch gutter');
+      for (const c of p) assert.ok(pointInPolygonXY(c, poly));
+    }
+  }
+});
+
+/* ------------------------------------------------------- self-intersection */
+
+test('isSimplePolygon: bow-tie, spike and repeat are not simple; rect, L, triangle are', () => {
+  const f = localFrame([[LAT, LON]]);
+  const ll = (pts) => pts.map(f.toLatLng);
+  assert.equal(isSimplePolygon(rectAt(LAT, LON, 10, 6)), true);
+  assert.equal(isSimplePolygon([...rectAt(LAT, LON, 10, 6)].reverse()), true);
+  assert.equal(isSimplePolygon(ll(L_XY)), true);
+  assert.equal(isSimplePolygon(ll([[0, 0], [10, 0], [5, 8]])), true);
+  assert.equal(isSimplePolygon(ll([[0, 0], [10, 10], [10, 0], [0, 10]])), false, 'bow-tie');
+  assert.equal(isSimplePolygon(ll([[0, 0], [10, 0], [10, 10], [10, 5], [0, 10]])), false, 'spike back along an edge');
+  assert.equal(isSimplePolygon(ll([[0, 0], [10, 0], [10, 0], [0, 10]])), false, 'repeated vertex');
+  assert.equal(isSimplePolygon(ll([[0, 0], [10, 0], [5, 5], [10, 10], [0, 10], [5, 5]])), false, 'touching at a vertex');
+  assert.equal(isSimplePolygon(ll([[0, 0], [10, 0]])), false);
+  assert.equal(isSimplePolygon(null), false);
+});
+
+test('isSimplePolygon: exactly collinear rings read off a lat/lon grid are not simple', () => {
+  // Integer points on a 1e-5 deg (~1 m) grid, as a map click would give. Lat/lon rounding
+  // left these collinear cases a few 1e-9 m² off zero, above the old fixed 1e-9 m² cut.
+  const grid = (pts, step = 1e-5) => pts.map(([x, y]) => [LAT + y * step, LON - 0.01 + x * step]);
+  const bad = {
+    'all on one line': [[2, 2], [3, 3], [1, 1], [3, 1]],
+    'flat triangle': [[2, 17], [16, 3], [9, 10]],
+    'vertex on a non-adjacent edge': [[4, 0], [4, 2], [2, 4], [4, 5], [0, 3]],
+  };
+  for (const [name, pts] of Object.entries(bad)) {
+    assert.equal(isSimplePolygon(grid(pts)), false, name);
+    assert.equal(isSimplePolygon(grid([...pts].reverse())), false, `${name} (reversed)`);
+  }
+  // Genuine shapes on the same grid stay simple, including a shallow ridge vertex.
+  assert.equal(isSimplePolygon(grid([[0, 0], [4, 0], [4, 3], [0, 3]])), true);
+  assert.equal(isSimplePolygon(grid([[0, 0], [10, 0], [10, 1], [5, 2], [0, 1]])), true);
+  assert.equal(isSimplePolygon(grid([[0, 0], [1000, 0], [1000, 1], [0, 1]], 1e-6)), true, 'long thin');
+  // And at a 1 cm grid.
+  assert.equal(isSimplePolygon(grid([[0, 0], [4, 0], [4, 3], [0, 3]], 1e-7)), true);
+  assert.equal(isSimplePolygon(grid([[0, 0], [2, 2], [4, 4]], 1e-7)), false);
+});
+
+test('self-intersecting traces are invalid: area 0, count 0, layout flagged', () => {
+  const f = localFrame([[LAT, LON]]);
+  const bow = [[0, 0], [10, 10], [10, 0], [0, 10]].map(f.toLatLng);
+  assert.equal(polygonAreaM2(bow), 0);
+  assert.equal(panelCount(polygonAreaM2(bow), 26.6, PANEL), 0);
+  assert.equal(panelCount(bow, 26.6, PANEL), 0, 'polygon form');
+  const out = layoutPanels(bow, 0, 26.6, PANEL);
+  assert.equal(out.count, 0);
+  assert.deepEqual(out.rects, []);
+  assert.equal(out.invalid, 'self-intersecting');
+  assert.ok(Number.isFinite(azimuthFromGutter(bow, 0)), 'azimuth stays a number');
+  // A valid face carries no `invalid` key, and the polygon form of panelCount agrees.
+  const r = rectAt(LAT, LON, 10, 6);
+  assert.equal('invalid' in layoutPanels(r, 0, 26.6, PANEL), false);
+  assert.equal(panelCount(r, 26.6, PANEL), panelCount(polygonAreaM2(r), 26.6, PANEL));
+});
+
+/* ---------------------------------------------------------- module size */
+
+test('panelDims: 460 W reproduces the reference module exactly', () => {
+  assert.deepEqual(panelDims(460), { widthM: 1.134, heightM: 1.762 });
+  assert.equal(DEFAULT_PANEL.widthM, 1.134);
+  assert.equal(DEFAULT_PANEL.heightM, 1.762);
+  assert.deepEqual(panelDims(undefined), panelDims(460));
+  assert.deepEqual(panelDims(-3), panelDims(460));
+  assert.deepEqual(panelDims('abc'), panelDims(460));
+});
+
+test('panelDims: higher watts never give a smaller module; width class steps at 500 W', () => {
+  let prev = 0;
+  for (let w = 100; w <= 1000; w += 5) {          // the hash accepts 100–1000 W
+    const d = panelDims(w);
+    const area = d.widthM * d.heightM;
+    assert.ok(area > prev, `${w} W area ${area} did not grow past ${prev}`);
+    prev = area;
+    assert.equal(d.widthM, w > 500 ? 1.303 : 1.134);
+  }
+  for (let w = 350; w <= 560; w += 5) {           // the knob's range
+    const h = panelDims(w).heightM;
+    assert.ok(h > 1.3 && h < 2.0, `${w} W height ${h} m is not a plausible module`);
+  }
+  // Area tracks watts at the reference 23 % gross efficiency, to the mm rounding.
+  for (const w of [400, 550]) {
+    const d = panelDims(w);
+    assert.ok(pct(d.widthM * d.heightM, 1.134 * 1.762 * w / 460) < 0.002);
+  }
+});
+
+test('the panel-watt knob reaches the layout: {...DEFAULT_PANEL, w} derives dims', () => {
+  // This is exactly what roofBuilder does with the app's { w: state.system.panelW }.
+  const merged = (w) => ({ ...DEFAULT_PANEL, ...{ w } });
+  assert.deepEqual(resolvePanel(merged(400)), { w: 400, ...panelDims(400) });
+  assert.deepEqual(resolvePanel(merged(460)), { w: 460, widthM: 1.134, heightM: 1.762 });
+  assert.deepEqual(resolvePanel(undefined), { w: 460, widthM: 1.134, heightM: 1.762 });
+  // Explicit dimensions still win (dev.html passes them).
+  assert.deepEqual(resolvePanel({ w: 400, widthM: 1.0, heightM: 1.7 }), { w: 400, widthM: 1.0, heightM: 1.7 });
+  // A string watt value (a form field) is coerced, not carried through as text.
+  assert.deepEqual(resolvePanel({ w: '400' }), { w: 400, ...panelDims(400) });
+  assert.deepEqual(resolvePanel({ w: 'abc' }), { w: 460, widthM: 1.134, heightM: 1.762 });
+  assert.equal(resolvePanel({ w: '400', widthM: 1.0, heightM: 1.7 }).w, 400);
+  // One explicit side: the other comes from the module's area at w, not the side dropped.
+  const area400 = 1.134 * 1.762 * 400 / 460;
+  const onlyW = resolvePanel({ w: 400, widthM: 1.0 });
+  assert.equal(onlyW.widthM, 1.0);
+  assert.equal(onlyW.heightM, Math.round(area400 / 1.0 * 1000) / 1000);
+  const onlyH = resolvePanel({ w: 460, heightM: 2.0 });
+  assert.equal(onlyH.heightM, 2.0);
+  assert.equal(onlyH.widthM, Math.round(1.134 * 1.762 / 2.0 * 1000) / 1000);
+
+  // 460 W results do not move.
+  assert.equal(panelCount(60, 26.6, merged(460)), panelCount(60, 26.6, PANEL));
+  const r = rectAt(LAT, LON, 12, 8);
+  assert.equal(layoutPanels(r, 0, 26.6, merged(460)).count, layoutPanels(r, 0, 26.6, PANEL).count);
+
+  // Bigger modules, fewer of them; smaller, more.
+  assert.ok(panelCount(60, 26.6, merged(400)) > panelCount(60, 26.6, merged(460)));
+  assert.ok(panelCount(60, 26.6, merged(550)) < panelCount(60, 26.6, merged(460)));
+  const big = layoutPanels(rectAt(LAT, LON, 16, 10), 0, 26.6, merged(550));
+  const f = localFrame(rectAt(LAT, LON, 16, 10));
+  for (const rect of big.rects) {
+    const p = rect.map(f.toXY);
+    assert.ok(Math.abs(Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]) - 1.303) < 1e-3, '550 W is the wide class');
+  }
+  // Installed kW from the area stays roughly flat across the knob (area ∝ W).
+  const kw = (w) => panelCount(200, 26.6, merged(w)) * w / 1000;
+  assert.ok(pct(kw(400), kw(460)) < 0.05 && pct(kw(550), kw(460)) < 0.05);
+});
+
 /* --------------------------------------------------------- module shape */
 
 test('module exports a default object with every named function', () => {
   for (const k of ['polygonAreaM2', 'edgeBearing', 'azimuthFromGutter', 'planeAreaFromFootprint',
-                   'usableFraction', 'panelCount', 'layoutPanels', 'pitchOptions']) {
+                   'usableFraction', 'panelCount', 'layoutPanels', 'pitchOptions',
+                   'isSimplePolygon', 'panelDims', 'resolvePanel']) {
     assert.equal(typeof G[k], 'function', `default export is missing ${k}`);
   }
 });

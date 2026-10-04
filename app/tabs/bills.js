@@ -21,18 +21,12 @@ export const id = "bills";
 export const label = "Bills & money";
 
 export function rail(state, ctx) {
-  const custom = state.tariff.planId === "custom";
   return [
     K.rate(ctx, true),
     K.financing(true),
     K.replay(true),
-    { group: "Build a rate from your bill", open: false, items: [
-      { path: "ui.customEnabled", kind: "check", label: "Use rates I type in instead" },
-      { path: "tariff.custom.fixedPerDay", kind: "number", label: "Base charge, $/day", min: 0, step: 0.01, show: () => custom },
-      { path: "tariff.custom.onPeak", kind: "number", label: "On-peak, $/kWh", min: 0, step: 0.001, show: () => custom },
-      { path: "tariff.custom.midPeak", kind: "number", label: "Mid-peak, $/kWh", min: 0, step: 0.001, show: () => custom },
-      { path: "tariff.custom.offPeak", kind: "number", label: "Off-peak, $/kWh", min: 0, step: 0.001, show: () => custom },
-    ] },
+    // "Build a rate from your bill" is not offered: custom rates are not wired into the
+    // engine yet, and a control that only says so is a promise the page cannot keep.
     K.price(ctx, false),
     K.incentives(false),
   ];

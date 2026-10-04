@@ -7,6 +7,7 @@
  * ========================================================================== */
 
 import { fmtMoney, fmtNum, fmtPct, fmtYears } from "./format.js";
+import { DISCLAIMER } from "./blocks.js";
 import { sizingCapFor } from "../../core/sizing.js";
 
 export function summaryText(state, ctx) {
@@ -83,7 +84,7 @@ export function summaryText(state, ctx) {
   L.push(`         production         ${fmtNum(cell.pvKwh, 0)} kWh/yr, ${fmtPct(cell.selfSufficiency, 0)} self-sufficient, `
     + `${fmtNum(cell.exportKwh, 0)} kWh exported, ${fmtNum(cell.cycles, 0)} cycles/yr`);
   L.push("");
-  L.push("Not financial advice and not a quote. Rates change; check the Assumptions tab for effective dates.");
+  L.push(DISCLAIMER);
   if (typeof location !== "undefined") L.push(`Reproduce this exact scenario: ${location.href}`);
   return L.join("\n");
 }

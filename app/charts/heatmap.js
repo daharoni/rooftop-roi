@@ -22,7 +22,12 @@ export const OBJ_LABEL = {
 
 /** Every objective restated as "higher is better, zero = no better than nothing". */
 export function goodness(cell, objective, fin) {
-  if (objective === "irr") return cell.irr === null || cell.irr === undefined ? -1 : cell.irr - fin.investReturn;
+  if (objective === "irr") {
+    // The IRR the optimiser ranks by (core/optimizer irrRank): the project IRR, which
+    // exists under a no-money-down loan where the levered `irr` does not.
+    const v = cell.projectIrr !== undefined ? cell.projectIrr : cell.irr;
+    return typeof v === "number" && Number.isFinite(v) ? v - fin.investReturn : -1;
+  }
   if (objective === "payback") {
     return cell.payback === null || cell.payback === undefined ? -fin.horizon : fin.horizon - cell.payback;
   }
@@ -125,10 +130,10 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
         "data-best": isBest ? "1" : null,
         "data-near": isNear ? "1" : null,
         "data-sel": isSel ? "1" : null,
-        title: `${p} panels, ${plural(b, "battery", "batteries")} — NPV ${fmtMoney(cell.npv)}, payback ${fmtYears(cell.payback)}`
+        title: `${plural(p, "panel", "panels")}, ${plural(b, "battery", "batteries")} — NPV ${fmtMoney(cell.npv)}, payback ${fmtYears(cell.payback)}`
           + (isNear ? ` — within ${sliceFmt(flat.tol, objective)} of the best` : "")
           + (over ? " — above SCE's 150% sizing line" : ""),
-        "aria-label": `${p} panels, ${plural(b, "battery", "batteries")}, NPV ${fmtMoney(cell.npv)}`
+        "aria-label": `${plural(p, "panel", "panels")}, ${plural(b, "battery", "batteries")}, NPV ${fmtMoney(cell.npv)}`
           + (isNear ? ", effectively tied with the best" : ""),
         on: { click: () => onPick && onPick(p, b) },
       }));

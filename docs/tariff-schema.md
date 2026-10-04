@@ -199,11 +199,11 @@ schedule.winter.weekend  = [24 period ids]
 ```
 
 All four arrays are required, each exactly 24 entries, each entry a member of `period_ids`.
-**Holidays bill the weekend schedule** — `core/tariff.js` handles that, the file carries no
-holiday table. The eight: New Year's Day, Presidents' Day, Memorial Day, Independence Day,
-Labor Day, Veterans Day, Thanksgiving, Christmas. Fixed-date holidays are matched on both the
-actual and the *observed* date (Sat → the Friday before, Sun → the Monday after), so a
-Monday can be a weekend day.
+**Holidays bill the weekend schedule** — `core/periods.js` handles that (`core/tariff.js`
+and the engine both use it), the file carries no holiday table. The eight: New Year's Day,
+Presidents' Day, Memorial Day, Independence Day, Labor Day, Veterans Day, Thanksgiving,
+Christmas. A fixed-date holiday on a Sunday is also observed the Monday after, so a Monday
+can be a weekend day; a holiday on a Saturday is **not** moved to the Friday.
 
 Hour index is **hour-beginning in local prevailing (clock) time**, DST included. Index 16 is
 4–5 p.m.

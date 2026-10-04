@@ -4,11 +4,12 @@
  *   mountRoofBuilder(el, {
  *     site: { lat, lon } | null,
  *     planes: Plane[],
- *     panel: { w: 460, widthM: 1.134, heightM: 1.762 },
+ *     panel: { w: 460 },   // watts alone is the normal form: module size is derived from it
+ *                          // (geometry.resolvePanel). widthM/heightM, if both given, override.
  *     onChange(planes),                       // every edit, Plane[] per ARCHITECTURE.md
  *     onSiteChange({ lat, lon }),             // the user set coordinates here
  *     onCalibration({ installerAnnualKwh }),  // proposal path only
- *   }) -> { destroy, setPlanes, setSite, setPath }
+ *   }) -> { destroy, setPlanes, setSite, setPath, setPanel }
  *
  * Three ways in, one list out. The emitted objects are exactly the Plane shape
  * from ARCHITECTURE.md and nothing else — anything the UI needs to remember
@@ -18,22 +19,54 @@
  * If `planes` arrives empty the builder seeds one south-facing starter face so
  * the panel opens in a working state, and emits it. Pass planes to override.
  *
- * Leaflet 1.9.4 and its stylesheet are fetched from cdnjs the first time the
- * map path is opened, so the other two paths cost no network at all.
+ * Leaflet 1.9.4 and its stylesheet are served from app/vendor/leaflet the first
+ * time the map path is opened, so the other two paths load nothing extra.
  * ========================================================================== */
 
 import G, {
   polygonAreaM2, polygonCentroid, azimuthFromGutter, edgePair, edgeIndexOf,
   planeAreaFromFootprint, usableFraction, panelCount, layoutPanels, pitchOptions,
   pitchRatioFor, compassShort, compassName, shadeSteps, shadeStepFor, norm360,
-  localFrame, m2ToFt2, ftToM, mToFt, clamp, DEFAULT_PANEL,
+  localFrame, m2ToFt2, ftToM, mToFt, clamp, DEFAULT_PANEL, isSimplePolygon,
 } from './geometry.js';
 
-const LEAFLET_VER = '1.9.4';
-const LEAFLET_JS  = `https://cdnjs.cloudflare.com/ajax/libs/leaflet/${LEAFLET_VER}/leaflet.min.js`;
-const LEAFLET_CSS = `https://cdnjs.cloudflare.com/ajax/libs/leaflet/${LEAFLET_VER}/leaflet.min.css`;
-const ESRI_TILES  = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-const ESRI_ATTR   = 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+const LEAFLET_JS  = new URL('../vendor/leaflet/leaflet.min.js', import.meta.url).href;
+const LEAFLET_CSS = new URL('../vendor/leaflet/leaflet.min.css', import.meta.url).href;
+
+/* -------------------------------------------------------------------------
+ * SATELLITE TILE PROVIDER: the single place to change it.
+ *
+ * !! 'esri' IS NOT LICENSED FOR COMMERCIAL OR AD-SUPPORTED USE. Switch
+ * !! TILE_PROVIDER before any public/commercial launch (see
+ * !! docs/launch-licensing.md). Every host below must also be listed in
+ * !! app/privacy.js CALLS and in the CSP img-src in index.html (a test checks).
+ *
+ * usgs: public domain, but its cache stops at z16 (~2.4 m/px); too coarse to
+ *       trace a roof. Fine as a placeholder, not as the product.
+ * maptiler: needs a key from https://cloud.maptiler.com; put it in
+ *       MAPTILER_KEY (browser keys are public: restrict it by origin in
+ *       MapTiler's dashboard).
+ * ----------------------------------------------------------------------- */
+const MAPTILER_KEY = '';
+export const TILE_PROVIDERS = {
+  esri: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    maxNativeZoom: 19,
+  },
+  usgs: {
+    url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Imagery: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a>',
+    maxNativeZoom: 16,   // verified: z17+ returns 404 (tested at three US points)
+  },
+  maptiler: {
+    url: 'https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key={key}',
+    attribution: '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+    maxNativeZoom: 20,
+    key: MAPTILER_KEY,
+  },
+};
+export const TILE_PROVIDER = 'esri';
 
 const CSS_HREF = new URL('./roof.css', import.meta.url).href;
 const FACE_VARS = ['--s1', '--s2', '--s3', '--s7', '--s5', '--s4', '--s8', '--s6'];
@@ -134,7 +167,7 @@ const baseName = (az) => `${cap(compassName(az))} face`;
 export function mountRoofBuilder(el, opts = {}) {
   ensureStylesheet();
 
-  const panel = { ...DEFAULT_PANEL, ...(opts.panel || {}) };
+  let panel = { ...DEFAULT_PANEL, ...(opts.panel || {}) };   // setPanel() replaces it
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {};
   const onSiteChange = typeof opts.onSiteChange === 'function' ? opts.onSiteChange : () => {};
   const onCalibration = typeof opts.onCalibration === 'function' ? opts.onCalibration : () => {};
@@ -494,6 +527,10 @@ export function mountRoofBuilder(el, opts = {}) {
   const mapTip = h('div', { class: 'rb-map-tip', hidden: true });
   const mapEl = h('div', { class: 'rb-map' });
   const mapNotice = h('div', { class: 'rb-notice', hidden: true });
+  const CROSSING_MSG = "This outline crosses itself. Drag the corner back so the edges don't cross.";
+  const mapCrossing = h('div', { class: 'rb-notice', role: 'alert', hidden: true, text: CROSSING_MSG });
+  /** Show or hide the self-crossing warning for the face being drawn or edited. */
+  function showCrossing(bad) { mapCrossing.hidden = !bad; }
   const mapMeasure = h('div', { class: 'rb-measure' });
   const mapDetail = h('div', { hidden: true });
   const mapToolbar = h('div', { class: 'rb-btn-row', style: { marginTop: '12px' } });
@@ -546,7 +583,7 @@ export function mountRoofBuilder(el, opts = {}) {
       mapSteps,
       h('p', { class: 'rb-fine rb-lap-hint', style: { marginTop: '8px' }, text: 'Tracing is easier on a laptop, where you can click precisely. On a phone: pinch to zoom, then tap each corner.' }),
       h('div', { class: 'rb-map-wrap' }, mapEl, mapTip),
-      mapToolbar, mapMeasure, mapNotice),
+      mapToolbar, mapMeasure, mapCrossing, mapNotice),
     mapDetail);
 
   function stepLi(n, title, body) {
@@ -587,7 +624,9 @@ export function mountRoofBuilder(el, opts = {}) {
     map = L.map(mapEl, { zoomControl: false, doubleClickZoom: false, attributionControl: true })
       .setView([st.site.lat, st.site.lon], 20);
     L.control.zoom({ position: 'topright' }).addTo(map);
-    tiles = L.tileLayer(ESRI_TILES, { maxZoom: 21, maxNativeZoom: 19, attribution: ESRI_ATTR, crossOrigin: true });
+    const tp = TILE_PROVIDERS[TILE_PROVIDER];
+    tiles = L.tileLayer(tp.url.replace('{key}', encodeURIComponent(tp.key || '')),
+      { maxZoom: 21, maxNativeZoom: tp.maxNativeZoom, attribution: tp.attribution, crossOrigin: true });
     tiles.on('tileload', () => { tilesSeen++; if (tilesSeen > 0) hideOffline(); });
     tiles.on('tileerror', () => { tileErrors++; if (tilesSeen === 0 && tileErrors >= 3) showOffline('tiles'); });
     tiles.addTo(map);
@@ -603,8 +642,8 @@ export function mountRoofBuilder(el, opts = {}) {
     mapNotice.replaceChildren(
       h('b', { text: kind === 'lib' ? 'The map could not load.' : 'The satellite photos are not loading.' }),
       document.createTextNode(kind === 'lib'
-        ? ' Leaflet is fetched from cdnjs, so this usually means no connection or a blocked CDN. Nothing else in the tool needs it.'
-        : ' You are probably offline or behind a filter that blocks Esri. Everything else still works.'),
+        ? ' The map library is served from this site, so this usually means the page was only partly loaded; try reloading. Nothing else in the tool needs it.'
+        : ' You are probably offline or behind a filter that blocks the imagery provider. Everything else still works.'),
       h('div', {}, h('button', { type: 'button', class: 'rb-btn', text: 'Describe the face instead', onclick: () => setPath('simple') })));
   }
   function hideOffline() { if (mapNotice.textContent.includes('satellite')) mapNotice.hidden = true; }
@@ -633,6 +672,7 @@ export function mountRoofBuilder(el, opts = {}) {
 
   function cancelDraw() {
     draft = [];
+    mapCrossing.hidden = true;
     if (draftLine) { map.removeLayer(draftLine); draftLine = null; }
     draftVerts.forEach((m) => map.removeLayer(m));
     draftVerts = [];
@@ -674,6 +714,7 @@ export function mountRoofBuilder(el, opts = {}) {
     });
     btnUndo.disabled = draft.length === 0;
     btnDone.disabled = draft.length < 3;
+    showCrossing(draft.length >= 4 && !isSimplePolygon(draft));
     if (draft.length === 1) tip('Keep going — click the next corner.');
     if (draft.length >= 3) tip('Click the <b>first dot</b> to close the shape, or keep adding corners.');
   }
@@ -682,6 +723,7 @@ export function mountRoofBuilder(el, opts = {}) {
     if (draft.length < 3) return;
     const polygon = draft.slice();
     cancelDraw();
+    showCrossing(!isSimplePolygon(polygon));
     const p = adoptPlane({ name: 'Roof face', tilt: 26.6, azimuth: 180, polygon });
     st.planes.push(p);
     st.selectedId = p.id;
@@ -734,6 +776,7 @@ export function mountRoofBuilder(el, opts = {}) {
     const m = metaOf(p.id);
     if (!p.polygon || !p.gutterEdge) return;
     const out = layoutPanels(p.polygon, p.gutterEdge, p.tilt, panel);
+    if (p.id === st.selectedId) showCrossing(!isSimplePolygon(p.polygon) || !!out.invalid);
     m.layoutMax = out.count;
     m.rects = out.rects;
     m.footprintM2 = out.areaM2;
@@ -793,7 +836,7 @@ export function mountRoofBuilder(el, opts = {}) {
           draggable: true, icon: L.divIcon({ className: '', html: '<div class="rb-vertex"></div>', iconSize: [0, 0] }),
           keyboard: false, zIndexOffset: 700,
         }).addTo(map);
-        mk.on('drag', (e) => { p.polygon[i] = [e.latlng.lat, e.latlng.lng]; poly.setLatLngs(p.polygon); });
+        mk.on('drag', (e) => { p.polygon[i] = [e.latlng.lat, e.latlng.lng]; poly.setLatLngs(p.polygon); showCrossing(!isSimplePolygon(p.polygon)); });
         mk.on('dragend', () => {
           p.azimuth = round1(azimuthFromGutter(p.polygon, p.gutterEdge));
           if (!metaOf(p.id).renamed) p.name = defaultName(p.azimuth, p.id);
@@ -813,6 +856,8 @@ export function mountRoofBuilder(el, opts = {}) {
 
   function syncMapDetail() {
     const p = selected();
+    if (p && p.polygon) showCrossing(!isSimplePolygon(p.polygon));
+    else if (mapState !== 'draw') showCrossing(false);
     if (!p || !p.polygon || !p.gutterEdge) { mapDetail.hidden = true; mapMeasure.replaceChildren(); return; }
     mapDetail.hidden = st.path !== 'map';
     const m = metaOf(p.id);
@@ -1073,6 +1118,27 @@ export function mountRoofBuilder(el, opts = {}) {
       if (st.path === 'simple') syncSimple();
     },
     setPath,
+    /**
+     * The panel wattage changed on the parent side. Re-lay-out every traced face
+     * (polygon + gutter) at the new module size and recount it; faces with no
+     * polygon (a panel count the user typed or an installer quote) are left alone.
+     */
+    setPanel(next) {
+      const merged = { ...DEFAULT_PANEL, ...(next || {}) };
+      if (merged.w === panel.w && merged.widthM === panel.widthM && merged.heightM === panel.heightM) return;
+      panel = merged;
+      let changed = false;
+      for (const p of st.planes) {
+        if (!p.polygon || !p.gutterEdge) continue;
+        const before = p.maxPanels;
+        relayout(p);
+        if (p.maxPanels !== before) changed = true;
+      }
+      if (st.path === 'map') syncMapDetail();
+      if (st.path === 'simple') syncSimple();
+      renderFaces();
+      if (changed) emit();
+    },
   };
 
   /* --------------------------------------------------------- the dial */

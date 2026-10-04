@@ -36,6 +36,7 @@ const OUT = path.join(ROOT, "app", "worker-bundle.js");
 
 /** Module file -> the global the worker script knows it by.  Order matters. */
 const MODULES = [
+  ["periods.js", "TouPeriods"],     // the one TOU-period lookup, shared with core/tariff.js
   ["flexload.js", "FlexLoad"],
   ["engine.js", "SolarEngine"],
   ["finance.js", "SolarFinance"],

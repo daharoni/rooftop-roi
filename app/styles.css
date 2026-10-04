@@ -221,7 +221,12 @@ a  { color: var(--accent); }
  * on screen while the controls move.
  * ====================================================================== */
 
-.shell { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100vh; height: 100dvh; }
+.shell { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); height: 100vh; height: 100dvh; }
+/* main.js inserts #app-banner between the tabs and the workbench.  Pinning both
+   to their rows keeps the workbench in the stretching row whether the banner is
+   shown or hidden (a hidden banner leaves an empty auto row, zero tall). */
+#app-banner { grid-row: 3; }
+.shell > .workbench { grid-row: 4; }
 
 .topbar {
   display: flex; align-items: center; gap: 12px; padding: 8px 18px;
@@ -412,6 +417,12 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
  * ====================================================================== */
 
 .chart-box { position: relative; width: 100%; }
+/* Chart.js missing (blocked or offline): base.js hides the canvas and says so in its place. */
+.chart-fail {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 8px 12px; text-align: center; font-size: 11.5px; color: var(--ink-2);
+  border: 1px dashed var(--rule); border-radius: var(--r-sm); background: var(--sunken);
+}
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 2px; font-size: 11px; color: var(--ink-2); }
 .legend .key { display: inline-flex; align-items: center; gap: 6px; }
 .legend .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
@@ -480,19 +491,51 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
   padding: 8px 15px; border-radius: 999px; z-index: 40; box-shadow: var(--shadow);
 }
 
+/* The phone-only jump between results and settings (main.js buildRailJump). */
+.rail-jump { display: none; }
+
 /* =========================================================================
- * Responsive — the rail stacks above the pane, the whole shell scrolls.
+ * Responsive — results first: the pane stacks above the rail, the whole shell
+ * scrolls, the tab strip sticks to the top, and a floating button jumps
+ * between the results and the settings.  The DOM order (rail, then pane) is
+ * unchanged, so wide screens and assistive tech see the same document.
  * ====================================================================== */
 
+/* Source citations end in long unbroken URLs; let them wrap rather than push the page sideways on a phone. */
+#sources-body li { overflow-wrap: anywhere; }
+
 @media (max-width: 1000px) {
+  .tabs { position: sticky; top: 0; z-index: 20; }
+  .workbench { display: flex; flex-direction: column; }
+  .pane { order: 1; scroll-margin-top: 44px; }
+  .rail { order: 2; border-top: 1px solid var(--border); scroll-margin-top: 44px; }
+  .rail::before {
+    content: "Settings"; display: block; padding: 16px 0 2px;
+    font-size: 13px; font-weight: 600; color: var(--ink);
+  }
+  .rail > div > .group:first-child { border-top: 0; }
+  .rail > div > .group:first-child > summary { padding-top: 11px; }
+  .rail-jump {
+    display: inline-flex; align-items: center; position: fixed; right: 16px; bottom: 16px; z-index: 30;
+    font-family: var(--sans); font-size: 13px; font-weight: 600; color: #fff; background: var(--accent);
+    border: 0; border-radius: 999px; padding: 10px 16px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); cursor: pointer;
+  }
+  .toast { bottom: 72px; max-width: calc(100vw - 32px); text-align: center; }
+  .topbar { flex-wrap: wrap; row-gap: 6px; }
+  .topbar-right { flex-wrap: wrap; justify-content: flex-end; }
+  /* The strip scrolls sideways when the labels do not fit; a scrollbar under it is noise. */
+  .tabs { scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
   .landing-grid { grid-template-columns: minmax(0, 1fr); }
   .row2 { grid-template-columns: minmax(0, 1fr); }
   .dash-cols { grid-template-columns: minmax(0, 1fr); }
   .headline { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .shell { height: auto; min-height: 100vh; grid-template-rows: auto auto auto; }
+  /* Four content-height rows (topbar, tabs, banner, workbench) and one column that
+     may shrink below its content's min-content width, so nothing pushes the page sideways. */
+  .shell { height: auto; min-height: 100vh; grid-template-rows: auto auto auto auto; grid-template-columns: minmax(0, 1fr); }
   .workbench { grid-template-columns: minmax(0, 1fr); }
-  .rail { border-right: 0; border-bottom: 1px solid var(--border); overflow: visible; }
+  .rail { border-right: 0; overflow: visible; padding-bottom: 72px; }
   .pane { overflow: visible; }
 }
 @media (max-width: 560px) {
@@ -500,11 +543,20 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
   .landing { padding: 0 16px 48px; }
   .lede { font-size: 30px; }
   .pane { padding: 14px 14px 40px; }
-  .rail { padding: 0 14px 20px; }
+  .rail { padding: 0 14px 72px; }
   .card { padding: 13px 14px; }
   .hero-num { font-size: 38px; }
   .calls li { grid-template-columns: minmax(0, 1fr); gap: 1px; }
-  .topbar { flex-wrap: wrap; }
+  .topbar { flex-wrap: wrap; padding: 8px 14px; }
+  /* Four actions in one sideways-scrolling row rather than two stacked rows above the answer. */
+  .topbar-right {
+    margin-left: 0; width: 100%; flex-wrap: nowrap; justify-content: flex-start;
+    overflow-x: auto; scrollbar-width: none; gap: 6px;
+  }
+  .topbar-right::-webkit-scrollbar { display: none; }
+  .topbar-right .btn { flex: none; padding: 5px 9px; }
+  .tabs { padding: 0 6px; }
+  .tabs button { padding: 9px 10px 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

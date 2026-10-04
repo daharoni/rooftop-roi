@@ -12,6 +12,10 @@
  * ========================================================================== */
 
 const mode = (s) => s.fin.financing.mode;
+/** Whole dollars with a thousands separator ("$1,400 /kWh"), for the slider label and aria-valuetext. */
+const dollars = (unit = "") => (v) => "$" + Math.round(Number(v)).toLocaleString("en-US") + unit;
+/** A year-of-life slider reads "year 12", not a bare 12. */
+const yearN = (v) => "year " + Math.round(Number(v));
 
 export const OBJECTIVE_OPTS = [
   { v: "npv", t: "Most NPV vs. investing" }, { v: "lifetime", t: "Lowest lifetime cost" },
@@ -69,9 +73,9 @@ export function price(ctx, open = true) {
   return { group: "Price", open, items: [
     { path: "fin.costPerW", kind: "range", label: "Solar, installed", min: 0.5, max: 6, step: 0.05, money: 2, unit: " /W",
       footnote: (s) => effective(s, "w") },
-    { path: "fin.costPerKwh", kind: "range", label: "Storage, installed", min: 200, max: 2000, step: 25, money: 0, unit: " /kWh",
+    { path: "fin.costPerKwh", kind: "range", label: "Storage, installed", min: 200, max: 2000, step: 25, money: 0, fmt: dollars(" /kWh"), unit: " /kWh",
       footnote: (s) => effective(s, "kwh") },
-    { path: "fin.adder", kind: "range", label: "Fixed install adder", min: 0, max: 20000, step: 250, money: 0,
+    { path: "fin.adder", kind: "range", label: "Fixed install adder", min: 0, max: 20000, step: 250, money: 0, fmt: dollars(),
       note: "Panel upgrade, trenching, re-roof — anything quoted as a lump sum." },
   ] };
 }
@@ -89,13 +93,13 @@ export function financing(open = true) {
     { path: "fin.financing.loan.dealerFeePct", kind: "range", label: "Dealer fee", min: 0, max: 0.35, step: 0.01, pct: 0,
       show: (s) => mode(s) === "loan",
       note: "A low advertised APR is usually paid for with a dealer fee rolled into the principal. Ask what it is." },
-    { path: "fin.financing.lease.monthly", kind: "range", label: "Lease payment", min: 0, max: 500, step: 5, money: 0, unit: " /mo",
+    { path: "fin.financing.lease.monthly", kind: "range", label: "Lease payment", min: 0, max: 500, step: 5, money: 0, fmt: dollars(" /mo"), unit: " /mo",
       show: (s) => mode(s) === "lease" },
     { path: "fin.financing.lease.escalatorPct", kind: "range", label: "Annual escalator", min: 0, max: 0.06, step: 0.001, pct: 1, unit: " /yr",
       show: (s) => mode(s) === "lease" },
     { path: "fin.financing.lease.termYears", kind: "range", label: "Lease term", min: 5, max: 30, step: 1, unit: " yr",
       show: (s) => mode(s) === "lease" },
-    { path: "fin.financing.lease.buyout", kind: "range", label: "Buyout at the end", min: 0, max: 20000, step: 250, money: 0,
+    { path: "fin.financing.lease.buyout", kind: "range", label: "Buyout at the end", min: 0, max: 20000, step: 250, money: 0, fmt: dollars(),
       show: (s) => mode(s) === "lease" },
   ] };
 }
@@ -114,8 +118,8 @@ export function incentives(open = false) {
         + "lower price. It is a pricing decision, not an entitlement — model the price you were quoted." },
     { path: "fin.taxCreditPct", kind: "range", label: "Credit you claim yourself", min: 0, max: 0.3, step: 0.01, pct: 0,
       note: "Section 25D is terminated for a 2026 homeowner-owned install. Leave at 0 unless you know otherwise." },
-    { path: "fin.sgipPerKwh", kind: "range", label: "Storage rebate", min: 0, max: 1100, step: 25, money: 0, unit: " /kWh" },
-    { path: "fin.rebates", kind: "range", label: "Other rebates", min: 0, max: 10000, step: 100, money: 0 },
+    { path: "fin.sgipPerKwh", kind: "range", label: "Storage rebate", min: 0, max: 1100, step: 25, money: 0, fmt: dollars(" /kWh"), unit: " /kWh" },
+    { path: "fin.rebates", kind: "range", label: "Other rebates", min: 0, max: 10000, step: 100, money: 0, fmt: dollars() },
   ] };
 }
 
@@ -207,8 +211,12 @@ export function rate(ctx, open = false) {
   ] };
 }
 
-export function future(ctx, open = false) {
-  return { group: "The next 25 years", open, items: [
+/** The group title names the horizon; main.js keeps it current when the slider moves. */
+export const futureTitle = (years) => `The next ${years} years`;
+
+export function future(ctx, open = false, state = null) {
+  const years = state && state.fin && Number.isFinite(state.fin.horizon) ? state.fin.horizon : 25;
+  return { group: futureTitle(years), open, items: [
     { path: "fin.horizon", kind: "range", label: "Analysis horizon", min: 10, max: 40, step: 1, unit: " yr" },
     { path: "fin.investReturn", kind: "range", label: "Return if invested instead", min: 0, max: 0.15, step: 0.005, pct: 1, unit: " /yr" },
     { path: "fin.escalation", kind: "range", label: "Utility rate escalation", min: 0, max: 0.1, step: 0.005, pct: 1, unit: " /yr",
@@ -224,12 +232,12 @@ export function wear(open = false) {
   return { group: "Wear and tear", open, items: [
     { path: "fin.panelDeg", kind: "range", label: "Panel degradation", min: 0, max: 0.015, step: 0.001, pct: 2, unit: " /yr" },
     { path: "fin.battDeg", kind: "range", label: "Battery degradation", min: 0, max: 0.05, step: 0.002, pct: 1, unit: " /yr" },
-    { path: "fin.battReplYear", kind: "range", label: "Replace the battery in year", min: 10, max: 30, step: 1 },
+    { path: "fin.battReplYear", kind: "range", label: "Replace the battery in year", min: 10, max: 30, step: 1, fmt: yearN },
     { path: "fin.battReplFraction", kind: "range", label: "Replacement costs", min: 0, max: 1, step: 0.05, pct: 0, unit: " of today's price" },
-    { path: "fin.inverterYear", kind: "range", label: "Replace the inverter in year", min: 5, max: 30, step: 1 },
+    { path: "fin.inverterYear", kind: "range", label: "Replace the inverter in year", min: 5, max: 30, step: 1, fmt: yearN },
     { path: "fin.inverterPerW", kind: "range", label: "Inverter replacement", min: 0, max: 0.5, step: 0.01, money: 2, unit: " /W" },
-    { path: "fin.omPerYear", kind: "range", label: "O&M + insurance", min: 0, max: 1000, step: 25, money: 0, unit: " /yr" },
-    { path: "fin.resaleValue", kind: "range", label: "Value left in the house", min: 0, max: 40000, step: 500, money: 0 },
+    { path: "fin.omPerYear", kind: "range", label: "O&M + insurance", min: 0, max: 1000, step: 25, money: 0, fmt: dollars(" /yr"), unit: " /yr" },
+    { path: "fin.resaleValue", kind: "range", label: "Value left in the house", min: 0, max: 40000, step: 500, money: 0, fmt: dollars() },
   ] };
 }
 

@@ -28,20 +28,6 @@ export const EXPLANATION =
  */
 export const CALLS = [
   {
-    who: "Google Fonts",
-    hosts: ["fonts.googleapis.com", "fonts.gstatic.com"],
-    what: "A request for the IBM Plex typefaces. Like any web request it carries your IP address, and the browser tells Google which page asked.",
-    when: "On first load; your browser caches the fonts afterwards.",
-    avoidable: false,
-  },
-  {
-    who: "cdnjs (Cloudflare)",
-    hosts: ["cdnjs.cloudflare.com"],
-    what: "The Chart.js charting library, and the Leaflet map library. Nothing of yours is in the request beyond your IP address.",
-    when: "Chart.js on first load; Leaflet only when you open the map.",
-    avoidable: false,
-  },
-  {
     who: "OpenStreetMap",
     hosts: ["nominatim.openstreetmap.org"],
     what: "The address you type, sent to their Nominatim geocoder to turn it into coordinates.",
@@ -68,16 +54,42 @@ export const CALLS = [
     who: "Open-Meteo weather archive",
     hosts: ["archive-api.open-meteo.com"],
     what: "Your coordinates rounded to 0.05° (about 5 km), to fetch eleven years of hourly sunlight and temperature.",
-    when: "Once per location: eleven requests, then cached in this browser so moving a slider or editing the roof never calls again.",
+    when: "Once per location: about three requests (a few years each), then cached in this browser so moving a slider or editing the roof never calls again.",
     avoidable: false,
   },
   {
     who: "Esri satellite tiles",
+    kind: "img",
     hosts: ["server.arcgisonline.com"],
     what: "Requests for map image tiles. The tile coordinates at the zoom used for tracing reveal roughly which block you are looking at (to about 75 m), along with your IP address.",
-    when: "Only while a map is on screen.",
+    when: "Only while a map is on screen. This is the imagery provider in use today.",
     avoidable: true,
     escape: "Skip the map: type a ZIP code, and enter tilt and direction by hand on the Roof tab.",
+  },
+  {
+    who: "USGS imagery tiles (alternative provider, not in use)",
+    kind: "img",
+    hosts: ["basemap.nationalmap.gov"],
+    what: "The same kind of tile request as above, if the site is switched to this provider.",
+    when: "Only while a map is on screen, and only if the site is configured to use it.",
+    avoidable: true,
+    escape: "Skip the map: type a ZIP code, and enter tilt and direction by hand on the Roof tab.",
+  },
+  {
+    who: "MapTiler imagery tiles (alternative provider, not in use)",
+    kind: "img",
+    hosts: ["api.maptiler.com"],
+    what: "The same kind of tile request as above, if the site is switched to this provider.",
+    when: "Only while a map is on screen, and only if the site is configured to use it.",
+    avoidable: true,
+    escape: "Skip the map: type a ZIP code, and enter tilt and direction by hand on the Roof tab.",
+  },
+  {
+    who: "This site (GitHub Pages)",
+    hosts: [],
+    what: "The page, its scripts, the IBM Plex typefaces, the Chart.js charting library and the Leaflet map library are all served from this same site; none comes from a third-party CDN or font service. GitHub, which hosts the site, sees ordinary web-server request logs.",
+    when: "On load; Leaflet only when you open the map.",
+    none: true,
   },
   {
     who: "Nothing else",
@@ -94,11 +106,21 @@ export const CALLS = [
  */
 export const NOT_REQUESTS = {
   "www.w3.org": "the SVG namespace identifier, not a request",
+  "open-meteo.com": "the CC BY 4.0 attribution link in the landing footer; never fetched by the page",
+  "creativecommons.org": "the CC BY 4.0 licence link in the landing footer; never fetched by the page",
   "github.com": "the 'Source on GitHub' link and the geocoder's User-Agent string; never fetched",
+  "www.usgs.gov": "a clickable attribution link on the map; never fetched by the page",
+  "www.maptiler.com": "a clickable attribution link on the map; never fetched by the page",
+  "www.openstreetmap.org": "a clickable attribution link on the map; never fetched by the page",
 };
 
-/** Every host the page can contact, for tests and for a future CSP connect-src. */
+/** Every host the page can contact. */
 export const HOSTS = CALLS.flatMap((c) => c.hosts || []);
+
+/** Hosts reached by fetch(): the CSP connect-src in index.html must equal this. */
+export const CONNECT_HOSTS = CALLS.filter((c) => c.kind !== "img").flatMap((c) => c.hosts || []);
+/** Hosts reached by <img> tile loads: the CSP img-src host list must equal this. */
+export const IMG_HOSTS = CALLS.filter((c) => c.kind === "img").flatMap((c) => c.hosts || []);
 
 export const STORAGE_NOTE =
   "What stays on this device: your meter readings and the downloaded weather in IndexedDB, and "
@@ -110,7 +132,7 @@ export const STORAGE_NOTE =
 export let GEOCODE_NOTE =
   "Typing an address sends it to OpenStreetMap's Nominatim geocoder to get coordinates back. "
   + "A ZIP code goes to Open-Meteo's place search instead. To send neither, load your meter file "
-  + "first and set the location on the Roof tab, by clicking the map (which loads Esri satellite "
+  + "first and set the location on the Roof tab, by clicking the map (which loads satellite "
   + "tiles) or typing coordinates.";
 
 /**
@@ -131,4 +153,4 @@ export async function adoptGeocodeNote() {
   return GEOCODE_NOTE;
 }
 
-export default { CLAIM, EXPLANATION, CALLS, HOSTS, NOT_REQUESTS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote };
+export default { CLAIM, EXPLANATION, CALLS, HOSTS, CONNECT_HOSTS, IMG_HOSTS, NOT_REQUESTS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote };

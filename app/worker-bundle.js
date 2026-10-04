@@ -1,7 +1,150 @@
 /* GENERATED FILE - DO NOT EDIT.
- * Built by `node core/bundle-for-worker.mjs` from core/{flexload.js,engine.js,finance.js,optimizer.js}
+ * Built by `node core/bundle-for-worker.mjs` from core/{periods.js,flexload.js,engine.js,finance.js,optimizer.js}
  * and core/worker.js.  Edit those, re-run the script, commit the result.
  */
+/* ===== core/periods.js ==================================================== */
+var __ns_TouPeriods = (function () {
+/* =============================================================================
+ * core/periods.js - THE one TOU-period lookup: holidays, day type, season, schedule
+ * row, schedule_overrides.  Imported by core/tariff.js (periodAt, exportRateAt) and by
+ * core/engine.js (prepare's day types, buildRates' period codes), so the engine and
+ * the tariff library can never disagree about which period an hour is in.
+ *
+ * Plain ES module, no dependencies, no DOM.  core/bundle-for-worker.mjs concatenates it
+ * into app/worker-bundle.js ahead of engine.js (it is published as `TouPeriods`).
+ *
+ * Holidays bill the WEEKEND schedule.  The eight: New Year's Day, Presidents' Day,
+ * Memorial Day, Independence Day, Labor Day, Veterans Day, Thanksgiving, Christmas.
+ * A fixed-date holiday that falls on a SUNDAY is also observed on the Monday after, so
+ * a Monday can bill as a weekend.  A holiday that falls on a SATURDAY is NOT moved to
+ * the Friday before.  That is SDG&E's rule, not the federal one, and only SDG&E's is
+ * quoted in this repo: "When any holiday listed above falls on Sunday, the following
+ * Monday will be recognized as an off-peak period. No change will be made for holidays
+ * falling on Saturday" (SDG&E Electric Rule 1; data/tariffs/sdge.json meta.notes).
+ * sce.json lists the holidays with no observance text, and pge.json quotes none, so
+ * SCE and PG&E are ASSUMED to follow the same rule.  pge.json's export-matrix note
+ * counts 111 weekend/holiday days in 2026 (104 weekend days + the seven weekday
+ * holidays, Saturday July 4 left unshifted), which agrees with "no Saturday shift" but
+ * does not test the Sunday rule, since no 2026 holiday falls on a Sunday.  (Until
+ * 2026-10 core/tariff.js also shifted Saturday holidays to Friday while core/engine.js
+ * shifted nothing; this module replaced both.)
+ * ========================================================================== */
+
+/** Day of month of the n-th `weekday` (0 = Sunday) of `month` (1-12). */
+function nthWeekday(year, month, weekday, n) {
+  const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  return 1 + ((weekday - first + 7) % 7) + (n - 1) * 7;
+}
+/** Day of month of the last `weekday` of `month` (1-12). */
+function lastWeekday(year, month, weekday) {
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const last = new Date(Date.UTC(year, month - 1, days)).getUTCDay();
+  return days - ((last - weekday + 7) % 7);
+}
+/** 0 = Sunday .. 6 = Saturday, for a calendar date (no time zone involved). */
+function dayOfWeek(y, m, d) {
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * The holidays for one year, as a Set of "y-m-d" keys (month and day unpadded).
+ * A Sunday fixed-date holiday adds its Monday; the Sunday entry itself is harmless (it
+ * is a weekend day anyway).  Never crosses a year boundary: Jan 1 -> Jan 2, Dec 25 ->
+ * Dec 26.  Returns a fresh Set.
+ */
+function holidaysForYear(year) {
+  const s = new Set();
+  const add = (m, d) => s.add(year + "-" + m + "-" + d);
+  const addObserved = (m, d) => {
+    add(m, d);
+    // Sunday -> the Monday after.  Saturday -> no change (see the header).
+    if (dayOfWeek(year, m, d) === 0) add(m, d + 1);
+  };
+  addObserved(1, 1);                                  // New Year's Day
+  add(2, nthWeekday(year, 2, 1, 3));                  // Presidents' Day
+  add(5, lastWeekday(year, 5, 1));                    // Memorial Day
+  addObserved(7, 4);                                  // Independence Day
+  add(9, nthWeekday(year, 9, 1, 1));                  // Labor Day
+  addObserved(11, 11);                                // Veterans Day
+  add(11, nthWeekday(year, 11, 4, 4));                // Thanksgiving
+  addObserved(12, 25);                                // Christmas
+  return s;
+}
+
+const holidayCache = new Map();
+/** True when y-m-d (m 1-12) is one of the holidays (actual or observed date). */
+function isHoliday(y, m, d) {
+  let s = holidayCache.get(y);
+  if (!s) { s = holidaysForYear(y); holidayCache.set(y, s); }
+  return s.has(y + "-" + m + "-" + d);
+}
+
+/** True when the WEEKEND schedule applies: Saturday, Sunday, or a holiday. */
+function billsAsWeekend(y, m, d, dow) {
+  const w = dow === undefined ? dayOfWeek(y, m, d) : dow;
+  return w === 0 || w === 6 || isHoliday(y, m, d);
+}
+
+/** "summer" or "winter" for a plan and a month (1-12). */
+function seasonOf(plan, month) {
+  const months = (plan && plan.summer_months) || [];
+  return months.indexOf(+month) >= 0 ? "summer" : "winter";
+}
+
+/**
+ * The period a plan is in for (month 1-12, weekend?, hour 0-23): the season's schedule
+ * row (a missing weekend row reads the weekday one), then the plan's month-scoped
+ * `schedule_overrides`, last match wins.  The summer/winter split cannot express a
+ * window that covers only part of a season - SDG&E EV-TOU-2's March/April weekday
+ * 10am-2pm super-off-peak is the live example - hence the overrides.
+ * Throws on a plan whose schedule does not resolve: a miss is a bug, not a default.
+ */
+function periodFor(plan, month, weekend, hour) {
+  const season = seasonOf(plan, month);
+  const dayType = weekend ? "weekend" : "weekday";
+  const bySeason = plan.schedule[season];
+  if (!bySeason) throw new Error("tariff: plan " + plan.id + " has no " + season + " schedule");
+  const row = bySeason[dayType] || bySeason.weekday;
+  let period = row && row[hour];
+  if (!period) throw new Error("tariff: plan " + plan.id + " " + season + "/" + dayType + " hour " + hour + " has no period");
+  let overridden = false;
+  const ovs = plan.schedule_overrides;
+  if (ovs) for (let k = 0; k < ovs.length; k++) {
+    const ov = ovs[k];
+    if (ov.months && ov.months.indexOf(month) < 0) continue;
+    if (ov.daytype && ov.daytype !== dayType) continue;
+    if (ov.hours && ov.hours.indexOf(hour) < 0) continue;
+    period = ov.period;
+    overridden = true;
+  }
+  return { season, dayType, period, overridden };
+}
+
+/**
+ * The whole of periodFor() for one plan as a flat 12 x 2 x 24 table of period ids,
+ * index (month-1)*48 + weekend*24 + hour.  Everything periodFor depends on is in that
+ * key, so a hot loop indexes this instead of calling periodFor per hour.  Not memoised:
+ * 576 lookups are nothing next to a year of hours, and a plan edited in place (a
+ * custom tariff) must never read a stale table.
+ */
+function periodGrid(plan) {
+  const g = new Array(576);
+  for (let m = 1; m <= 12; m++) for (let w = 0; w < 2; w++) for (let h = 0; h < 24; h++) {
+    g[(m - 1) * 48 + w * 24 + h] = periodFor(plan, m, w === 1, h).period;
+  }
+  return g;
+}
+
+const TouPeriods = {
+  nthWeekday, lastWeekday, dayOfWeek, holidaysForYear, isHoliday, billsAsWeekend,
+  seasonOf, periodFor, periodGrid,
+};
+var __default = TouPeriods;
+
+return __default;
+})();
+var TouPeriods = __ns_TouPeriods;
+
 /* ===== core/flexload.js =================================================== */
 var __ns_FlexLoad = (function () {
 /* =============================================================================
@@ -1189,17 +1332,24 @@ var __ns_SolarEngine = (function () {
  * 2. nbt.nonbypassable_charges_per_kwh is treated as ALREADY INSIDE the retail
  *    import rates (that is how SCE publishes them), so it is not added on top.
  *    Set params.applyNbc = true if your tariff file lists NBC-exclusive rates.
- * 3. Net surplus compensation is applied to the kWh basis of unused credits: we
- *    track both the dollar balance and the kWh that produced it, and pay the
- *    remaining kWh at the NSC rate at true-up.
+ * 3. Net surplus is kWh, not dollars: at true-up the kWh exported minus the kWh
+ *    imported over the relevant period (if positive) are debited from the export
+ *    credit balance at the ARECR (never below zero; the ACC Plus adder is exempt) and
+ *    paid at the NSC rate (settle()).
  * 4. The minimum-charge floor is max(minimum_charge_per_day, fixed_charge_per_day)
- *    x days, so the fixed charge always survives an export-credit offset.
+ *    x days.  Export credit (ACC value and ACC Plus adder alike) offsets a month only
+ *    down to max(that floor, fixed charge + nbt.nonbypassable_charges_per_kwh x imported
+ *    kWh): NBCs and the fixed charge are always paid.  Credit that does not fit is
+ *    banked, settled at true-up, and any residual carried into the next period.
  * 5. Holidays use the weekend schedule: New Year's, Presidents', Memorial,
- *    Independence, Labor, Veterans, Thanksgiving, Christmas (observed dates are
- *    NOT shifted for weekend-falling holidays - SCE bills the actual date).
+ *    Independence, Labor, Veterans, Thanksgiving, Christmas, on the actual date, and a
+ *    Sunday holiday also on the Monday after (a Saturday one is NOT moved to Friday:
+ *    the utilities' rule).  The rule, and the plan's schedule_overrides, come from
+ *    core/periods.js - the SAME lookup core/tariff.js periodAt() uses.
  * ========================================================================== */
 
 const FlexLoad = __ns_FlexLoad;
+const Periods = __ns_TouPeriods;
 
 const EPS = 1e-9;
 const PERIOD_IDS = ["on", "mid", "off", "super_off"];
@@ -1236,31 +1386,9 @@ function setFlexReshape(fn) { _flexReshape = typeof fn === "function" ? fn : nul
 function flexReshapeSource() { return _flexReshape ? "flexload" : "engine-fallback"; }
 
 // ---------------------------------------------------------------- calendar
-function nthWeekday(year, month /*1-12*/, weekday /*0=Sun*/, n) {
-  const first = new Date(Date.UTC(year, month - 1, 1));
-  const off = (weekday - first.getUTCDay() + 7) % 7;
-  return 1 + off + 7 * (n - 1);
-}
-function lastWeekday(year, month, weekday) {
-  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const last = new Date(Date.UTC(year, month - 1, days));
-  return days - ((last.getUTCDay() - weekday + 7) % 7);
-}
-function holidaySet(years) {
-  const s = new Set();
-  years.forEach(function (y) {
-    const add = (m, d) => s.add(y + "-" + m + "-" + d);
-    add(1, 1);                                   // New Year's Day
-    add(2, nthWeekday(y, 2, 1, 3));              // Presidents' Day
-    add(5, lastWeekday(y, 5, 1));                // Memorial Day
-    add(7, 4);                                   // Independence Day
-    add(9, nthWeekday(y, 9, 1, 1));              // Labor Day
-    add(11, 11);                                 // Veterans Day
-    add(11, nthWeekday(y, 11, 4, 4));            // Thanksgiving
-    add(12, 25);                                 // Christmas
-  });
-  return s;
-}
+// Holidays, the weekend rule and the schedule/override lookup are core/periods.js,
+// shared with core/tariff.js periodAt(): there is exactly one TOU-period lookup.
+const nthWeekday = Periods.nthWeekday;
 // US DST: 2nd Sunday of March 02:00 -> 1st Sunday of November 02:00.
 function dstBounds(year) {
   return { start: nthWeekday(year, 3, 0, 2), end: nthWeekday(year, 11, 0, 1) };
@@ -1306,10 +1434,6 @@ function prepare(data, opts) {
   }
   const exportKwh = load.exportKwh ? Float64Array.from(load.exportKwh, (v) => (isFinite(v) ? v : 0)) : null;
 
-  const years = new Set();
-  for (let i = 0; i < N; i++) years.add(+ts[i].slice(0, 4));
-  const hol = holidaySet(Array.from(years));
-
   const dayStart = [], dayLen = [], dayDow = [], monthDays = [], monthKey = [], dayExpect = [];
   const dayValid = [], monthValidHours = [], monthHours = [];
   let prevDay = "", prevMonth = "", d = -1, m = -1, prevTs = "";
@@ -1326,7 +1450,7 @@ function prepare(data, opts) {
       dayExpect.push(mo === 3 && dd === dstBounds(y).start ? 23 : 24);
       const dow = new Date(Date.UTC(y, mo - 1, dd)).getUTCDay();
       dayDow.push(dow);
-      cachedDayType = (dow === 0 || dow === 6 || hol.has(y + "-" + mo + "-" + dd)) ? 1 : 0;
+      cachedDayType = Periods.billsAsWeekend(y, mo, dd, dow) ? 1 : 0;
       if (mkey !== prevMonth) { prevMonth = mkey; m++; monthDays.push(0); monthKey.push(mkey); }
       monthDays[m]++;
     }
@@ -1728,19 +1852,21 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
   const mf = +o.municipalSurchargeFactor;
   const munFactor = isFinite(mf) && mf > 0 ? mf : 0;
   const cpaSurcharge = /^cpa/.test(providerId) ? (bv.cpa_energy_surcharge_per_kwh || 0) : 0;
-  const isSummer = {};
-  for (let m = 1; m <= 12; m++) isSummer[m] = plan.summer_months.indexOf(m) >= 0;
-
-  // memoise the 2x2x24 rate lookup
-  const cache = {};
+  // The period of every (month, day type, hour) comes from core/periods.js periodGrid():
+  // the same lookup, overrides and all, that core/tariff.js periodAt() answers with.
+  // Prices are memoised on the same 12 x 2 x 24 key, so the hourly loop is two
+  // typed-array reads and no allocation.
+  const grid = Periods.periodGrid(plan);
+  const cellP = new Uint8Array(576), cellR = new Float64Array(576), cellS = new Uint8Array(576);
+  const cellDone = new Uint8Array(576);
+  const nbcDollarsPerKwh = (t.nbt && t.nbt.nonbypassable_charges_per_kwh) || 0;
   for (let i = 0; i < N; i++) {
     const mo = ctx.month[i], h = ctx.hour[i], dt = ctx.dayType[i];
-    const su = isSummer[mo] ? 1 : 0;
-    const key = su + "|" + dt + "|" + h;
-    let c = cache[key];
-    if (!c) {
+    const key = (mo - 1) * 48 + dt * 24 + h;
+    if (!cellDone[key]) {
+      const pid = grid[key];
+      const su = Periods.seasonOf(plan, mo) === "summer" ? 1 : 0;
       const season = su ? "summer" : "winter";
-      const pid = plan.schedule[season][dt ? "weekend" : "weekday"][h];
       const tbl = plan.rates[season][pid];
       const full = rateFor(tbl, providerId, t, plan.id + " " + season + "." + pid);
       // The municipal surcharge is levied on GENERATION only.  For a CCA customer the
@@ -1754,10 +1880,12 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
         stack = Math.max(0, tbl.cpa_clean - del - tbl.sce_generation + SCE_CPA_GEN_GAP);
       }
       const gen = Math.max(0, full - del - stack);
-      c = cache[key] = { p: PERIOD_INDEX[pid] === undefined ? 2 : PERIOD_INDEX[pid],
-                         r: full + nbc + gen * munFactor + cpaSurcharge };
+      cellP[key] = PERIOD_INDEX[pid] === undefined ? 2 : PERIOD_INDEX[pid];
+      cellR[key] = full + nbc + gen * munFactor + cpaSurcharge;
+      cellS[key] = su;
+      cellDone[key] = 1;
     }
-    per[i] = c.p; imp[i] = c.r; summer[i] = su;
+    per[i] = cellP[key]; imp[i] = cellR[key]; summer[i] = cellS[key];
     exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
   }
   return { plan, planRequested: planRes.requested, planFallback: planRes.fallback,
@@ -1771,6 +1899,9 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
            baselineRegion: baseline.region, baselineRegionFallback: baseline.fallback,
            baselineCreditPct: baselinePct,
            fixed: plan.fixed_charge_per_day, min: plan.minimum_charge_per_day,
+           // Non-bypassable charges, $/kWh IMPORTED: inside the retail rates (or added on
+           // top with applyNbc), and never offsettable by export credit (settle()).
+           nbcPerKwh: nbcDollarsPerKwh,
            nsc: t.nbt.net_surplus_compensation_per_kwh, climate: climate || null,
            trueUpMonth: resolveTrueUpMonth(t, o.trueUpMonth) };
 }
@@ -1980,8 +2111,16 @@ function settlementPoints(ctx, tum) {
 /**
  * Turn monthly energy totals into a bill, NBT-style:
  *   subtotal = fixed + energy - baseline credit, floored at the minimum charge;
- *   export credits then offset the subtotal down to (not below) that floor;
- *   the unused balance rolls forward and is cashed out at NSC at true-up.
+ *   export credits - the ACC export value AND the ACC Plus adder - then offset the
+ *   subtotal down to (not below) the CREDIT FLOOR: the fixed charge plus the month's
+ *   non-bypassable charges (nbt.nonbypassable_charges_per_kwh x imported kWh), or the
+ *   minimum charge if that is higher.  Under Schedule NBT export credit may offset
+ *   generation and delivery energy charges only; NBCs and the fixed charge are always
+ *   paid.  The ACC Plus adder is a bill credit, not cash: it never takes a month below
+ *   that floor, and what does not fit is banked with the export credit;
+ *   the unused balance rolls forward.  At true-up the net surplus kWh (exported minus
+ *   imported over the relevant period) are debited from the export credit at the ARECR
+ *   and paid at NSC.
  * The credit bank runs round the record as a cycle (settlementPoints above): the bank
  * left at the end of the record is CARRIED into the record's first month, never
  * forfeited, and reported as `trailing`.
@@ -1992,7 +2131,7 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
   const blPct = r.baselineCreditPct || 1;
 
   // ---- 1. everything that does not depend on the credit bank, month by month
-  const subtotalA = new Float64Array(M), floorA = new Float64Array(M);
+  const subtotalA = new Float64Array(M), creditFloorA = new Float64Array(M);
   const expKwhA = new Float64Array(M), expCredA = new Float64Array(M);
   const accPlusA = new Float64Array(M), climateA = new Float64Array(M);
   const pre = detail ? new Array(M) : null;
@@ -2035,16 +2174,31 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
     if (subtotal < floor) { minApplied = floor - subtotal; subtotal = floor; }
     // The CA Climate Credit is a flat bill credit, not an energy charge: it lands after
     // the export offset and CAN push the bill below the fixed charge.
+    // A month at either edge of the record may be only partly present (a record that
+    // ends on the 9th): there the credit is prorated by the days present over the
+    // calendar month's length.  Billing months inside the record are whole, so they keep
+    // the usable-day share above.  Baseline and system get the same credit either way.
     let climate = 0;
     if (r.climate && r.climate.amount && r.climate.months.indexOf(ctx.monthNum[m]) >= 0) {
-      climate = r.climate.amount * share;
+      let ccShare = share;
+      if (m === 0 || m === M - 1) {
+        const key = ctx.monthKey[m];
+        const monthLen = new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7), 0)).getUTCDate();
+        ccShare = Math.min(1, days / monthLen);
+      }
+      climate = r.climate.amount * ccShare;
     }
-    subtotalA[m] = subtotal; floorA[m] = floor; expKwhA[m] = expKwh; expCredA[m] = expCred;
-    // The ACC Plus adder is the one export credit that MAY offset fixed and
-    // non-bypassable charges, so it is settled outside the credit bank.
+    // What export credit can never touch: the fixed charge and the month's NBCs, which
+    // sit inside the retail import rates (or are added on top with applyNbc - either way
+    // they are inside `energy`).  Never above the subtotal itself.
+    const nbc$ = (r.nbcPerKwh || 0) * mImpKwh[m];
+    const creditFloor = Math.min(subtotal, Math.max(floor, fixed + nbc$));
+    subtotalA[m] = subtotal; creditFloorA[m] = creditFloor; expKwhA[m] = expKwh; expCredA[m] = expCred;
+    // ACC Plus earned on this month's creditable export.  It joins the credit bank below
+    // with the ACC value, so it obeys the same floor and the same carry-forward.
     accPlusA[m] = (r.accPlus || 0) * expKwh;
     climateA[m] = climate;
-    if (pre) pre[m] = { days, calDays, fixed, energy, credit, minApplied, forfeitKwh, forfeit$ };
+    if (pre) pre[m] = { days, calDays, fixed, energy, credit, minApplied, forfeitKwh, forfeit$, nbc$ };
   }
 
   // ---- 2. the credit bank, round the cycle, starting empty in the month after the
@@ -2053,46 +2207,119 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
   const isPoint = new Uint8Array(M);
   for (const k of points) isPoint[k] = 1;
   const start = (points[points.length - 1] + 1) % M;
-  const usedA = new Float64Array(M), trueUpA = new Float64Array(M);
-  const forfeitSettleA = new Float64Array(M), balA = new Float64Array(M);
-  let bal$ = 0, balKwh = 0, endBank$ = 0, endBankKwh = 0;
-  for (let j = 0; j < M; j++) {
-    const m = (start + j) % M;
-    bal$ += expCredA[m]; balKwh += expKwhA[m];
-    const used = Math.min(bal$, Math.max(0, subtotalA[m] - floorA[m]));
-    if (bal$ > EPS) { balKwh *= (1 - used / bal$); }
-    bal$ -= used;
-    let trueUp = 0, forfeitCredit = 0;
-    if (isPoint[m]) {
-      // Schedule NBT SC 4.e.i, in order: the credit bank is first reduced by the
-      // "Average Retail Export Compensation Rate" applied to net surplus kWh, THEN the
-      // net surplus kWh are paid at Net Surplus Compensation.  The ARECR is about three
-      // times the NSC rate, so a bank built out of cheap midday exports is wiped out
-      // entirely and the customer keeps only the NSC payment - which is exactly the
-      // penalty for an array sized to annual kWh offset rather than to self-consumption.
-      const reduction = Math.min(bal$, r.arecr * balKwh);
-      trueUp = balKwh * r.nsc;
-      forfeitCredit = Math.max(0, reduction - trueUp);
-      bal$ -= reduction;               // any residual rolls into the new relevant period
-      balKwh = 0;
+  // The bank holds four dollar pools.  Every month the room (subtotal - credit floor)
+  // is filled from them in this order:
+  //   1. this relevant period's ACC export credit;
+  //   2. export credit carried over a true-up;
+  //   3. this period's ACC Plus adder;
+  //   4. adder carried over a true-up.
+  // Export credit first is the tariff's own order: export credit is applied to the
+  // month's energy charges, and the adder - a separate bill line that "will apply to
+  // future bills until the credit is used" - to what remains (PG&E NBT SC 2.c-2.e).
+  //
+  // The NET SURPLUS kWh are tracked apart from the dollars.  Net Surplus Electricity is
+  // the kWh exported over the relevant period in excess of the kWh imported, max(0,
+  // export - import), export-cap forfeited kWh excluded - whatever has happened to the
+  // dollars (PG&E NBT SC 5.d: "if the customer exported more electricity than they
+  // imported over the Relevant Period").  At true-up those kWh are debited at the ARECR
+  // and then credited at the NSC rate.  The debit falls on EXPORT credit only (pools 1
+  // and 2): "The ACC Plus paid to the customer on Net Surplus Electricity will not be
+  // debited" (SC 5.d), and the true-up carries forward "export credits (not including
+  // the ACC Plus credit) ... after debit for excess energy" (SC 2.h).  We stop the debit
+  // at an empty export balance - it is never turned into a charge - and pay NSC on the
+  // surplus kWh even when the bank is already spent.
+  //
+  // So the NSC payout depends on kWh alone, and the room filled each month is
+  // min(bank, room) in any order.  The pool order still reaches the TOTAL in one place:
+  // the debit sees only the export pools, so drawing the adder first would leave more
+  // export credit exposed to it (tests/engine.test.mjs swaps the order with the
+  // test-only r.bankDrawOrder and checks NSC is unchanged and the tariff order is never
+  // worse).  Export first also makes the export side follow EXACTLY its no-adder path,
+  // so the adder dollars that reach a bill (accUsedA) are the adder's marginal value and
+  // exportValue - accPlusValue is the export value once the adder expires.
+  //
+  // Whatever survives a true-up rolls into the next relevant period (SC 4.e.i) as a
+  // carried pool.  The record is a cycle, so in steady state each pass round it starts
+  // with the carry the previous pass ended on (the cycle ends ON a settlement point).
+  // One pass from empty, then warm passes until the dollars realised stop changing; a
+  // bank that only ever grows stops changing after one warm pass, because every month's
+  // room is already full.
+  const adderFirst = r.bankDrawOrder === "adderFirst";   // test-only: proves order-freedom
+  function runCycle(ce0, ca0) {
+    const usedA = new Float64Array(M), accUsedA = new Float64Array(M), trueUpA = new Float64Array(M);
+    const forfeitSettleA = new Float64Array(M), balA = new Float64Array(M);
+    let e$ = 0, ce$ = ce0, a$ = 0, ca$ = ca0, pExpKwh = 0, pImpKwh = 0;
+    let endBank$ = 0, endBankKwh = 0, value = 0;
+    // Take up to `want` dollars from the pools in order; returns [fromE, fromCe, fromA, fromCa].
+    function take(want, exportOnly) {
+      const order = exportOnly ? [0, 1] : adderFirst ? [2, 3, 0, 1] : [0, 1, 2, 3];
+      const got = [0, 0, 0, 0];
+      for (const k of order) {
+        const have = k === 0 ? e$ : k === 1 ? ce$ : k === 2 ? a$ : ca$;
+        const x = Math.min(have, want);
+        if (x <= 0) continue;
+        want -= x; got[k] = x;
+        if (k === 0) e$ -= x; else if (k === 1) ce$ -= x; else if (k === 2) a$ -= x; else ca$ -= x;
+      }
+      return got;
     }
-    if (m === M - 1) { endBank$ = bal$; endBankKwh = balKwh; }
-    usedA[m] = used; trueUpA[m] = trueUp; forfeitSettleA[m] = forfeitCredit; balA[m] = bal$;
+    for (let j = 0; j < M; j++) {
+      const m = (start + j) % M;
+      e$ += expCredA[m]; a$ += accPlusA[m];
+      pExpKwh += expKwhA[m]; pImpKwh += mImpKwh[m];
+      const [fromE, fromCe, fromA, fromCa] = take(Math.max(0, subtotalA[m] - creditFloorA[m]));
+      let trueUp = 0, forfeitCredit = 0;
+      if (isPoint[m]) {
+        // Schedule NBT SC 4.e.i, in order: the credit bank is first reduced by the
+        // "Average Retail Export Compensation Rate" applied to the net surplus kWh, THEN
+        // the net surplus kWh are paid at Net Surplus Compensation.  The ARECR is about
+        // three times the NSC rate, so a bank built out of cheap midday exports is wiped
+        // out and the customer keeps only the NSC payment - the penalty for an array
+        // sized to annual kWh offset rather than to self-consumption.
+        const surplusKwh = Math.max(0, pExpKwh - pImpKwh);
+        const cut = take(r.arecr * surplusKwh, true).reduce((s, v) => s + v, 0);
+        trueUp = surplusKwh * r.nsc;
+        forfeitCredit = Math.max(0, cut - trueUp);
+        // Any residual rolls into the new relevant period as carried credit.
+        ce$ += e$; e$ = 0; ca$ += a$; a$ = 0; pExpKwh = 0; pImpKwh = 0;
+      }
+      const bank = e$ + ce$ + a$ + ca$;
+      if (m === M - 1) { endBank$ = bank; endBankKwh = Math.max(0, pExpKwh - pImpKwh); }
+      usedA[m] = fromE + fromCe; accUsedA[m] = fromA + fromCa; trueUpA[m] = trueUp;
+      forfeitSettleA[m] = forfeitCredit; balA[m] = bank;
+      value += fromE + fromCe + fromA + fromCa + trueUp;
+    }
+    // The cycle ends on a settlement point, so only carried pools are left.
+    return { usedA, accUsedA, trueUpA, forfeitSettleA, balA, endBank$, endBankKwh, value,
+             carryE$: ce$ + e$, carryA$: ca$ + a$ };
   }
+  let cyc = runCycle(0, 0);
+  for (let pass = 0; pass < 4 && cyc.carryE$ + cyc.carryA$ > EPS; pass++) {
+    const next = runCycle(cyc.carryE$, cyc.carryA$);
+    const done = Math.abs(next.value - cyc.value) < 1e-9;
+    cyc = next;
+    if (done) break;
+  }
+  const { usedA, accUsedA, trueUpA, forfeitSettleA, balA, endBank$, endBankKwh } = cyc;
 
   // ---- 3. totals and rows, in record order
-  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0;
+  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0, accPlusValue = 0;
   const rows = detail ? [] : null;
   for (let m = 0; m < M; m++) {
-    const bill = subtotalA[m] - usedA[m] - climateA[m] - accPlusA[m] - trueUpA[m];
+    const bill = subtotalA[m] - usedA[m] - accUsedA[m] - climateA[m] - trueUpA[m];
     total += bill;
-    exportValue += usedA[m] + accPlusA[m] + trueUpA[m];   // dollars sourced from exported kWh
+    exportValue += usedA[m] + accUsedA[m] + trueUpA[m];   // dollars sourced from exported kWh
+    accPlusValue += accUsedA[m];                          // ...of which the ACC Plus adder
     forfeitedTotal += forfeitSettleA[m];
     if (rows) {
       const q = pre[m];
       rows.push({ key: ctx.monthKey[m], days: q.days, calendarDays: q.calDays, fixed: q.fixed,
                   energy: q.energy, baselineCredit: -q.credit, minimumAdj: q.minApplied,
-                  exportCreditUsed: -usedA[m], accPlus: -accPlusA[m],
+                  // accPlus is the adder that reached this bill (this month's or banked);
+                  // accPlusEarned is this month's adder before the credit floor.
+                  // nonBypassable is INSIDE energy, shown because no credit offsets it.
+                  exportCreditUsed: -usedA[m], accPlus: -accUsedA[m],
+                  accPlusEarned: -accPlusA[m], nonBypassable: q.nbc$,
                   climateCredit: -climateA[m], trueUp: -trueUpA[m], settled: !!isPoint[m], bill,
                   importKwh: mImpKwh[m], exportKwh: expKwhA[m],
                   forfeitedKwh: q.forfeitKwh, forfeitedCredit: q.forfeit$ + forfeitSettleA[m],
@@ -2114,7 +2341,7 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
     return { start: ctx.monthKey[from], end: ctx.monthKey[p], months };
   });
   return { total, months: rows, leftoverCredit: endBank$, forfeited: forfeitedTotal,
-           exportValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
+           exportValue, accPlusValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
 }
 
 // ---------------------------------------------------------------- dispatch
@@ -2287,6 +2514,13 @@ function runHours(scn, params, detail) {
     // from avoided import cost because export prices are locked at the ACC vintage
     // for nine years and do not follow retail escalation.
     exportRevenue: billing.exportValue / years,
+    // The part of exportRevenue that is the ACC Plus adder - a SUBSET of it, never extra.
+    // Realised value (with the adder minus without it, so banked adder lost to the
+    // true-up counts for nothing), annualised like exportRevenue.  core/finance.js
+    // expires it after the vintage's nine-year lock.
+    accPlusRevenue: billing.accPlusValue / years,
+    // Flexible-load hours whose kWh were non-finite and were priced as 0 (buildScenario).
+    flexNanHours: scn.flexNanHours || 0,
     selfSufficiency: tLoad > 0 ? 1 - tImp / tLoad : 0,
     solarFraction: tPv > 0 ? tSelf / tPv : 0,
     weatherKey: scn.weatherKey,
@@ -2403,7 +2637,8 @@ function noSystem(scn, p, detail) {
 /**
  * The four savings numbers every result carries, given the two no-system bills.
  * A no-system baseline exports nothing, so the whole of exportRevenue is the system's;
- * the remainder of the saving is avoided retail import cost.  Shared with the
+ * the remainder of the saving is avoided retail import cost (res.accPlusRevenue, the
+ * adder's share of exportRevenue, needs no baseline term for the same reason).  Shared with the
  * optimizer's sweep so the split is defined in exactly one place.
  */
 function attachSavings(res, sameFlexBill, asRecordedBill) {
@@ -2437,7 +2672,8 @@ function simulate(ctx, params, opts) {
   res.flexShiftOnlySavings = b.asRecorded.bill - b.sameFlex.bill;
   res.years = ctx.years;
   res.usableDays = ctx.usableDays;
-  res.flexNanHours = b.scnSame.flexNanHours || 0;
+  // runHours already carries flexNanHours; the as-recorded arm can add its own.
+  res.flexNanHours = Math.max(res.flexNanHours || 0, b.scnRec.flexNanHours || 0);
   return res;
 }
 
@@ -2450,7 +2686,7 @@ function billOnAllPlans(ctx, params) {
     const withSys = runHours(b.scnSame, q, false);
     return { planId: plan.id, name: plan.name, bill: withSys.bill,
              baselineSameFlex: b.sameFlex.bill, baselineAsRecorded: b.asRecorded.bill,
-             exportRevenue: withSys.exportRevenue,
+             exportRevenue: withSys.exportRevenue, accPlusRevenue: withSys.accPlusRevenue,
              savings: b.asRecorded.bill - withSys.bill };
   });
 }
@@ -2471,7 +2707,7 @@ function billOnAllProviders(ctx, params) {
   });
 }
 
-const _internal = { holidaySet, isDST, spread, fallbackReshape, dayBounds,
+const _internal = { isDST, spread, fallbackReshape, dayBounds,
                            shadingFactors, PERIOD_IDS, EXP_BANDS, bandOf, DOW_PRIORITY };
 
 const SolarEngine = {
@@ -2518,24 +2754,56 @@ var __ns_SolarFinance = (function () {
  *   lease  no upfront at all, escalating annual payments and an optional buyout;
  *          a third party owns the system, so no homeowner incentive applies and
  *          O&M / inverter / battery replacement are not the customer's problem.
- * Savings accrue in all three.
+ * Savings accrue in all three - under a lease only while the household has the
+ * system.  When a lease term ends before the horizon:
+ *   buyout > 0   the buyout is paid in the last term year and the household owns
+ *                the system from the next year on: savings continue, and O&M,
+ *                replacements and the resale credit become the owner's, as for cash.
+ *   buyout = 0   the system goes back to the lessor (the conservative reading of a
+ *                California lease/PPA with renew-or-remove at end of term), so the
+ *                savings stop with the payments.  Renewing is a new contract this
+ *                model does not price.
+ *
+ * Replacements (inverter every inverterYear, battery every battReplYear) recur at
+ * every multiple of their interval, but only while at least REPLACE_MIN_REMAINING
+ * years of the horizon remain after the replacement year: nobody budgets a new
+ * inverter in year 24 of a 25-year analysis whose terminal value is zero.  On the
+ * default 25-year horizon that books the inverter at 12 (not 24) and the battery at
+ * 20 - exactly what the single-replacement rule used to give.  The battery's
+ * capacity-fade clock restarts at every replacement that is booked, and only then.
+ *
+ * Defaults mirror the app's State.DEFAULTS.fin (app/state.js ~line 101-111), which
+ * is the source of truth for anything a person sees; these only fill keys a caller
+ * leaves out (tests, the optimizer called without a full finance block).  Keep the
+ * overlapping keys equal; tests/finance.test.mjs pins the two that once drifted.
  * ========================================================================== */
+
+/** Years of horizon that must remain after a replacement for it to be booked. */
+const REPLACE_MIN_REMAINING = 3;
 
 const DEFAULTS = {
   costPerW: 3.00,            // $/W DC, installed, before incentives
   costPerKwh: 1000,          // $/kWh usable storage, installed
   adder: 0,                  // fixed install adder (panel upgrade, trenching, ...)
+  // Per-roof-face extra install cost (long conduit runs, tile roof, steep pitch...).
+  // Charged whenever there are panels; hardware-agnostic, so it never enters the
+  // panel/pack degradation blend.
+  roofCostAdder: 0,
   taxCreditPct: 0,           // homeowner-claimed 25D - terminated for 2026 installs
   // How a third-party credit reaches the customer.  "none" | "discount" | "vendor".
-  incentiveMode: "vendor",
+  // "none" to match app/state.js (State.DEFAULTS.fin.incentiveMode).
+  incentiveMode: "none",
   discountPct: 0,            // mode "discount": straight % off system price
   vendorCreditPct: 0.40,     // mode "vendor": the credit the vendor claims - context only
   passThroughPct: 0.34,      // mode "vendor": points off the system price they pass on
   sgipPerKwh: 0,             // SGIP storage rebate, $/kWh usable (closed as of 2026)
   rebates: 0,                // any other one-off rebate $ (CPA Sun Storage, ...)
   horizon: 25,               // analysis years
-  escalation: 0.045,         // retail rate escalation, nominal $/yr
+  escalation: 0.05,          // retail rate escalation, nominal $/yr (app/state.js)
   exportEscalation: 0.0,     // export credits are locked to a fixed ACC vintage
+  // The ACC Plus adder is locked for nine years from interconnection and then ends;
+  // from year accPlusYears + 1 the sim's accPlusRevenue is taken back out.
+  accPlusYears: 9,
   investReturn: 0.07,        // nominal return on the same cash in the market
   discountRate: 0.025,       // inflation / real-terms discount
   panelDeg: 0.005,           // /yr production loss
@@ -2588,7 +2856,21 @@ function withDefaults(f) {
       buyout: Math.max(0, num(g.lease && g.lease.buyout, D.lease.buyout)),
     },
   };
+  o.roofCostAdder = Math.max(0, o.roofCostAdder);
+  o.accPlusYears = Math.max(0, o.accPlusYears);
   return o;
+}
+
+/**
+ * The years in 1..H at which a part with a service life of `every` years is
+ * replaced: every multiple of the (rounded) interval that leaves at least
+ * REPLACE_MIN_REMAINING years of horizon after it.  `every` <= 0 means never.
+ */
+function replacementYears(every, H) {
+  const n = Math.round(every), out = [];
+  if (!(n >= 1)) return out;
+  for (let y = n; y <= H - REPLACE_MIN_REMAINING; y += n) out.push(y);
+  return out;
 }
 
 /**
@@ -2698,7 +2980,15 @@ function amortize(principal, apr, termYears) {
  *               pvKwh, kwdc, battKWhTotal }
  *             `savings` is year-1 bill savings in dollars; `bill` the with-system
  *             annual bill; `baselineBill` today's annual bill.
+ *             Optional `accPlusRevenue`: year-1 dollars of ACC Plus adder credit,
+ *             a part of `exportRevenue` (and so of `savings`), not on top of it.
+ *             It is removed from every year after f.accPlusYears (default 9),
+ *             escalated and degraded exactly as the export revenue it sits in.
+ *             Missing or 0 changes nothing.
  * @param f    finance inputs (see DEFAULTS)
+ * @returns    among the rest, `irr` (levered, the household's own cash) with
+ *             `irrReason` - null when irr is a number, else why it is undefined:
+ *             "no money down", "never repays" or "no unique rate".
  */
 function evaluate(sim, f) {
   f = withDefaults(f);
@@ -2707,9 +2997,16 @@ function evaluate(sim, f) {
   // Backward compatible: a sim that carries only `savings` is treated as all-import.
   const exportRev = sim.exportRevenue || 0;
   const importSav = sim.importSavings !== undefined ? sim.importSavings : (sim.savings - exportRev);
+  // The adder is a slice of the export credit, so it can never exceed it or go below 0:
+  // a hand-built sim with a stray value is clamped rather than inventing savings.
+  const accPlusRev = Math.min(Math.max(0, +sim.accPlusRevenue || 0), Math.max(0, exportRev));
   const watts = sim.kwdc * 1000;
   const solarCost = watts * f.costPerW;
   const storageCost = sim.battKWhTotal * f.costPerKwh;
+  // Roof work (re-roofing a face, conduit runs, structural fixes) is the household's
+  // own bill: it is not part of the system's sticker price, so no vendor pass-through,
+  // tax credit or rebate reaches it, and under a lease it is still paid up front.
+  const roofCost = watts > 0 ? f.roofCostAdder : 0;
   const gross = solarCost + storageCost + (watts > 0 || sim.battKWhTotal > 0 ? f.adder : 0);
   const disc = effectiveDiscount(f);
   const discounted = gross * (1 - disc);
@@ -2717,7 +3014,7 @@ function evaluate(sim, f) {
   const itc = isLease ? 0 : discounted * f.taxCreditPct;
   const sgip = isLease ? 0 : sim.battKWhTotal * f.sgipPerKwh;
   const rebates = isLease ? 0 : f.rebates;
-  const netCost = isLease ? gross : Math.max(0, discounted - itc - sgip - rebates);
+  const netCost = (isLease ? gross : Math.max(0, discounted - itc - sgip - rebates)) + roofCost;
 
   const H = Math.max(1, Math.round(f.horizon));
   const times = flowTimes(H, f.midYear !== false);
@@ -2725,6 +3022,10 @@ function evaluate(sim, f) {
   // ----------------------------------------------------------------- financing
   const pay = new Array(H + 1).fill(0);
   let upfront = 0, schedule = [], amort = null, principal = 0, dealerFee = 0;
+  // Which years the household has the system, and which years it owns (pays O&M,
+  // replacements, gets the resale credit).  Cash and loan: all of them.  Lease: has
+  // it for the term, then owns it after a buyout or hands it back (see the header).
+  let hasUntil = H, ownsFrom = 1, ownsAtH = false, leaseEnd = null;
   if (mode === "loan") {
     const L = f.financing.loan;
     dealerFee = netCost * L.sharePct * L.dealerFeePct;
@@ -2750,6 +3051,22 @@ function evaluate(sim, f) {
       const row = schedule[L.termYears - 1];
       if (row) row.payment = pay[L.termYears];
     }
+    if (L.termYears === H && L.buyout > 0) {
+      // Bought in the final year: the household owns it at the horizon, so the resale
+      // credit is theirs even though no ownership year is left to run.
+      ownsFrom = H + 1; ownsAtH = true;
+      leaseEnd = { year: L.termYears, outcome: "buyout" };
+    } else if (L.termYears >= H) {
+      ownsFrom = H + 1;                                   // leased to the end of the analysis
+      leaseEnd = { year: L.termYears, outcome: "runs to horizon" };
+    } else if (L.buyout > 0) {
+      ownsFrom = L.termYears + 1;
+      leaseEnd = { year: L.termYears, outcome: "buyout" };
+    } else {
+      ownsFrom = H + 1; hasUntil = L.termYears;
+      leaseEnd = { year: L.termYears, outcome: "returned" };
+    }
+    upfront = roofCost;                                   // the lessor does not fix the roof
   } else {
     upfront = netCost;
   }
@@ -2771,27 +3088,37 @@ function evaluate(sim, f) {
   // "pays for itself" and project-IRR figures below are about the asset, while
   // NPV and wealth are about the household's actual money.
   const cf = [-upfront], netSav = [0], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
+  // Replacement years recur (see replacementYears and the header).  The pack's
+  // fade clock restarts at each one whoever pays for it - a lessor swapping a pack
+  // in year 20 hands back a fresh one just the same.
+  const battRepl = replacementYears(f.battReplYear, H), invRepl = replacementYears(f.inverterYear, H);
+  let lastBattRepl = 0;
   for (let y = 1; y <= H; y++) {
+    const has = y <= hasUntil, owns = y >= ownsFrom;
+    const battSwap = battRepl.indexOf(y) >= 0;
     const sFac = Math.pow(1 - f.panelDeg, y - 1);
-    // capacity resets when the pack is replaced
-    const bAge = (f.battReplYear > 0 && y > f.battReplYear) ? y - f.battReplYear : y;
+    const bAge = y - lastBattRepl;                 // capacity resets after each replacement
+    if (battSwap) lastBattRepl = y;                // the new pack arrives at the end of year y
     const bFac = Math.pow(1 - f.battDeg, bAge - 1);
     const esc = Math.pow(1 + f.escalation, y - 1);
     const escX = Math.pow(1 + f.exportEscalation, y - 1);
     const deg = wS * sFac + wB * bFac;
-    const sav = importSav * esc * deg + exportRev * escX * deg;
-    // Under a lease the third party owns and maintains the hardware.
-    const o = isLease ? 0 : f.omPerYear * Math.pow(1 + f.discountRate, y - 1);
+    // The ACC Plus adder rides inside exportRevenue for its nine-year lock, then ends.
+    const exportY = exportRev - (y > f.accPlusYears ? accPlusRev : 0);
+    const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
+    // O&M, replacements and resale are the owner's: the household under cash or a
+    // loan, the lessor under a lease until a buyout hands the system over.
+    const o = owns ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
     let ex = 0;
-    if (!isLease) {
-      if (sim.battKWhTotal > 0 && y === Math.round(f.battReplYear)) ex += sim.battKWhTotal * f.costPerKwh * f.battReplFraction;
-      if (watts > 0 && y === Math.round(f.inverterYear)) ex += watts * f.inverterPerW;
+    if (owns) {
+      if (sim.battKWhTotal > 0 && battSwap) ex += sim.battKWhTotal * f.costPerKwh * f.battReplFraction;
+      if (watts > 0 && invRepl.indexOf(y) >= 0) ex += watts * f.inverterPerW;
     }
-    const resale = isLease ? 0 : f.resaleValue;
+    const resale = (owns || (ownsAtH && y === H)) ? f.resaleValue : 0;
     const earned = sav - o - ex + (y === H ? resale : 0);
     const net = earned - pay[y];
     cf.push(net); netSav.push(earned); savings.push(sav); om.push(o); extras.push(ex); payments.push(pay[y]);
-    prod.push(sim.pvKwh * sFac);
+    prod.push(has ? sim.pvKwh * sFac : 0);
   }
 
   const cum = [], dcum = [];
@@ -2807,8 +3134,26 @@ function evaluate(sim, f) {
   // below the savings from year one) and only dips negative at a battery
   // replacement decades later still has a sign change, and bisection would
   // dutifully return a deeply negative "rate" that describes nothing.
+  // When there is no rate, say why, so the UI can print a reason and not "0.0%":
+  //   "no money down"  nothing goes out before money comes in - a fully financed
+  //                    loan whose payment sits below the saving, a good lease;
+  //   "never repays"   the running total never turns positive (an underwater
+  //                    lease, zero savings);
+  //   "no unique rate" an outlay first and a positive running total, but the signs
+  //                    flip back - typically a loan whose term outlasts the horizon,
+  //                    its balance settled in the final year - and no single rate
+  //                    in -90%..300% zeroes the NPV.
+  // projectIrr below (the unlevered return on the cash price) is unaffected.
   const firstMove = cf.find((v) => Math.abs(v) > 1e-9);
-  const irr = firstMove !== undefined && firstMove < 0 ? irrOf(cf, times) : null;
+  // (An outlay that is never earned back can still have a real, negative IRR; only
+  // when bisection finds no root does "never repays" stand in for it.)
+  let irr = null, irrReason = null;
+  if (firstMove === undefined) irrReason = "never repays";
+  else if (firstMove > 0) irrReason = "no money down";
+  else {
+    irr = irrOf(cf, times);
+    if (irr === null) irrReason = crossing(cum) === null ? "never repays" : "no unique rate";
+  }
 
   // The asset on its own, before financing.  "Pays for itself" is the year the
   // system's cumulative earnings (netSav) have covered everything it will ever
@@ -2887,17 +3232,22 @@ function evaluate(sim, f) {
 
   return {
     inputs: f, gross, itc, sgip, rebates, netCost,
-    solarCost, storageCost,
+    solarCost, storageCost, roofCost,
     effectiveDiscount: disc, discountValue: gross - discounted,
     effectiveCostPerW: f.costPerW * (1 - disc), effectiveCostPerKwh: f.costPerKwh * (1 - disc),
     cashflows: cf, savingsByYear: savings, omByYear: om, extrasByYear: extras,
     paymentsByYear: payments,
     cumulative: cum, discountedCumulative: dcum, flowTimes: times,
-    npv, irr, projectIrr,
+    npv, irr, irrReason, projectIrr,
     payback, discountedPayback, totalCost,
     // When the household's own running cash turns positive (0 = from day one).
     cashFlowPayback: crossing(cum),
     loanPaidOffYear: amort ? Math.min(amort.termYears, H) : null,
+    // Lease only: { year, outcome } - "buyout" (owned after `year`), "returned"
+    // (savings stop after `year`) or "runs to horizon" (leased throughout).
+    leaseEnd,
+    // Years in which a replacement was booked (whoever paid for it).
+    replacementYears: { battery: sim.battKWhTotal > 0 ? battRepl : [], inverter: watts > 0 ? invRepl : [] },
     netSavingsByYear: netSav,
     lcoe, lifetimeCost: lifetime, lifetimeCostNoSystem: lifetimeNoSystem,
     wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest, cashRef,
@@ -2926,6 +3276,9 @@ function evaluate(sim, f) {
  * break-even, and under a lease the sticker price is not what the customer pays.
  */
 function breakEven(sim, f, key) {
+  // Said in so many words: the sticker price only nudges a lease's NPV through the
+  // cost-share degradation blend, and a root found that way would be noise.
+  if (withDefaults(f).financing.mode === "lease") return null;
   const npvAt = (price) => evaluate(sim, Object.assign({}, f, { [key]: price })).npv;
   const at0 = npvAt(0), at1 = npvAt(1);
   const slope = at1 - at0;
@@ -2944,7 +3297,8 @@ function breakEven(sim, f, key) {
   return Math.abs(y1) <= Math.abs(slope) * 1e-6 ? x1 : null;
 }
 
-const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount,
+const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount, replacementYears,
+                       REPLACE_MIN_REMAINING,
                        npvOf, irrOf, flowTimes, crossing, loanPayment, amortize, DEFAULTS };
 var __default = SolarFinance;
 
@@ -3152,17 +3506,19 @@ function priceGrid(grid, finance, objective, basis) {
     const savings = asRec ? c.savingsVsAsRecorded : c.savingsVsSameFlex;
     // The two halves of the saving escalate at different rates, so they travel apart.
     const exportRev = c.exportRevenue || 0;
+    // The ACC Plus share of exportRev: finance stops it after the nine-year lock.
+    const accPlusRev = c.accPlusRevenue || 0;
     let importSav = asRec ? c.importSavingsVsAsRecorded : c.importSavingsVsSameFlex;
     if (importSav === undefined) importSav = savings - exportRev;
     const fin = Finance.evaluate({
-      savings, importSavings: importSav, exportRevenue: exportRev,
+      savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, baselineBill: baseline.bill,
       pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
     }, finance);
     return {
       panels: c.panels, panelsByPlane: c.panelsByPlane, planeIds: c.planeIds,
       batteries: c.batteries, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
-      savings, importSavings: importSav, exportRevenue: exportRev,
+      savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, importKwh: c.importKwh, exportKwh: c.exportKwh,
       pvKwh: c.pvKwh, pvKwhByPlane: c.pvKwhByPlane, loadKwh: c.loadKwh, baseLoadKwh: c.baseLoadKwh,
       cycles: c.cycles, selfSufficiency: c.selfSufficiency,
@@ -3205,6 +3561,7 @@ function findCell(priced, panels, batteries) {
 function tornado(cell, finance, baselineBill, flexVariants) {
   const simOf = (o) => ({
     savings: o.savings, importSavings: o.importSavings, exportRevenue: o.exportRevenue,
+    accPlusRevenue: o.accPlusRevenue === undefined ? cell.accPlusRevenue : o.accPlusRevenue,
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
     pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal,
   });
@@ -3322,7 +3679,7 @@ var SolarOptimizer = __ns_SolarOptimizer;
       }));
       var r = E.simulate(ctx, q, {});
       return { savings: r.savingsVsSameFlex, importSavings: r.importSavingsVsSameFlex,
-               exportRevenue: r.exportRevenue, bill: r.bill,
+               exportRevenue: r.exportRevenue, accPlusRevenue: r.accPlusRevenue, bill: r.bill,
                baselineBill: r.baselineSameFlex.bill };
     };
     return { label: "Flexible load kWh/yr", low: mk(0.8), high: mk(1.2) };
@@ -3364,7 +3721,7 @@ var SolarOptimizer = __ns_SolarOptimizer;
         var s = E.simulate(ctx, q, {});
         return { key: w.key, label: w.label, group: w.group, pvKwh: s.pvKwh, bill: s.bill,
                  savings: s.savingsVsSameFlex, importSavings: s.importSavingsVsSameFlex,
-                 exportRevenue: s.exportRevenue, baselineBill: s.baselineSameFlex.bill };
+                 exportRevenue: s.exportRevenue, accPlusRevenue: s.accPlusRevenue, baselineBill: s.baselineSameFlex.bill };
       });
       // The hourly arrays are only meaningful to the charts that ask for them.
       if (!m.wantHourly) delete res.hourly;

@@ -148,7 +148,13 @@ function planeRow(plane, index, ctx, redraw) {
         [["0", "None"], ["0.05", "Light (5%)"], ["0.12", "Moderate (12%)"], ["0.25", "Heavy (25%)"]].map(([v, t]) =>
           el("option", { value: v, text: t, selected: Math.abs((plane.shading?.annual ?? 0) - Number(v)) < 0.001 })))),
       field("Extra cost $", el("input", { type: "number", min: 0, step: 100, value: plane.costAdder || 0,
-        on: { change: (e) => change("costAdder", Number(e.target.value)) } })),
+        title: "One-time cost of using this face (re-roofing under it, a long conduit run). Added to the "
+          + "system price whenever the optimiser puts panels on this face.",
+        on: { change: (e) => {
+          // Blank or negative is "no extra cost", never NaN in the price.
+          const v = Number(e.target.value);
+          change("costAdder", Number.isFinite(v) && v > 0 ? v : 0);
+        } } })),
     ]),
   ]);
 }
@@ -159,6 +165,11 @@ export function render(state, ctx) {
   // is synced inward, and only when it changed elsewhere (the landing form).
   if (builderHandle && typeof builderHandle.setSite === "function" && state.site.lat !== null) {
     builderHandle.setSite({ lat: state.site.lat, lon: state.site.lon });
+  }
+  // The Panel wattage knob lives elsewhere; keep the builder's module size in step.
+  // setPanel is a no-op when the wattage is unchanged.
+  if (builderHandle && typeof builderHandle.setPanel === "function") {
+    builderHandle.setPanel({ w: state.system.panelW });
   }
 
   const statusText = $("solar-status-text");

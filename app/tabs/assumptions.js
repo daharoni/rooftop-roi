@@ -80,15 +80,18 @@ export function render(state, ctx) {
 function renderQuality(state, ctx) {
   const node = clear($("quality-kv"));
   const meta = (ctx.loadSet && ctx.loadSet.meta) || {};
+  // Annual kWh as the engine counts it (usable days / 365), from main.js; the
+  // hours / 8760 fallback only until the engine has seen this file.
   const usable = meta.quality && Number.isFinite(meta.quality.usableHours) ? meta.quality.usableHours : meta.nHours;
   const years = usable ? usable / 8760 : 0;
+  const annualKwh = ctx.householdAnnualKwh || (meta.totalKwh && years ? meta.totalKwh / years : null);
   const solarMeta = firstSolarModel(state);
 
   const pairs = [
     ["Meter history", meta.nHours ? `${fmtNum(meta.nHours, 0)} hours · ${meta.start || "?"} → ${meta.end || "?"}` : "—"],
     ["Source", meta.source || "—"],
     ["Original interval", meta.intervalMinutes ? `${meta.intervalMinutes} min, summed to hours` : "—"],
-    ["Consumption", meta.totalKwh && years ? `${fmtNum(meta.totalKwh / years, 0)} kWh/yr` : "—"],
+    ["Consumption", annualKwh ? `${fmtNum(annualKwh, 0)} kWh/yr` : "—"],
     ["Gaps filled", meta.gapsFilled && meta.gapsFilled.length ? `${meta.gapsFilled.length} short gaps interpolated` : "none"],
     ["Flexible loads", state.flex.length
       ? state.flex.map((f) => `${f.name} ${fmtNum(f.annualKwh, 0)} kWh/yr (${f.source})`).join(" · ")
@@ -318,6 +321,10 @@ function renderMethod(state, ctx) {
       + "vintage is locked. Escalating export credits alongside the bill would inflate the value of every "
       + "exported kWh and push the optimiser toward an oversized array, so export escalation defaults to zero."),
     ul([
+      "Price. Solar $/W × kW DC plus storage $/kWh × usable kWh, plus the fixed install adder, plus each roof "
+        + "face's \"Extra cost $\" (Roof tab) for the faces that system actually puts panels on. The optimiser fills "
+        + "faces greedily, so every cell on the map knows its own faces: a 10-panel system that fits on the south "
+        + "face does not pay for re-roofing the west one. Discounts and incentives then apply as set in the rail.",
       "Cash. The whole net price is a year-0 outlay.",
       "Loan. A down payment at year 0 plus level annual payments for the term; the principal is the net price "
         + "times the share financed, inflated by any dealer fee. A low APR bought with a big dealer fee is not a "
