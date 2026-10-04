@@ -47,17 +47,25 @@ export function mount(pane, state, ctx) {
   pane.appendChild(el("section.headline", { id: "headline" }, [
     el("div.hero-verdict", {}, [
       el("span.eyebrow", { id: "hl-title", text: "Net present value vs. investing the cash" }),
-      el("div.hero-num.num", { id: "hero-npv", text: "—" }),
-      el("p.hero-band", { id: "hero-band", hidden: true }),
-      el("span.verdict-pill.pill-mid", { id: "hero-pill" }, [
-        el("span.dot"), el("span", { id: "hero-pill-text", text: "waiting for the simulation" }),
+      // Number and verdict share a row when they fit, so the column stays short.
+      el("div.hero-row", {}, [
+        el("div.hero-num.num", { id: "hero-npv", text: "—" }),
+        el("span.verdict-pill.pill-mid", { id: "hero-pill" }, [
+          el("span.dot"), el("span", { id: "hero-pill-text", text: "waiting for the simulation" }),
+        ]),
       ]),
+      el("p.hero-band", { id: "hero-band", hidden: true }),
       el("p.hero-why", { id: "hero-why", hidden: true }),
-      el("p.hero-note", { id: "hero-note" }),
+      // The definition of the number is a paragraph most readers need once; it folds away
+      // so the band is no taller than the tiles beside it.
+      el("details.data-view.hero-more", {}, [
+        el("summary", { text: "How this number is worked out" }),
+        el("p.hero-note", { id: "hero-note" }),
+      ]),
     ]),
-    el("div", {}, [
+    el("div.hero-figures", {}, [
       tiles("tiles"),
-      el("p.note", { id: "config-line", style: "margin:10px 0 0" }),
+      el("p.note.config-line", { id: "config-line" }),
     ]),
   ]));
 
@@ -319,7 +327,7 @@ function backupTile(cell, f) {
   const v = hours < 48 ? fmtNum(hours, hours < 10 ? 1 : 0) + " h" : fmtNum(hours / 24, 1) + " days";
   const flexOff = cell.baseLoadKwh && cell.loadKwh > cell.baseLoadKwh + 1 ? ", cars and pool off" : "";
   return { k: "Backup power", v,
-    d: `${fmtNum(kwh, 0)} kWh pack · house draws ${fmtNum(perDay, 0)} kWh/day${flexOff} · longer with daytime sun` + valued };
+    d: `${fmtNum(kwh, 0)} kWh pack · house draws ${fmtNum(perDay, 0)} kWh/day${flexOff} · more with daytime sun` + valued };
 }
 
 /** Above zero the roof won, below it the market did; zero is a real midpoint. */
@@ -384,11 +392,11 @@ function renderBand(state, ctx, cell) {
   } catch (e) { return; }
   if (!Number.isFinite(a) || !Number.isFinite(b)) return;
   const pct = (v) => fmtPct(v, 0).replace(/\s/g, "");
-  let text = `Between ${fmtCompact(Math.min(a, b))} and ${fmtCompact(Math.max(a, b))} if rates rise ${pct(lo)} to ${pct(hi)} a year; `;
+  let text = `${fmtCompact(Math.min(a, b))} to ${fmtCompact(Math.max(a, b))} if rates rise ${pct(lo)} to ${pct(hi)} a year; `;
   const rows = Array.isArray(ctx.weatherRows) ? ctx.weatherRows : [];
   const p90 = rows.find((r) => r.key === "p90"), p10 = rows.find((r) => r.key === "p10");
   if (p90 && p10 && Number.isFinite(p90.npv) && Number.isFinite(p10.npv)) {
-    text += `a dull to a sunny year moves it between ${fmtCompact(Math.min(p90.npv, p10.npv))} and ${fmtCompact(Math.max(p90.npv, p10.npv))}.`;
+    text += `${fmtCompact(Math.min(p90.npv, p10.npv))} to ${fmtCompact(Math.max(p90.npv, p10.npv))} from a dull to a sunny year.`;
   } else {
     text += "weather years move it less.";
   }
