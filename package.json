@@ -7,6 +7,7 @@
     "test": "node --test tests/*.test.mjs",
     "test:live": "env -u SKIP_LIVE node --test tests/weather.test.mjs tests/geocode.test.mjs",
     "validate": "node tests/validate-tariffs.mjs --strict",
+    "check:fresh": "node tests/check-freshness.mjs",
     "bundle": "node core/bundle-for-worker.mjs",
     "serve": "python3 -m http.server 8000"
   }

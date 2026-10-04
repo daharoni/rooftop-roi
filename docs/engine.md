@@ -337,6 +337,10 @@ net-metering agreement. Full detail and the list of what is not modelled: `docs/
   baselines are "existing array, no battery" and `savings*` is what the battery adds. Results
   report `existingPanels`, `existingPvKwh` and `newPanels`. The worker's `grid` fixes the panel
   axis at the existing count and sweeps batteries only.
+- **End of term.** On NEM 1 / NEM 2 the worker also runs every battery cell under Net Billing
+  with `accPlusAdder: 0` and attaches it as `cell.after` (plus `afterBaselineSameFlex` /
+  `afterBaselineAsRecorded` on the grid, `after` on `detail` and each weather row); finance
+  switches to it after `f.legacyYears`. See `docs/nem2.md`, "When the term ends".
 - **Prices.** `buildRates` sets the export price of every hour to that hour's import price less
   `nbt.nonbypassable_charges_per_kwh` (NEM 2) or to the import price itself (NEM 1); ACC Plus,
   the ARECR, the CCA export adder and the export cap are all off.

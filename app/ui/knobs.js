@@ -132,6 +132,32 @@ export function incentives(open = false) {
   ] };
 }
 
+/**
+ * The array the household already has. Shown only in existing-solar mode (group-level `show`).
+ * `since` is nullable: blank means "unknown", which models the legacy agreement for the whole horizon.
+ */
+export function existingSolar(open = false) {
+  const thisYear = new Date().getFullYear();
+  return { group: "Your existing solar", open,
+    show: (s) => !!s.existing && s.existing.nem !== "none" && Number(s.existing.kwDc) > 0,
+    items: [
+      { path: "existing.kwDc", kind: "number", label: "Array size, kW DC", min: 0.5, max: 50, step: 0.1 },
+      { path: "existing.nem", kind: "select", label: "Net metering plan",
+        opts: [{ v: "nem2", t: "NEM 2" }, { v: "nem1", t: "NEM 1" }] },
+      { path: "existing.since", kind: "number", label: "Year switched on", min: 1995, max: thisYear, step: 1,
+        reason: "finance", nullable: true,
+        footnote: (s) => {
+          const y = Number(s.existing && s.existing.since);
+          if (!s.existing || s.existing.since === null || s.existing.since === undefined || !Number.isFinite(y)) {
+            return "Enter the year to model the end of the 20-year term.";
+          }
+          return y + 20 <= thisYear
+            ? `That agreement ended in ${y + 20}; everything is priced under Net Billing.`
+            : `Runs to ${y + 20}; Net Billing after that.`;
+        } },
+    ] };
+}
+
 export function hardware(open = false) {
   return { group: "Hardware", open, items: [
     { path: "system.battPreset", kind: "select", label: "Battery product", reason: "sim", opts: presetOptions(),
@@ -267,6 +293,6 @@ export function replay(open = true) {
 }
 
 export default {
-  goal, price, financing, incentives, hardware, dispatch, search, household, rate, future, wear, replay,
+  goal, price, financing, incentives, existingSolar, hardware, dispatch, search, household, rate, future, wear, replay,
   item, OBJECTIVE_OPTS, BASIS_OPTS,
 };

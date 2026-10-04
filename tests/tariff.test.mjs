@@ -612,3 +612,41 @@ test("validate() makes the NBT terms errors, not warnings", () => {
   delete t.plans[0].baseline_credit_pct;
   assert.ok(T.validate(t).errors.some((e) => e.includes("baseline_credit_pct")), "baseline_credit_pct required");
 });
+
+/* ------------------------------------------------------------------ freshness */
+import { freshness, freshnessNotice } from "../core/tariff.js";
+import { spawnSync } from "node:child_process";
+
+test("freshness thresholds", () => {
+  const meta = { as_of: "2026-01-01" };
+  const at = (d) => freshness(meta, new Date(d + "T12:00:00Z"));
+  assert.equal(at("2026-01-01").level, "fresh");
+  assert.equal(at("2026-06-29").level, "fresh");   // 179 days
+  assert.equal(at("2026-06-30").level, "aging");   // 180 days
+  assert.equal(at("2027-01-01").level, "aging");   // 365 days
+  assert.equal(at("2027-01-02").level, "stale");
+  assert.equal(at("2026-10-04").months, 9);
+  assert.equal(freshness({}, new Date()).level, "unknown");
+  assert.equal(freshness({ as_of: "soon" }, new Date()).level, "unknown");
+});
+
+test("freshnessNotice wording and exclusions", () => {
+  const t = { utility: { id: "pge", name: "Pacific Gas and Electric" }, meta: { as_of: "2026-01-15" } };
+  assert.equal(freshnessNotice(t, new Date("2026-03-01T00:00:00Z")), null);
+  const aging = freshnessNotice(t, new Date("2026-09-01T00:00:00Z"));
+  assert.match(aging, /^The PG&E rate book in this tool was last checked on January 15, 2026, 7 months ago\./);
+  assert.match(freshnessNotice(t, new Date("2027-03-01T00:00:00Z")), /over a year ago\. Rates have almost certainly changed/);
+  const custom = { utility: t.utility, meta: { as_of: "2020-01-01", notes: "CUSTOM TARIFF built" } };
+  assert.equal(freshnessNotice(custom, new Date("2027-03-01T00:00:00Z")), null);
+  assert.equal(freshnessNotice({ meta: {} }, new Date()), null);
+});
+
+test("check-freshness script exit codes", () => {
+  const script = join(HERE, "check-freshness.mjs");
+  const ok = spawnSync("node", [script, "--today=2026-10-04"], { encoding: "utf8" });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.equal(ok.stdout.trim().split("\n").filter((l) => l.endsWith(")")).length, 3);
+  const bad = spawnSync("node", [script, "--today=2028-01-01"], { encoding: "utf8" });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /::error::/);
+});

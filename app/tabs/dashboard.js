@@ -29,6 +29,7 @@ export function rail(state, ctx) {
     K.price(ctx, true),
     K.financing(true),
     K.hardware(false),
+    K.existingSolar(false),
     K.dispatch(false),
     K.search(false),
     K.household(false),
@@ -373,6 +374,7 @@ function renderBand(state, ctx, cell) {
       savings: cell.savings, importSavings: cell.importSavings, exportRevenue: cell.exportRevenue,
       accPlusRevenue: cell.accPlusRevenue, bill: cell.bill, baselineBill: ctx.baselineBill,
       pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
+      after: cell.after || null,          // the Net Billing stream once a NEM 1/2 term ends
     };
     // main.js's finEff carries the NGOM adder, the roof adder rule and the existing-array
     // watts; pricing from raw state.fin would buy an existing array all over again.
@@ -405,10 +407,43 @@ function renderWhy(state, ctx, cap) {
   node.hidden = true;
   const priced = ctx.priced;
   if (!priced || !priced.cells || !priced.best) return;
-  const text = whySentence(state, ctx, cap);
+  const text = [whySentence(state, ctx, cap), termSentence(state, ctx)].filter(Boolean).join(" ");
   if (!text) return;
   node.textContent = text;
   node.hidden = false;
+}
+
+/**
+ * Existing-solar mode only: what happens when the NEM 1/2 term ends. Reads the priced best cell's
+ * regimeChangeYear and after.savings (first-year dollars on each agreement) and the finance
+ * legacyYears; every field may be absent, in which case there is nothing to say.
+ */
+function termSentence(state, ctx) {
+  const ex = ctx.existingMode;
+  if (!ex) return null;
+  const plan = nemLabel(ex.nem);
+  const fin = (ctx.finEff && ctx.finEff(0)) || {};
+  const legacyYears = fin.legacyYears !== undefined ? fin.legacyYears : ex.legacyYears;
+  // The comparison is about the battery, so use the best cell that has one (1 battery when the best is none).
+  const pr = ctx.priced || {};
+  const best = pr.best && pr.best.batteries > 0 ? pr.best
+    : (pr.cells || []).find((c) => c.batteries === 1) || null;
+  const since = state.existing ? state.existing.since : null;
+  if (since === null || since === undefined) {
+    return "Enter the year the array was switched on (rail, Your existing solar) to model the end of its 20-year term.";
+  }
+  if (legacyYears === null || legacyYears === undefined) return null;
+  if (legacyYears === 0) return `Your ${plan} agreement has ended; everything here is priced under Net Billing.`;
+  const year = best && best.regimeChangeYear;
+  if (!year) return null;
+  const ends = ex.termEndsYear;
+  const head = ends ? `Your ${plan} agreement runs to ${ends}. ` : `Your ${plan} agreement is in its last years. `;
+  const now = Number(best.savings), then = best.after ? Number(best.after.savings) : NaN;
+  if (!Number.isFinite(now) || !Number.isFinite(then)) return `${head}From year ${year} the battery is valued under Net Billing.`;
+  const tol = Math.max(25, 0.05 * Math.abs(now));
+  const cmp = then > now + tol ? "more" : then < now - tol ? "less" : "about the same";
+  return `${head}From year ${year} the battery is valued under Net Billing, where it earns ${cmp} `
+    + `(${fmtMoney(then, 0)} a year against ${fmtMoney(now, 0)} under ${plan}).`;
 }
 
 function whySentence(state, ctx, cap) {

@@ -638,3 +638,80 @@ test("an existing array with no battery is 'do nothing': no adder, O&M or resale
     { ...f, costPerKwh: 1000 });
   assert.ok(withB.netCost > 13500 && withB.netCost < 13500 + 1500 + 1e-6, "battery plus the adder, no roof work, no panels");
 });
+
+// ================================================================== NEM term ends
+// A battery on an existing NEM 2 array: $400/yr while the legacy term runs, then $700/yr
+// (all import, no export) on Net Billing, where the no-system bill is also different.
+const LEG = { savings: 400, importSavings: 400, exportRevenue: 0, bill: 1600, baselineBill: 2000,
+              pvKwh: 0, kwdc: 0, battKWhTotal: 10, batteries: 1,
+              after: { savings: 700, importSavings: 600, exportRevenue: 100, accPlusRevenue: 0,
+                       bill: 2300, baselineBill: 3000 } };
+const LEGF = { costPerKwh: 400, horizon: 10, escalation: 0.04, exportEscalation: 0, investReturn: 0.06,
+               battDeg: 0.02, battReplYear: 99, omPerYear: 50, midYear: true };
+const strip = (r) => { const o = Object.assign({}, r); delete o.inputs; return o; };
+
+test("legacy term: without `after`, or with legacyYears null, nothing changes", () => {
+  const { after, ...plain } = LEG;
+  const ref = Finance.evaluate(plain, LEGF);
+  assert.equal(ref.regimeChangeYear, null);
+  assert.equal(ref.legacyYears, null);
+  assert.equal(Finance.withDefaults({}).legacyYears, null, "default legacyYears is null");
+  // legacyYears set but no after stream: byte-equal (inputs aside, which echo the knob).
+  assert.deepEqual(strip(Finance.evaluate(plain, { ...LEGF, legacyYears: 5 })), strip(ref));
+  // after present but legacyYears null: byte-equal, inputs included.
+  assert.deepEqual(Finance.evaluate(LEG, LEGF), ref);
+  assert.deepEqual(Finance.evaluate(LEG, { ...LEGF, legacyYears: null }), ref);
+});
+
+test("legacy term: switch at year 5 takes year 6 on from `after`, escalated and degraded alike", () => {
+  const ref = Finance.evaluate({ ...LEG, after: undefined }, LEGF);
+  const r = Finance.evaluate(LEG, { ...LEGF, legacyYears: 5 });
+  assert.equal(r.regimeChangeYear, 6);
+  assert.equal(r.legacyYears, 5);
+  for (let y = 1; y <= 5; y++) near(r.savingsByYear[y], ref.savingsByYear[y], 1e-9, `year ${y} is the legacy stream`);
+  const deg = (y) => Math.pow(1 - 0.02, y - 1);
+  for (const y of [6, 10]) {
+    near(r.savingsByYear[y], (600 * Math.pow(1.04, y - 1) + 100) * deg(y), 1e-9, `year ${y} is the NBT stream`);
+  }
+  near(r.firstYearSavings, ref.firstYearSavings, 1e-12, "year 1 is still on NEM 2");
+  near(r.currentMonthlyBill, 2000 / 12, 1e-12, "today's bill is the legacy one");
+  // Lifetime cost: the no-system arm switches baseline too.
+  let noSys = 0;
+  for (let y = 1; y <= 10; y++) {
+    noSys += (y <= 5 ? 2000 : 3000) * Math.pow(1.04, y - 1) / Math.pow(1.025, y - 0.5);
+  }
+  near(r.lifetimeCostNoSystem, noSys, 1e-6, "no-system arm uses after.baselineBill after the switch");
+  // The wealth identity still holds.
+  near(r.wealthSystem - r.wealthInvest, r.npv * Math.pow(1.06, 10), 1e-6, "wealth identity");
+  assert.ok(r.npv > ref.npv, "a better NBT stream raises the NPV");
+});
+
+test("legacy term: 0 means Net Billing throughout; >= horizon never switches", () => {
+  const r0 = Finance.evaluate(LEG, { ...LEGF, legacyYears: 0 });
+  assert.equal(r0.regimeChangeYear, 1);
+  assert.equal(r0.legacyYears, 0);
+  near(r0.firstYearSavings, 700, 1e-9, "year 1 on the NBT stream");
+  near(r0.currentMonthlyBill, 3000 / 12, 1e-12, "today's bill is the NBT baseline");
+  near(r0.firstYearMonthlyOutlay, 2300 / 12, 1e-12, "with-system bill is the NBT one");
+  const all = Finance.evaluate({ ...LEG, savings: 700, importSavings: 600, exportRevenue: 100,
+                                 bill: 2300, baselineBill: 3000, after: undefined }, LEGF);
+  assert.deepEqual(r0.savingsByYear, all.savingsByYear, "identical to a pure NBT sim");
+  near(r0.npv, all.npv, 1e-9, "same NPV");
+  near(r0.wealthSystem - r0.wealthInvest, r0.npv * Math.pow(1.06, 10), 1e-6, "wealth identity");
+
+  const ref = Finance.evaluate({ ...LEG, after: undefined }, LEGF);
+  for (const L of [10, 30]) {
+    const rH = Finance.evaluate(LEG, { ...LEGF, legacyYears: L });
+    assert.equal(rH.regimeChangeYear, null, `legacyYears ${L} >= horizon never switches`);
+    assert.equal(rH.legacyYears, L);
+    assert.deepEqual(rH.savingsByYear, ref.savingsByYear);
+    assert.equal(rH.npv, ref.npv);
+  }
+});
+
+test("legacy term: ACC Plus in `after` follows its own nine-year lock", () => {
+  const sim = { ...LEG, after: { ...LEG.after, accPlusRevenue: 40 } };
+  const r = Finance.evaluate(sim, { ...LEGF, legacyYears: 0, battDeg: 0, escalation: 0, accPlusYears: 3 });
+  near(r.savingsByYear[3], 700, 1e-9, "adder inside the lock");
+  near(r.savingsByYear[4], 660, 1e-9, "adder gone after it");
+});

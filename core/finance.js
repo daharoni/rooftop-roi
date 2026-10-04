@@ -102,6 +102,9 @@ export const DEFAULTS = {
   // The ACC Plus adder is locked for nine years from interconnection and then ends;
   // from year accPlusYears + 1 the sim's accPlusRevenue is taken back out.
   accPlusYears: 9,
+  // Existing array on NEM 1 / NEM 2: years 1..legacyYears are billed on the legacy
+  // agreement, later years on Net Billing from `sim.after`.  null = never switches.
+  legacyYears: null,
   investReturn: 0.07,        // nominal return on the same cash in the market
   discountRate: 0.025,       // inflation / real-terms discount
   panelDeg: 0.005,           // /yr production loss
@@ -162,6 +165,8 @@ export function withDefaults(f) {
   o.microinverters = f && f.microinverters !== undefined && f.microinverters !== null
     ? (f.microinverters === "false" ? false : !!f.microinverters) : DEFAULTS.microinverters;
   o.accPlusYears = Math.max(0, o.accPlusYears);
+  o.legacyYears = typeof o.legacyYears === "number" && isFinite(o.legacyYears)
+    ? Math.max(0, Math.round(o.legacyYears)) : null;
   return o;
 }
 
@@ -289,6 +294,13 @@ export function amortize(principal, apr, termYears) {
  *             It is removed from every year after f.accPlusYears (default 9),
  *             escalated and degraded exactly as the export revenue it sits in.
  *             Missing or 0 changes nothing.
+ *             Optional `after` { savings, importSavings, exportRevenue, accPlusRevenue,
+ *             bill, baselineBill }: the same system's year-1 figures on Net Billing,
+ *             for an existing array whose NEM 1 / NEM 2 term ends.  With a finite
+ *             f.legacyYears, every year y > legacyYears takes its import saving,
+ *             export revenue and ACC Plus share from `after` (escalated and degraded
+ *             exactly as the main stream) and its bill series from after.baselineBill.
+ *             Without `after`, or with legacyYears null, nothing changes.
  * @param f    finance inputs (see DEFAULTS)
  * @returns    among the rest, `irr` (levered, the household's own cash) with
  *             `irrReason` - null when irr is a number, else why it is undefined:
@@ -304,6 +316,21 @@ export function evaluate(sim, f) {
   // The adder is a slice of the export credit, so it can never exceed it or go below 0:
   // a hand-built sim with a stray value is clamped rather than inventing savings.
   const accPlusRev = Math.min(Math.max(0, +sim.accPlusRevenue || 0), Math.max(0, exportRev));
+  // The legacy term (docs/nem2.md, "When the term ends"): from year legacyYears + 1 the
+  // stream comes from sim.after.  `post` is that stream, normalised like the main one.
+  const A = sim.after;
+  const switches = !!A && f.legacyYears !== null;
+  let post = null;
+  if (switches) {
+    const xA = A.exportRevenue || 0;
+    post = {
+      exportRev: xA,
+      importSav: A.importSavings !== undefined ? A.importSavings : (A.savings - xA),
+      accPlusRev: Math.min(Math.max(0, +A.accPlusRevenue || 0), Math.max(0, xA)),
+      bill: A.bill, baselineBill: A.baselineBill,
+    };
+  }
+  const isPost = (y) => switches && y > f.legacyYears;
   const watts = sim.kwdc * 1000;
   const newWatts = Math.max(0, sim.kwdc - f.existingKwDc) * 1000;
   const units = Math.max(0, +sim.batteries || 0);
@@ -415,9 +442,11 @@ export function evaluate(sim, f) {
     const escX = Math.pow(1 + f.exportEscalation, y - 1);
     const deg = wS * sFac + wB * bFac;
     // The ACC Plus adder rides inside exportRevenue for its nine-year lock, then ends.
-    const exportY = exportRev - (y > f.accPlusYears ? accPlusRev : 0);
+    const st = isPost(y) ? post : null;
+    const exportY = st ? st.exportRev - (y > f.accPlusYears ? st.accPlusRev : 0)
+      : exportRev - (y > f.accPlusYears ? accPlusRev : 0);
     const xr = has ? extraPerYear : 0;
-    const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
+    const sav = has ? (st ? st.importSav : importSav) * esc * deg + exportY * escX * deg : 0;
     // O&M, replacements and resale are the owner's: the household under cash or a
     // loan, the lessor under a lease until a buyout hands the system over.
     const o = owns && !nothingNew ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
@@ -526,9 +555,12 @@ export function evaluate(sim, f) {
     // saving - which already carries the escalation split (import at retail,
     // export locked) and the degradation blend, so lifetime cost and NPV agree
     // on how much a slowly fading array is worth.
-    const billY = sim.baselineBill * escY - savings[y] - extraRev[y];
+    // After the legacy term both arms are billed on Net Billing: the no-system
+    // household rolls over too, so the baseline switches with the saving.
+    const baseY = isPost(y) ? post.baselineBill : sim.baselineBill;
+    const billY = baseY * escY - savings[y] - extraRev[y];
     lifetime += (billY + om[y] + extras[y] + payments[y]) / dis;
-    lifetimeNoSystem += (sim.baselineBill * escY) / dis;
+    lifetimeNoSystem += (baseY * escY) / dis;
   }
 
   // What the customer writes a cheque for each month: the loan's level payment, or a
@@ -539,8 +571,10 @@ export function evaluate(sim, f) {
   else if (isLease) monthlyPayment = (pay[1] || 0) / 12;
 
   const firstYearPayment = pay[1] || 0;
-  const firstYearMonthlyOutlay = firstYearPayment / 12 + (sim.bill || 0) / 12;
-  const currentMonthlyBill = (sim.baselineBill || 0) / 12;
+  // Year 1's own regime: already on Net Billing when legacyYears is 0.
+  const y1 = isPost(1) ? post : sim;
+  const firstYearMonthlyOutlay = firstYearPayment / 12 + (y1.bill || 0) / 12;
+  const currentMonthlyBill = (y1.baselineBill || 0) / 12;
 
   return {
     inputs: f, gross, itc, sgip, rebates, netCost,
@@ -571,6 +605,11 @@ export function evaluate(sim, f) {
     batteryFixedCost: units * f.costPerBattery, newKwDc: newWatts / 1000,
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,
+    // The legacy term: the first year billed on Net Billing (null when the horizon
+    // never leaves the legacy agreement, or there is no `after` stream), and the
+    // legacyYears used (null when no switch is modelled).
+    regimeChangeYear: switches && f.legacyYears < H ? f.legacyYears + 1 : null,
+    legacyYears: switches ? f.legacyYears : null,
     // financing
     financingMode: mode, upfront, downPayment: isLease ? 0 : upfront,
     loanPrincipal: principal, dealerFee, monthlyPayment,

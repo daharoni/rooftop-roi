@@ -119,6 +119,13 @@ function simOf(cell, baselineBill, scale = 1) {
     exportRevenue: cell.exportRevenue * scale, accPlusRevenue: (cell.accPlusRevenue || 0) * scale,
     bill: cell.bill, baselineBill, pvKwh: cell.pvKwh * scale,
     kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
+    // An existing NEM 1/2 array: the same cell's Net Billing stream for the years after
+    // the legacy term ends (priceGrid shapes it; finance switches on f.legacyYears).
+    after: cell.after ? {
+      savings: cell.after.savings * scale, importSavings: cell.after.importSavings * scale,
+      exportRevenue: (cell.after.exportRevenue || 0) * scale, accPlusRevenue: (cell.after.accPlusRevenue || 0) * scale,
+      bill: cell.after.bill, baselineBill: cell.after.baselineBill,
+    } : null,
   };
 }
 

@@ -144,7 +144,7 @@ export const DEFAULTS = {
     kwDc: null, batteries: 0, battKWh: null, price: null, annualKwh: null, monthly: null,
   },
   // Solar already on the roof (NEM 1/2 customer modelling a battery). kwDc 0 = none.
-  existing: { kwDc: 0, planeId: null, nem: "none" },
+  existing: { kwDc: 0, planeId: null, nem: "none", since: null },   // since: year the array was switched on (NEM 1/2 run 20 years from it)
   ui: {
     tab: "dashboard", demo: false, basis: "sameFlex", season: 0, weatherKey: "tmy", objective: "npv",
     replayStart: "", replayEnd: "", replayActual: 0,
@@ -251,6 +251,7 @@ const SCALARS = [
   ["xkw", "existing.kwDc", "num", { min: 0, max: 50 }],
   ["xpl", "existing.planeId", "str", { re: ID_RE, max: 24 }],
   ["xnem", "existing.nem", "str", { enum: ["none", "nem2", "nem1"] }],
+  ["xyr", "existing.since", "num", { min: 1995, max: 2100, int: true }],
 
   // Tab ids are normalised by main.js (old links say "money" or "home").
   ["tab", "ui.tab", "str", { re: /^[a-z]+$/, max: 20 }],

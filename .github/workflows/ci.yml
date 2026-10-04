@@ -23,6 +23,8 @@ jobs:
         run: npm test
       - name: Validate tariff library (strict)
         run: npm run validate
+      - name: Tariff files are fresh
+        run: npm run check:fresh
       - name: Worker bundle is committed and current
         run: |
           npm run bundle
@@ -38,3 +40,5 @@ jobs:
           node-version: 24
       - name: Live network tests
         run: npm run test:live
+      - name: Tariff files are fresh
+        run: npm run check:fresh

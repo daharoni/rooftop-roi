@@ -622,6 +622,7 @@ const NEW_KEYS = [
   ["quote.kwDc", 8.2, "qkw"], ["quote.batteries", 2, "qb"], ["quote.battKWh", 13.5, "qbk"],
   ["quote.price", 41000, "qpr"], ["quote.annualKwh", 12400, "qkwh"], ["quote.monthly", 199, "qmo"],
   ["existing.kwDc", 5.5, "xkw"], ["existing.planeId", "p1", "xpl"], ["existing.nem", "nem2", "xnem"],
+  ["existing.since", 2016, "xyr"],
 ];
 
 test("every v2 key round-trips through the hash and through storage", () => {
@@ -637,7 +638,7 @@ test("every v2 key round-trips through the hash and through storage", () => {
 
 test("nullable quote numbers are omitted when null and rejected out of range", () => {
   const h = toHash(Object.assign(freshState(), { baseLoadScale: 1.2 }));
-  assert.ok(!/q(kw|b|bk|pr|kwh|mo)=|x(kw|pl|nem)=/.test(h), "defaults never appear");
+  assert.ok(!/q(kw|b|bk|pr|kwh|mo)=|x(kw|pl|nem|yr)=/.test(h), "defaults never appear");
   assert.equal(toStorage(freshState()).qkw, undefined);
   const rep = {};
   const s = fromHash("v=2&qkw=99&qb=2.5&xnem=bogus", freshState(), rep);
@@ -645,6 +646,18 @@ test("nullable quote numbers are omitted when null and rejected out of range", (
   assert.equal(s.quote.batteries, 0);
   assert.equal(s.existing.nem, "none");
   assert.deepEqual(rep.keys.sort(), ["qb", "qkw", "xnem"]);
+});
+
+test("existing.since reads null from an old link, and an out-of-range year is flagged", () => {
+  assert.equal(fromHash("v=2&xkw=5&xnem=nem2", freshState()).existing.since, null);
+  assert.equal(freshState().existing.since, null);
+  const rep = {};
+  const s = fromHash("v=2&xyr=1980", freshState(), rep);
+  assert.equal(s.existing.since, null);
+  assert.deepEqual(rep.keys, ["xyr"]);
+  const rep2 = {};
+  assert.equal(fromHash("v=2&xyr=2016.5", freshState(), rep2).existing.since, null);
+  assert.deepEqual(rep2.keys, ["xyr"]);
 });
 
 test("the version 1 to 2 migration restores the old defaults a v1 link left out", () => {

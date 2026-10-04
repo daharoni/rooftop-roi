@@ -263,3 +263,42 @@ test("tornado adds a battery $/unit bar only when that price is set", () => {
   assert.ok(!labels({}).includes("Battery $/unit"));
   assert.ok(labels({ costPerBattery: 2000 }).includes("Battery $/unit"));
 });
+
+test("priceGrid carries an existing cell's Net Billing stream into finance, per basis", () => {
+  const cell = (nb, sav, after) => ({
+    panels: 10, newPanels: 0, panelsByPlane: [10], batteries: nb, kwdc: 5, battKWhTotal: 13.5 * nb,
+    bill: 1500 - sav, pvKwh: 8000, exportRevenue: 0, accPlusRevenue: 0,
+    savingsVsSameFlex: sav, savingsVsAsRecorded: sav + 50,
+    importSavingsVsSameFlex: sav, importSavingsVsAsRecorded: sav + 50, after,
+  });
+  const aft = (s) => ({ savingsVsSameFlex: s, savingsVsAsRecorded: s + 20,
+                        importSavingsVsSameFlex: s - 30, importSavingsVsAsRecorded: s - 10,
+                        exportRevenue: 30, accPlusRevenue: 0, bill: 2600 - s });
+  const grid = {
+    cells: [cell(0, 0, aft(0)), cell(1, 300, aft(600))],
+    panelList: [10], battList: [0, 1], planes: [],
+    baselineSameFlex: { bill: 1500 }, baselineAsRecorded: { bill: 1550 },
+    afterBaselineSameFlex: { bill: 2600 }, afterBaselineAsRecorded: { bill: 2620 },
+  };
+  const fin = { existingKwDc: 5, legacyYears: 10 };
+  const p = Optimizer.priceGrid(grid, fin, "npv", "sameFlex");
+  const c = p.cells[1];
+  assert.deepEqual(c.after, { savings: 600, importSavings: 570, exportRevenue: 30, accPlusRevenue: 0,
+                              bill: 2000, baselineBill: 2600 });
+  assert.equal(c.regimeChangeYear, 11);
+  assert.equal(c.finance.legacyYears, 10);
+  const r = Optimizer.priceGrid(grid, fin, "npv", "asRecorded").cells[1];
+  assert.deepEqual(r.after, { savings: 620, importSavings: 590, exportRevenue: 30, accPlusRevenue: 0,
+                              bill: 2000, baselineBill: 2620 });
+  // Without the switch the NPV is the legacy stream's alone; the better NBT stream raises it.
+  const never = Optimizer.priceGrid(grid, { existingKwDc: 5 }, "npv", "sameFlex").cells[1];
+  assert.equal(never.regimeChangeYear, null);
+  assert.ok(c.npv > never.npv, "switching to the richer stream raises NPV");
+  // tornado re-prices with the same stream: its base is the priced NPV.
+  near(Optimizer.tornado(c, fin, 1500, null).base, c.npv, 1e-9, "tornado base includes after");
+  // A grid without `after` prices exactly as before.
+  const plain = { ...grid, cells: grid.cells.map((x) => ({ ...x, after: undefined })) };
+  const q = Optimizer.priceGrid(plain, fin, "npv", "sameFlex").cells[1];
+  assert.equal(q.after, null);
+  assert.equal(q.npv, never.npv);
+});

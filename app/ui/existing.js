@@ -29,8 +29,23 @@ export function kwProblem(v) {
   return null;
 }
 
+export const SINCE_MIN = 1995;
+export const TERM_YEARS = 20;
+
+/** "2016" is a year; blank, "2016.5" and "last year" are not. NaN for anything else. */
+export function parseYear(text) {
+  const t = String(text == null ? "" : text).trim();
+  return /^\d{4}$/.test(t) ? Number(t) : NaN;
+}
+
+/** null when usable, else the sentence to show. `now` is the current calendar year. */
+export function sinceProblem(v, now = new Date().getFullYear()) {
+  if (!Number.isInteger(v) || v < SINCE_MIN || v > now) return `Enter a year from ${SINCE_MIN} to ${now}, like 2019.`;
+  return null;
+}
+
 /**
- * renderExistingForm(host, { onSubmit({ kwDc, nem }), onCancel, initial: { kwDc, nem } })
+ * renderExistingForm(host, { onSubmit({ kwDc, nem, since }), onCancel, initial: { kwDc, nem, since } })
  * nem is "nem2" (the default) or "nem1".
  */
 export function renderExistingForm(host, options = {}) {
@@ -47,17 +62,35 @@ export function renderExistingForm(host, options = {}) {
     el("option", { value: "nem1", text: "NEM 1 (installed before 2016 or so)" }),
   ]);
   nem.value = initial.nem === "nem1" ? "nem1" : "nem2";
+  const now = new Date().getFullYear();
+  const defaultSince = () => (nem.value === "nem1" ? 2013 : 2019);
+  const since = el("input", {
+    type: "text", inputMode: "numeric", id: "existing-since", autocomplete: "off", maxLength: 4,
+    "aria-describedby": "existing-since-note existing-since-ended",
+  });
+  since.value = String(Number.isInteger(initial.since) ? initial.since : defaultSince());
+  let sinceTyped = Number.isInteger(initial.since);
+  const ended = el("p.ctl-note", { id: "existing-since-ended", hidden: true,
+    text: "That agreement has already ended, so the whole plan is priced under Net Billing." });
+  const showEnded = () => {
+    const v = parseYear(since.value);
+    ended.hidden = !(Number.isInteger(v) && v >= SINCE_MIN && v <= now && v + TERM_YEARS <= now);
+  };
+  showEnded();
   const error = el("p.field-error", { role: "alert", hidden: true });
 
   const ok = () => { error.hidden = true; error.textContent = ""; };
-  const fail = (msg) => { error.textContent = msg; error.hidden = false; kw.focus(); return null; };
+  const fail = (msg, field = kw) => { error.textContent = msg; error.hidden = false; field.focus(); return null; };
 
   function collect() {
     const v = parseKw(kw.value);
     const why = kwProblem(v);
     if (why) return fail(why);
+    const yr = parseYear(since.value);
+    const yWhy = sinceProblem(yr, now);
+    if (yWhy) return fail(yWhy, since);
     ok();
-    return { kwDc: Math.round(v * 100) / 100, nem: nem.value === "nem1" ? "nem1" : "nem2" };
+    return { kwDc: Math.round(v * 100) / 100, nem: nem.value === "nem1" ? "nem1" : "nem2", since: yr };
   }
   function submit() {
     const spec = collect();
@@ -65,7 +98,10 @@ export function renderExistingForm(host, options = {}) {
   }
 
   kw.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+  since.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
   kw.addEventListener("input", () => { if (!error.hidden) ok(); });
+  since.addEventListener("input", () => { sinceTyped = true; if (!error.hidden) ok(); showEnded(); });
+  nem.addEventListener("change", () => { if (!sinceTyped) { since.value = String(defaultSince()); showEnded(); } });
 
   clear(host);
   host.appendChild(el("div.existing-form", {}, [
@@ -85,6 +121,16 @@ export function renderExistingForm(host, options = {}) {
         text: "Your bill or the utility's permission-to-operate letter names it. Not sure? NEM 2 is the usual answer.",
       }),
     ]),
+    el("div", {}, [
+      el("label.field-lab", { htmlFor: "existing-since", text: "Year it was switched on" }),
+      el("div.field-row", {}, [since]),
+      el("p.ctl-note", {
+        id: "existing-since-note",
+        text: "NEM 1 and NEM 2 last 20 years from the day the utility let the array switch on. "
+          + "After that the same panels are billed under Net Billing.",
+      }),
+      ended,
+    ]),
     error,
     el("div.existing-actions", {}, [
       el("button.btn.btn-primary", { type: "button", text: "Model a battery", on: { click: submit } }),
@@ -95,4 +141,4 @@ export function renderExistingForm(host, options = {}) {
   return { focus: () => kw.focus(), collect };
 }
 
-export default { renderExistingForm, parseKw, kwProblem, KW_MIN, KW_MAX };
+export default { renderExistingForm, parseKw, kwProblem, parseYear, sinceProblem, KW_MIN, KW_MAX };

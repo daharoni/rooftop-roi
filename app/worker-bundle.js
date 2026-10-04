@@ -2997,6 +2997,9 @@ const DEFAULTS = {
   // The ACC Plus adder is locked for nine years from interconnection and then ends;
   // from year accPlusYears + 1 the sim's accPlusRevenue is taken back out.
   accPlusYears: 9,
+  // Existing array on NEM 1 / NEM 2: years 1..legacyYears are billed on the legacy
+  // agreement, later years on Net Billing from `sim.after`.  null = never switches.
+  legacyYears: null,
   investReturn: 0.07,        // nominal return on the same cash in the market
   discountRate: 0.025,       // inflation / real-terms discount
   panelDeg: 0.005,           // /yr production loss
@@ -3057,6 +3060,8 @@ function withDefaults(f) {
   o.microinverters = f && f.microinverters !== undefined && f.microinverters !== null
     ? (f.microinverters === "false" ? false : !!f.microinverters) : DEFAULTS.microinverters;
   o.accPlusYears = Math.max(0, o.accPlusYears);
+  o.legacyYears = typeof o.legacyYears === "number" && isFinite(o.legacyYears)
+    ? Math.max(0, Math.round(o.legacyYears)) : null;
   return o;
 }
 
@@ -3184,6 +3189,13 @@ function amortize(principal, apr, termYears) {
  *             It is removed from every year after f.accPlusYears (default 9),
  *             escalated and degraded exactly as the export revenue it sits in.
  *             Missing or 0 changes nothing.
+ *             Optional `after` { savings, importSavings, exportRevenue, accPlusRevenue,
+ *             bill, baselineBill }: the same system's year-1 figures on Net Billing,
+ *             for an existing array whose NEM 1 / NEM 2 term ends.  With a finite
+ *             f.legacyYears, every year y > legacyYears takes its import saving,
+ *             export revenue and ACC Plus share from `after` (escalated and degraded
+ *             exactly as the main stream) and its bill series from after.baselineBill.
+ *             Without `after`, or with legacyYears null, nothing changes.
  * @param f    finance inputs (see DEFAULTS)
  * @returns    among the rest, `irr` (levered, the household's own cash) with
  *             `irrReason` - null when irr is a number, else why it is undefined:
@@ -3199,6 +3211,21 @@ function evaluate(sim, f) {
   // The adder is a slice of the export credit, so it can never exceed it or go below 0:
   // a hand-built sim with a stray value is clamped rather than inventing savings.
   const accPlusRev = Math.min(Math.max(0, +sim.accPlusRevenue || 0), Math.max(0, exportRev));
+  // The legacy term (docs/nem2.md, "When the term ends"): from year legacyYears + 1 the
+  // stream comes from sim.after.  `post` is that stream, normalised like the main one.
+  const A = sim.after;
+  const switches = !!A && f.legacyYears !== null;
+  let post = null;
+  if (switches) {
+    const xA = A.exportRevenue || 0;
+    post = {
+      exportRev: xA,
+      importSav: A.importSavings !== undefined ? A.importSavings : (A.savings - xA),
+      accPlusRev: Math.min(Math.max(0, +A.accPlusRevenue || 0), Math.max(0, xA)),
+      bill: A.bill, baselineBill: A.baselineBill,
+    };
+  }
+  const isPost = (y) => switches && y > f.legacyYears;
   const watts = sim.kwdc * 1000;
   const newWatts = Math.max(0, sim.kwdc - f.existingKwDc) * 1000;
   const units = Math.max(0, +sim.batteries || 0);
@@ -3310,9 +3337,11 @@ function evaluate(sim, f) {
     const escX = Math.pow(1 + f.exportEscalation, y - 1);
     const deg = wS * sFac + wB * bFac;
     // The ACC Plus adder rides inside exportRevenue for its nine-year lock, then ends.
-    const exportY = exportRev - (y > f.accPlusYears ? accPlusRev : 0);
+    const st = isPost(y) ? post : null;
+    const exportY = st ? st.exportRev - (y > f.accPlusYears ? st.accPlusRev : 0)
+      : exportRev - (y > f.accPlusYears ? accPlusRev : 0);
     const xr = has ? extraPerYear : 0;
-    const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
+    const sav = has ? (st ? st.importSav : importSav) * esc * deg + exportY * escX * deg : 0;
     // O&M, replacements and resale are the owner's: the household under cash or a
     // loan, the lessor under a lease until a buyout hands the system over.
     const o = owns && !nothingNew ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
@@ -3421,9 +3450,12 @@ function evaluate(sim, f) {
     // saving - which already carries the escalation split (import at retail,
     // export locked) and the degradation blend, so lifetime cost and NPV agree
     // on how much a slowly fading array is worth.
-    const billY = sim.baselineBill * escY - savings[y] - extraRev[y];
+    // After the legacy term both arms are billed on Net Billing: the no-system
+    // household rolls over too, so the baseline switches with the saving.
+    const baseY = isPost(y) ? post.baselineBill : sim.baselineBill;
+    const billY = baseY * escY - savings[y] - extraRev[y];
     lifetime += (billY + om[y] + extras[y] + payments[y]) / dis;
-    lifetimeNoSystem += (sim.baselineBill * escY) / dis;
+    lifetimeNoSystem += (baseY * escY) / dis;
   }
 
   // What the customer writes a cheque for each month: the loan's level payment, or a
@@ -3434,8 +3466,10 @@ function evaluate(sim, f) {
   else if (isLease) monthlyPayment = (pay[1] || 0) / 12;
 
   const firstYearPayment = pay[1] || 0;
-  const firstYearMonthlyOutlay = firstYearPayment / 12 + (sim.bill || 0) / 12;
-  const currentMonthlyBill = (sim.baselineBill || 0) / 12;
+  // Year 1's own regime: already on Net Billing when legacyYears is 0.
+  const y1 = isPost(1) ? post : sim;
+  const firstYearMonthlyOutlay = firstYearPayment / 12 + (y1.bill || 0) / 12;
+  const currentMonthlyBill = (y1.baselineBill || 0) / 12;
 
   return {
     inputs: f, gross, itc, sgip, rebates, netCost,
@@ -3466,6 +3500,11 @@ function evaluate(sim, f) {
     batteryFixedCost: units * f.costPerBattery, newKwDc: newWatts / 1000,
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,
+    // The legacy term: the first year billed on Net Billing (null when the horizon
+    // never leaves the legacy agreement, or there is no `after` stream), and the
+    // legacyYears used (null when no switch is modelled).
+    regimeChangeYear: switches && f.legacyYears < H ? f.legacyYears + 1 : null,
+    legacyYears: switches ? f.legacyYears : null,
     // financing
     financingMode: mode, upfront, downPayment: isLease ? 0 : upfront,
     loanPrincipal: principal, dealerFee, monthlyPayment,
@@ -3706,6 +3745,26 @@ function searchGrid(ctx, params, opts) {
 /** No new panels and no battery.  With an existing array, `panels` counts it, so `newPanels` decides. */
 const isDoNothing = (c) => (c.newPanels !== undefined && c.newPanels !== null ? c.newPanels : c.panels) === 0 && c.batteries === 0;
 
+/**
+ * The Net Billing stream of an existing-array cell (worker existingGrid's `cell.after`)
+ * on the chosen basis, in the shape Finance.evaluate reads as `sim.after`; null when
+ * the cell has none.
+ */
+function afterFor(c, grid, asRec) {
+  const a = c.after;
+  if (!a) return null;
+  const savings = asRec ? a.savingsVsAsRecorded : a.savingsVsSameFlex;
+  // The battery's export increment over the no-battery baseline on this basis (the
+  // existing array already exports without it), falling back to the total for old cells.
+  const perBasis = asRec ? a.exportRevenueVsAsRecorded : a.exportRevenueVsSameFlex;
+  const exportRevenue = perBasis !== undefined ? perBasis : (a.exportRevenue || 0);
+  let importSavings = asRec ? a.importSavingsVsAsRecorded : a.importSavingsVsSameFlex;
+  if (importSavings === undefined) importSavings = savings - exportRevenue;
+  const base = asRec ? grid.afterBaselineAsRecorded : grid.afterBaselineSameFlex;
+  return { savings, importSavings, exportRevenue, accPlusRevenue: a.accPlusRevenue || 0,
+           bill: a.bill, baselineBill: base ? base.bill : undefined };
+}
+
 function priceGrid(grid, finance, objective, basis) {
   // Tolerate priceGrid(grid, fin, basis) as the architecture doc writes it.
   if (basis === undefined && (objective === "sameFlex" || objective === "asRecorded")) {
@@ -3725,11 +3784,14 @@ function priceGrid(grid, finance, objective, basis) {
     const accPlusRev = c.accPlusRevenue || 0;
     let importSav = asRec ? c.importSavingsVsAsRecorded : c.importSavingsVsSameFlex;
     if (importSav === undefined) importSav = savings - exportRev;
-    const fin = Finance.evaluate({
+    const after = afterFor(c, grid, asRec);
+    const sim = {
       savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, baselineBill: baseline.bill,
       pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal, batteries: c.batteries,
-    }, finance);
+    };
+    if (after) sim.after = after;
+    const fin = Finance.evaluate(sim, finance);
     return {
       panels: c.panels, panelsByPlane: c.panelsByPlane, planeIds: c.planeIds,
       batteries: c.batteries, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
@@ -3747,6 +3809,7 @@ function priceGrid(grid, finance, objective, basis) {
       firstYearMonthlyOutlay: fin.firstYearMonthlyOutlay,
       currentMonthlyBill: fin.currentMonthlyBill,
       financingMode: fin.financingMode, monthlyPayment: fin.monthlyPayment,
+      after, regimeChangeYear: fin.regimeChangeYear,
       finance: fin,
     };
   });
@@ -3779,6 +3842,9 @@ function tornado(cell, finance, baselineBill, flexVariants) {
     accPlusRevenue: o.accPlusRevenue === undefined ? cell.accPlusRevenue : o.accPlusRevenue,
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
     pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
+    // The Net Billing stream after a legacy term ends rides along unchanged (the
+    // flex variants are simulated on the legacy regime only).
+    after: cell.after,
   });
   const sim = simOf(cell);
   const base = Finance.evaluate(sim, finance).npv;
@@ -3855,6 +3921,16 @@ var SolarOptimizer = __ns_SolarOptimizer;
  * panel axis at the existing array (every panel on the existing plane) and sweeps the
  * battery count only: the cells keep searchGrid's shape, with a one-entry panelList.
  *
+ * Existing array on NEM 1 / NEM 2 (params.existing set, billing not "nbt"): every grid
+ * cell also runs under Net Billing with accPlusAdder 0 and carries it as `cell.after`
+ * { savingsVsSameFlex, savingsVsAsRecorded, importSavingsVsSameFlex,
+ *   importSavingsVsAsRecorded, exportRevenue, accPlusRevenue, bill, pvKwh, importKwh,
+ *   exportKwh }; the grid gains afterBaselineSameFlex / afterBaselineAsRecorded
+ * ({ bill }) and progress counts both runs.  "detail" adds `after` { savings,
+ * savingsAsRecorded, importSavings, importSavingsAsRecorded, exportRevenue,
+ * accPlusRevenue, bill, baselineBill, baselineBillAsRecorded } to the result and to each
+ * weather row.  Finance switches to it after f.legacyYears (docs/nem2.md).
+ *
  * `params.planes` may omit `profile`: the worker fills it from the cached SolarProfiles
  * for that plane at `params.weatherKey`, which is why init carries the solar bundle.
  * ========================================================================== */
@@ -3914,6 +3990,42 @@ var SolarOptimizer = __ns_SolarOptimizer;
     return { label: "Flexible load kWh/yr", low: mk(0.8), high: mk(1.2) };
   }
 
+  /**
+   * The params an existing array is billed on once its NEM 1 / NEM 2 term has ended:
+   * Net Billing with the same panels, and no ACC Plus adder (that adder is for new
+   * 2023-2027 interconnections, not a legacy array rolling over).
+   */
+  function nbtVariant(p) {
+    // The pack was installed for a NEM array: non-exporting and solar-charged only.  It
+    // stays that way after the rollover (same hardware, same interconnection), so no
+    // grid charging and no export arbitrage in the Net Billing years either.
+    return Object.assign({}, p, { billing: "nbt", accPlusAdder: 0, gridCharge: false,
+      strategy: p.strategy === "export_arbitrage" ? "tou_arbitrage" : p.strategy });
+  }
+
+  /**
+   * The battery's export and import split under Net Billing.  The existing array already
+   * exports in the no-battery baseline, so the battery's export revenue is the INCREMENT
+   * over that baseline (usually negative: the pack keeps midday surplus at home), and the
+   * import saving is the rest of the bill saving.  attachSavings' split (savings minus
+   * total export revenue) is only right for a baseline with no panels.
+   */
+  function splitVs(r, baseline) {
+    var x = r.exportRevenue - baseline.exportRevenue;
+    var a = (r.accPlusRevenue || 0) - (baseline.accPlusRevenue || 0);
+    return { exportRevenue: x, accPlusRevenue: a, importSavings: baseline.bill - r.bill - x };
+  }
+
+  /** The NBT run of a detail/weather simulation, in the shape finance reads as `sim.after`. */
+  function afterOf(r) {
+    var vS = splitVs(r, r.baselineSameFlex), vA = splitVs(r, r.baselineAsRecorded);
+    return { savings: r.savingsVsSameFlex, savingsAsRecorded: r.savingsVsAsRecorded,
+             importSavings: vS.importSavings, importSavingsAsRecorded: vA.importSavings,
+             exportRevenue: vS.exportRevenue, exportRevenueAsRecorded: vA.exportRevenue,
+             accPlusRevenue: vS.accPlusRevenue, bill: r.bill,
+             baselineBill: r.baselineSameFlex.bill, baselineBillAsRecorded: r.baselineAsRecorded.bill };
+  }
+
   var MAX_EXISTING_BATTERIES = 20;   // optimizer.MAX_SEARCH_BATTERIES
 
   /**
@@ -3933,11 +4045,32 @@ var SolarOptimizer = __ns_SolarOptimizer;
     if (maxB > MAX_EXISTING_BATTERIES) maxB = MAX_EXISTING_BATTERIES;
     var battList = [], cells = [];
     for (var nb = 0; nb <= maxB; nb++) battList.push(nb);
+    // The same cells once more under Net Billing, for the years after the legacy term
+    // ends (docs/nem2.md, "When the term ends"): same panels, no ACC Plus adder.
+    // Only for a legacy agreement: an existing array already on Net Billing has no term.
+    var legacy = p.billing !== "nbt";
+    var pNbt = legacy ? nbtVariant(p) : null;
+    var bN = legacy ? E.baselines(ctx, pNbt, false) : null;
+    var per = legacy ? 2 : 1, total = per * battList.length;
     for (var i = 0; i < battList.length; i++) {
-      var res = E.runHours(scn, Object.assign({}, p, { panelsByPlane: alloc.slice(), batteries: battList[i] }), false);
+      var q = { panelsByPlane: alloc.slice(), batteries: battList[i] };
+      var res = E.runHours(scn, Object.assign({}, p, q), false);
       E.attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
+      if (legacy) {
+        post({ type: "progress", id: m.id, done: 2 * i + 1, total: total });
+        var rN = E.runHours(bN.scnSame, Object.assign({}, pNbt, q), false);
+        E.attachSavings(rN, bN.sameFlex.bill, bN.asRecorded.bill);
+        var vS = splitVs(rN, bN.sameFlex), vA = splitVs(rN, bN.asRecorded);
+        res.after = {
+          savingsVsSameFlex: rN.savingsVsSameFlex, savingsVsAsRecorded: rN.savingsVsAsRecorded,
+          importSavingsVsSameFlex: vS.importSavings, importSavingsVsAsRecorded: vA.importSavings,
+          exportRevenueVsSameFlex: vS.exportRevenue, exportRevenueVsAsRecorded: vA.exportRevenue,
+          exportRevenue: vS.exportRevenue, accPlusRevenue: vS.accPlusRevenue, bill: rN.bill,
+          pvKwh: rN.pvKwh, importKwh: rN.importKwh, exportKwh: rN.exportKwh,
+        };
+      }
       cells.push(res);
-      post({ type: "progress", id: m.id, done: i + 1, total: battList.length });
+      post({ type: "progress", id: m.id, done: per * (i + 1), total: total });
     }
     var order = [];
     for (var n = 0; n < xs.panels; n++) order.push(xs.planeIndex);
@@ -3946,6 +4079,8 @@ var SolarOptimizer = __ns_SolarOptimizer;
       planes: scn.planes.map(function (pl, k) { return { id: pl.id, name: pl.name, cap: k === xs.planeIndex ? xs.panels : 0 }; }),
       allocationOrder: order, greedyBatteries: 0,
       baselineSameFlex: b.sameFlex, baselineAsRecorded: b.asRecorded,
+      afterBaselineSameFlex: legacy ? { bill: bN.sameFlex.bill } : null,
+      afterBaselineAsRecorded: legacy ? { bill: bN.asRecorded.bill } : null,
       flexShiftOnlySavings: b.asRecorded.bill - b.sameFlex.bill,
       weatherKey: scn.weatherKey,
       years: ctx.years !== undefined ? ctx.years : ctx.nDays / 365, hours: ctx.N,
@@ -3990,13 +4125,19 @@ var SolarOptimizer = __ns_SolarOptimizer;
       res.providers = E.billOnAllProviders(ctx, params);
       res.schedule = scheduleStrip(params.planId);
       res.flexVariants = flexVariants(m.params, m.panelsByPlane, m.batteries);
+      // An existing array on NEM 1 / NEM 2: the same system under Net Billing, for the
+      // years after the legacy term ends.
+      var legacy = !!params.existing && params.billing !== "nbt";
+      if (legacy) res.after = afterOf(E.simulate(ctx, nbtVariant(params), {}));
       // One run per weather year, so the UI can show the production spread.
       res.weather = (m.weatherKeys || []).map(function (w) {
         var q = hydrate(Object.assign({}, params, { weatherKey: w.key, planes: (m.params.planes || []) }));
         var s = E.simulate(ctx, q, {});
-        return { key: w.key, label: w.label, group: w.group, pvKwh: s.pvKwh, bill: s.bill,
-                 savings: s.savingsVsSameFlex, importSavings: s.importSavingsVsSameFlex,
-                 exportRevenue: s.exportRevenue, accPlusRevenue: s.accPlusRevenue, baselineBill: s.baselineSameFlex.bill };
+        var row = { key: w.key, label: w.label, group: w.group, pvKwh: s.pvKwh, bill: s.bill,
+                    savings: s.savingsVsSameFlex, importSavings: s.importSavingsVsSameFlex,
+                    exportRevenue: s.exportRevenue, accPlusRevenue: s.accPlusRevenue, baselineBill: s.baselineSameFlex.bill };
+        if (legacy) row.after = afterOf(E.simulate(ctx, nbtVariant(q), {}));
+        return row;
       });
       // The hourly arrays are only meaningful to the charts that ask for them.
       if (!m.wantHourly) delete res.hourly;

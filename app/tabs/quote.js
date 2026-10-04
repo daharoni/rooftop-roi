@@ -24,7 +24,7 @@ const loanOrLease = (s) => s.fin.financing.mode === "loan" || s.fin.financing.mo
 
 export function rail() {
   return [
-    { group: "Your quote", open: true, items: [
+    { group: "Your quote", open: true, pinned: true, items: [
       { path: "quote.kwDc", kind: "number", label: "System size, kW DC", min: 0.5, max: 50, step: 0.1, ...ui },
       { path: "quote.batteries", kind: "number", label: "Batteries", min: 0, max: 10, step: 1, ...ui },
       { path: "quote.battKWh", kind: "number", label: "Battery size, usable kWh each", min: 1, max: 100, step: 0.5,
