@@ -12,6 +12,7 @@ import { el, clear, $ } from "./dom.js";
 import { DISCLAIMER } from "./blocks.js";
 import { renderBillForm } from "./billform.js";
 import { EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote } from "../privacy.js";
+import { REPO_URL, feedbackLink } from "./feedback.js";
 
 /* Averaged summer weekday from data/demo/*.csv, and the TMY profile for 15 July
    at 20° tilt / 180° azimuth scaled to 6 kW DC. Real numbers, not a sketch. */
@@ -67,7 +68,8 @@ export function renderLanding(root, handlers) {
   }));
 
   root.appendChild(el("footer.landing-foot", {}, [
-    el("span", {}, [el("a", { href: "https://github.com/daharoni/rooftop-roi", target: "_blank", rel: "noopener", text: "Source on GitHub" })]),
+    el("span", {}, [el("a", { href: REPO_URL, target: "_blank", rel: "noopener", text: "Source on GitHub" })]),
+    el("span", {}, [feedbackLink()]),
     el("span", { text: "MIT licence" }),
     el("span", { text: "No accounts, no cookies, no tracking" }),
     // Open-Meteo's free tier is CC BY 4.0 and the licence asks for a visible credit.

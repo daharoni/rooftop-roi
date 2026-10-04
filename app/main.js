@@ -32,6 +32,7 @@ import { summaryText, copyToClipboard } from "./ui/summary.js";
 import { destroyAll } from "./charts/base.js";
 import { fmtKwh } from "./ui/format.js";
 import { adoptGeocodeNote } from "./privacy.js";
+import { FEEDBACK_URL, FEEDBACK_TITLE } from "./ui/feedback.js";
 import { renderExistingForm } from "./ui/existing.js";
 import { applyPreset, matchPreset } from "./ui/presets.js";
 
@@ -2130,6 +2131,8 @@ function bindShell() {
     pane.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
   });
   $("btn-forget").addEventListener("click", forgetEverything);
+  const feedback = $("link-feedback");
+  if (feedback) { feedback.href = FEEDBACK_URL; feedback.title = FEEDBACK_TITLE; }
   const household = $("btn-household");
   if (household) household.addEventListener("click", changeHousehold);
   $("btn-share").addEventListener("click", shareLink);
