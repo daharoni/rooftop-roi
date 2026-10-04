@@ -1,6 +1,9 @@
 /* =============================================================================
  * format.js — every number the page prints goes through here.
  *
+ * Compact money ($16k) is for the hero figure and chart axes only; prose and tiles use
+ * full figures with thousands separators, and units attach without a space ($2.75/W).
+ *
  * One rule: a figure never appears without its unit, and money keeps its sign
  * as a real minus (U+2212), not a hyphen, so columns of tabular figures line up.
  * ========================================================================== */
@@ -22,6 +25,11 @@ export function fmtCompact(v) {
   if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(a >= 1e7 ? 0 : 2) + "M";
   if (a >= 1e4) return sign + "$" + Math.round(a / 1e3) + "k";
   return sign + "$" + Math.round(a).toLocaleString("en-US");
+}
+
+/** Money per unit, unit attached with no space and a thousands separator: "$2.75/W", "$2,347/kWh". */
+export function fmtPer(v, unit, dp) {
+  return fmtMoney(v, dp === undefined ? 0 : dp) + unit;
 }
 
 export function fmtNum(v, dp) {
@@ -52,4 +60,4 @@ export function esc(v) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-export default { fmtMoney, fmtCompact, fmtNum, fmtPct, fmtKwh, fmtKw, fmtYears, fmtHour, plural, esc };
+export default { fmtMoney, fmtCompact, fmtPer, fmtNum, fmtPct, fmtKwh, fmtKw, fmtYears, fmtHour, plural, esc };

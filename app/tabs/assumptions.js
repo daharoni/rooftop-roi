@@ -47,7 +47,7 @@ export function mount(pane) {
     title: "Rates, effective dates and confidence",
     sub: "A tariff file goes stale the moment a rate case is decided. These are the dates on the file this "
       + "page is using.",
-    body: [el("div.table-scroll", {}, [el("table", { id: "t-rates" })])],
+    body: [el("div.rate-list", { id: "t-rates" })],
   }));
 
   pane.appendChild(card({
@@ -190,19 +190,16 @@ function firstSolarModel(state) {
 function compiledText(meta) {
   if (!meta.as_of) return "—";
   const f = freshness(meta);
-  return f.months === null ? meta.as_of : `${meta.as_of} (${f.months} months ago)`;
+  return f.months === null ? meta.as_of : `${meta.as_of} (${f.months <= 0 ? "this month" : f.months === 1 ? "last month" : f.months + " months ago"})`;
 }
 
 function renderRates(state, ctx) {
-  const table = clear($("t-rates"));
+  const list = clear($("t-rates"));
   const t = ctx.tariff;
   if (!t || !t.meta) {
-    table.appendChild(el("tbody", {}, [el("tr", {}, [el("td", { text: "No tariff file loaded yet." })])]));
+    list.appendChild(el("p.note", { text: "No tariff file loaded yet." }));
     return;
   }
-  table.appendChild(el("thead", {}, [el("tr", {}, [
-    el("th", { text: "What" }), el("th", { text: "Value" }), el("th", { text: "Confidence" }),
-  ])]));
   const conf = t.meta.confidence || {};
   const rows = [
     ["Rates effective", t.meta.rates_effective || "—", conf.rates],
@@ -218,15 +215,11 @@ function renderRates(state, ctx) {
     ["Rate escalation used", fmtPct(state.fin.escalation, 1) + "/yr",
       t.meta.escalation ? `history ${fmtPct(t.meta.escalation.historical_cagr, 2)}/yr over ${t.meta.escalation.period}` : null],
   ];
-  table.appendChild(el("tbody", {}, rows.map(([what, value, confidence]) => el("tr", {}, [
-    el("td", { text: what }),
-    el("td.n", { text: String(value) }),
-    el("td", {}, confidenceCell(confidence)),
-  ]))));
+  for (const [what, value, confidence] of rows) list.appendChild(rateRow(what, value, confidence));
   const old = $("rates-fresh");
   if (old) old.remove();
   const notice = freshnessNotice(t);
-  if (notice) table.parentNode.parentNode.appendChild(el("p.ctl-warn", { id: "rates-fresh", text: notice }));
+  if (notice) list.parentNode.appendChild(el("p.ctl-warn", { id: "rates-fresh", text: notice }));
 }
 
 // Shorten a note to its first two sentences; the full text sits behind "more".
@@ -310,15 +303,28 @@ function renderIncentives(state, ctx) {
  * note is where the compiler says which figures are verbatim off a bill and
  * which are derived, so it belongs on the page rather than in the JSON.
  */
-function confidenceCell(confidence) {
-  if (!confidence) return [el("span", { style: "color:var(--ink-3)", text: "—" })];
-  const level = typeof confidence === "string" ? confidence : confidence.level || "—";
-  const note = typeof confidence === "string" ? null : confidence.note;
+/**
+ * One stacked row: label, value and confidence pill on a line, the note below at a
+ * readable measure.  A note longer than two sentences keeps its first two and folds
+ * the full derivation away.
+ */
+function rateRow(what, value, confidence) {
+  const level = !confidence ? null : typeof confidence === "string" ? confidence : confidence.level || "—";
+  const note = confidence && typeof confidence !== "string" ? confidence.note : null;
   const cls = level === "high" ? ".tag.tag-good" : level === "low" ? ".tag.tag-warn" : ".tag";
-  return [
-    el("span" + cls, { text: level }),
-    note ? el("div.ctl-note", { style: "margin-top:4px;max-width:52ch;text-align:left", text: note }) : null,
-  ].filter(Boolean);
+  const { short, full } = twoSentences(note);
+  return el("div.rate-row", {}, [
+    el("div.rate-head", {}, [
+      el("span.rate-what", { text: what }),
+      el("span.rate-value.num", { text: String(value) }),
+      level ? el("span" + cls, { text: level }) : null,
+    ]),
+    note ? el("p.note.rate-note", { text: short }) : null,
+    full ? el("details.data-view", {}, [
+      el("summary", { text: "Show derivation" }),
+      el("p.note.rate-note", { text: full }),
+    ]) : null,
+  ]);
 }
 
 function renderMethod(state, ctx) {

@@ -69,6 +69,8 @@ export function draw(id, config) {
     return prev;
   }
   destroyChart(id);
+  // Canvas text cannot inherit the page font, so hand Chart.js the same Plex stack.
+  if (T.sans) Chart.defaults.font.family = T.sans;
   let chart;
   try { chart = new Chart(node.getContext("2d"), config); }
   catch (err) {
@@ -106,11 +108,11 @@ export function baseOpts(extra) {
     scales: {
       x: {
         grid: { display: false }, border: { color: T.rule },
-        ticks: { color: T["ink-3"], font: { size: 10 }, maxRotation: 0, autoSkipPadding: 12 },
+        ticks: { color: T["ink-3"], font: { size: 12 }, maxRotation: 0, autoSkipPadding: 12 },
       },
       y: {
         grid: { color: T.grid, drawTicks: false }, border: { display: false },
-        ticks: { color: T["ink-3"], font: { size: 10 }, padding: 6 },
+        ticks: { color: T["ink-3"], font: { size: 12 }, padding: 6 },
       },
     },
     elements: { line: { borderWidth: 2, tension: 0.15 }, point: { radius: 0, hitRadius: 12, hoverRadius: 4 } },
@@ -147,7 +149,7 @@ export function lineChart(id, labels, series, opt = {}) {
         },
       },
       scales: {
-        x: { title: opt.xTitle ? { display: true, text: opt.xTitle, color: T["ink-3"], font: { size: 10 } } : undefined },
+        x: { title: opt.xTitle ? { display: true, text: opt.xTitle, color: T["ink-3"], font: { size: 12 } } : undefined },
         y: {
           beginAtZero: !!opt.zero,
           stacked: !!opt.stacked,

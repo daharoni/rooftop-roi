@@ -35,7 +35,7 @@ export function clear(node) { while (node && node.firstChild) node.removeChild(n
 const TOKEN_KEYS = [
   "--ink", "--ink-2", "--ink-3", "--grid", "--rule", "--surface", "--page", "--sunken",
   "--neutral-mid", "--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8",
-  "--good-text", "--critical", "--warning",
+  "--good-text", "--critical", "--warning", "--sans",
 ];
 
 export const T = {};

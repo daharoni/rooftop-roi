@@ -1,0 +1,9 @@
+Source Serif 4 — SIL Open Font License 1.1
+Copyright 2014-2023 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+Licence text: https://github.com/adobe-fonts/source-serif/blob/release/LICENSE.md
+The OFL permits self-hosting and redistribution with the font unmodified (only
+subset to latin by Google Fonts).
+
+Files (downloaded 2026-10-04 from the Google Fonts CSS API, family "Source Serif 4", v15, latin subset):
+  SourceSerif4-500-latin.woff2        21228 bytes  sha256 2d9f1d9f0d845ff6f8d6426969b28cf55d7a30415141a2f71fa2ee0f3c8ea490
+  SourceSerif4-500italic-latin.woff2  21324 bytes  sha256 b165f7e302617a496f308c49c47403a9513a6f7b5896672d1595672f45741d64

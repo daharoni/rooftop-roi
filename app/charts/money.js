@@ -190,10 +190,10 @@ export function renderTornado({ tornado }) {
       scales: {
         x: {
           grid: { color: T.grid, drawTicks: false }, border: { display: false },
-          ticks: { color: T["ink-3"], font: { size: 10 }, callback: fmtCompact },
-          title: { display: true, text: "change in NPV", color: T["ink-3"], font: { size: 10 } },
+          ticks: { color: T["ink-3"], font: { size: 12 }, callback: fmtCompact },
+          title: { display: true, text: "change in NPV", color: T["ink-3"], font: { size: 12 } },
         },
-        y: { grid: { display: false }, border: { color: T.rule }, ticks: { color: T["ink-2"], font: { size: 11 } } },
+        y: { grid: { display: false }, border: { color: T.rule }, ticks: { color: T["ink-2"], font: { size: 12 } } },
       },
       plugins: { tooltip: { callbacks: { label: (c) => " " + c.dataset.label + ": " + fmtMoney(c.parsed.x) } } },
     }),

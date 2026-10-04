@@ -24,7 +24,7 @@ const loanOrLease = (s) => s.fin.financing.mode === "loan" || s.fin.financing.mo
 
 export function rail() {
   return [
-    { group: "Your quote", open: true, pinned: true, items: [
+    { group: "Your quote", inPane: "quote-form-host", items: [
       { path: "quote.kwDc", kind: "number", label: "System size, kW DC", min: 0.5, max: 50, step: 0.1, ...ui },
       { path: "quote.batteries", kind: "number", label: "Batteries", min: 0, max: 10, step: 1, ...ui },
       { path: "quote.battKWh", kind: "number", label: "Battery size, usable kWh each", min: 1, max: 100, step: 0.5,
@@ -43,6 +43,11 @@ export function rail() {
 
 export function mount(pane) {
   clear(pane);
+  pane.appendChild(card({
+    id: "quote-form", title: "Enter the quote",
+    sub: "Numbers from the installer's proposal. Size and price are enough to start.",
+    body: [el("div.quote-form-grid", { id: "quote-form-host" })],
+  }));
   pane.appendChild(el("div", { id: "quote-empty" }));
   pane.appendChild(card({
     id: "quote-compare", title: "Your quote against this model",
@@ -122,7 +127,7 @@ function renderEmpty(host, q) {
   const have = [q.kwDc ? "size" : null, q.price ? "price" : null].filter(Boolean);
   host.appendChild(card({
     id: "quote-intro", title: "Check a quote",
-    sub: "Got a proposal from an installer? Enter its numbers in the Your quote settings panel. On a phone, Settings is below this message.",
+    sub: "Got a proposal from an installer? Fill in the form above.",
     body: [
       el("p.note", { text: "You need three things from the proposal:" }),
       el("ul.quote-list", {}, [
