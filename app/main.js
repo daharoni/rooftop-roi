@@ -801,6 +801,9 @@ function mountTab() {
       if (id === s.ui.tab && btn.scrollIntoView) btn.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }
+  watchTabStrip();
+  watchTopbarMenu();
+  { const t = $("tabs"); if (t) t.dispatchEvent(new Event("scroll")); }
   const pane = $("pane");
   pane.scrollTop = 0;
   pane.setAttribute("aria-labelledby", "tab-" + s.ui.tab);
@@ -853,9 +856,57 @@ function buildRailJump() {
   const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(check); } };
   window.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", onScroll, { passive: true });
+  // Hide while the settings are on screen, and while scrolling down; show on
+  // scroll up.  A hidden button is also out of the tab order (CSS hides it).
+  let railVisible = false, scrolledDown = false, lastY = window.scrollY;
+  const syncHidden = () => {
+    const hide = railVisible || scrolledDown;
+    btn.classList.toggle("hidden", hide);
+    if (hide) btn.setAttribute("tabindex", "-1"); else btn.removeAttribute("tabindex");
+    btn.setAttribute("aria-hidden", String(hide));
+  };
+  if (typeof IntersectionObserver === "function") {
+    new IntersectionObserver((entries) => {
+      railVisible = entries.some((e) => e.isIntersecting);
+      syncHidden();
+    }, { threshold: 0.05 }).observe(railNode);
+  }
+  window.addEventListener("scroll", () => {
+    const y = window.scrollY, d = y - lastY;
+    if (Math.abs(d) < 6) return;
+    scrolledDown = d > 0 && y > 80;
+    lastY = y;
+    syncHidden();
+  }, { passive: true });
   paint();
   onScroll();
+  syncHidden();
   $("shell").appendChild(btn);
+}
+
+/** Fade cue on the tab strip: `at-end` once scrolled to the right edge. */
+function watchTabStrip() {
+  const strip = $("tabs");
+  if (!strip || strip.dataset.watch) return;
+  strip.dataset.watch = "1";
+  const upd = () => strip.classList.toggle("at-end", strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1);
+  strip.addEventListener("scroll", upd, { passive: true });
+  window.addEventListener("resize", upd, { passive: true });
+  upd();
+}
+
+/** On phones "Copy summary" lives inside the Data & settings menu. */
+function watchTopbarMenu() {
+  const copy = $("btn-copy"), menu = document.querySelector(".data-actions-menu");
+  const right = document.querySelector(".topbar-right"), details = document.querySelector(".data-actions");
+  if (!copy || !menu || !right || !details || !window.matchMedia) return;
+  const mq = window.matchMedia("(max-width: 600px)");
+  const place = () => {
+    if (mq.matches) { if (copy.parentNode !== menu) menu.insertBefore(copy, menu.querySelector("#btn-reset")); }
+    else if (copy.parentNode !== right) right.insertBefore(copy, details);
+  };
+  if (mq.addEventListener) mq.addEventListener("change", place); else mq.addListener(place);
+  place();
 }
 
 function render() {

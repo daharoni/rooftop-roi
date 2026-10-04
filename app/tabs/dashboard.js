@@ -40,13 +40,21 @@ export function rail(state, ctx) {
   ];
 }
 
+/** A folded "How to read this" for the part of a subtitle that is more than one sentence. */
+function readMore(text) {
+  return el("details.data-view", {}, [
+    el("summary", { text: "How to read this" }),
+    el("p.note", { text }),
+  ]);
+}
+
 export function mount(pane, state, ctx) {
   clear(pane);
 
   // The verdict.
   pane.appendChild(el("section.headline", { id: "headline" }, [
     el("div.hero-verdict", {}, [
-      el("span.eyebrow", { id: "hl-title", text: "Value of this system vs. leaving the money invested" }),
+      el("span.eyebrow", { id: "hl-title", text: "What this system is worth versus leaving the money invested" }),
       // Number and verdict share a row when they fit, so the column stays short.
       el("div.hero-row", {}, [
         el("div.hero-num.num", { id: "hero-npv", text: "—" }),
@@ -54,6 +62,7 @@ export function mount(pane, state, ctx) {
           el("span.dot"), el("span", { id: "hero-pill-text", text: "waiting for the simulation" }),
         ]),
       ]),
+      el("p.hero-note.hero-caption", { id: "hero-caption" }),
       el("p.hero-band", { id: "hero-band", hidden: true }),
       el("p.hero-why", { id: "hero-why", hidden: true }),
       // What the figures mean is a few paragraphs most readers need once; they fold away
@@ -92,9 +101,9 @@ export function mount(pane, state, ctx) {
       id: "heat-card",
       title: "Which system size wins",
       tag: { id: "heat-obj", text: "max NPV" },
-      sub: "Every cell is a full hourly simulation of your own meter history. Click one to override the "
-        + "optimiser and price that system instead.",
+      sub: "Every cell is a full hourly simulation of your own meter history.",
       body: [
+        readMore("Click a cell to override the optimiser and price that system instead."),
         el("div.heat-wrap", {}, [el("div.heat", { id: "heat", role: "grid", "aria-label": "Objective value by panel and battery count" })]),
         el("div.heat-legend", {}, [
           el("span", { id: "heat-lo", text: "—" }),
@@ -114,9 +123,9 @@ export function mount(pane, state, ctx) {
     card({
       id: "day-card",
       title: "A typical weekday, hour by hour",
-      sub: "Average weekday shape for the selected system. The band under the axis is the tariff period in "
-        + "force at that hour.",
+      sub: "Average weekday shape for the selected system.",
       body: [
+        readMore("The band under the axis is the tariff period in force at that hour."),
         el("div.chart-box", { style: "height:230px" }, [el("canvas", { id: "c-day" })]),
         el("div", { id: "period-ribbon", "aria-hidden": "true" }),
         el("div.legend", { id: "l-day" }),
@@ -134,11 +143,11 @@ export function mount(pane, state, ctx) {
       id: "cash-card",
       title: "The money over time",
       tag: { id: "cash-mode-tag", text: "cash" },
-      sub: "The system's running cash position against the same cash left in the market, plus what the system "
-        + "is worth if every year's saving is reinvested at the same return. Both start from this system's own "
-        + "price, so the lines compare cash, loan and lease for one system; a dearer system starts from more "
-        + "cash, so compare systems by NPV, not by where the lines end.",
+      sub: "The system's running cash position against the same cash left in the market.",
       body: [
+        readMore("The chart also shows what the system is worth if every year's saving is reinvested at the same return. "
+          + "Both lines start from this system's own price, so they compare cash, loan and lease for one system; "
+          + "a dearer system starts from more cash, so compare systems by NPV, not by where the lines end."),
         el("div.chart-box", { style: "height:230px" }, [el("canvas", { id: "c-cash" })]),
         el("div.legend", { id: "l-cash" }),
       ],
@@ -148,8 +157,7 @@ export function mount(pane, state, ctx) {
       id: "flex-card",
       title: "Flexible load",
       tag: { id: "flex-tag", text: "—" },
-      sub: "Loads the household can run at a different hour. Moving them into the sun is often worth more "
-        + "than an extra battery, and it costs nothing.",
+      sub: "Loads the household can run at a different hour, which often beats an extra battery.",
       body: [
         el("dl.kv", { id: "flex-kv" }),
         el("div.retime", { id: "flex-retime", hidden: true }, [
@@ -167,9 +175,11 @@ export function mount(pane, state, ctx) {
     card({
       id: "alloc-card",
       title: "Where the panels go",
-      sub: "Panels are allocated face by face, greediest first: one more panel on each face, fill whichever "
-        + "earns most, until that face runs out of room.",
-      body: [el("div.table-scroll", {}, [el("table", { id: "t-alloc" })])],
+      sub: "Panels are allocated face by face, greediest first.",
+      body: [
+        readMore("One more panel goes on each face in turn; whichever earns most fills first, until that face runs out of room."),
+        el("div.table-scroll", {}, [el("table", { id: "t-alloc" })]),
+      ],
     }),
     card({
       id: "next-card",
@@ -239,6 +249,14 @@ function renderHeadline(state, ctx, cell) {
   npvNode.textContent = fmtCompact(cell.npv);
   npvNode.style.color = cell.npv >= 0 ? T["good-text"] : T.critical;
 
+  const cap = $("hero-caption");
+  if (cap) {
+    const yrs = fin.horizon + " years";
+    cap.textContent = Math.abs(cell.npv) < 50 ? `a wash against investing the same cash over ${yrs}`
+      : cell.npv > 0 ? `better than investing the same cash over ${yrs}`
+      : `worse than investing the same cash over ${yrs}`;
+  }
+
   const verdict = verdictFor(cell.npv);
   $("hero-pill").className = "verdict-pill " + verdict.pill;
   $("hero-pill-text").textContent = verdict.text;
@@ -248,7 +266,7 @@ function renderHeadline(state, ctx, cell) {
   if (title) {
     title.textContent = existing
       ? `Adding a battery to your existing ${fmtNum(existing.kwDc, 1)} kW system (${nemLabel(existing.nem)})`
-      : "Value of this system vs. leaving the money invested";
+      : "What this system is worth versus leaving the money invested";
   }
 
   const mode = fin.financing && fin.financing.mode;
@@ -358,13 +376,13 @@ function verdictFor(npv) {
 function outlayTile(mode, fin, f, cell, ctx) {
   // The roof faces' "Extra cost $" for the faces this system uses (main.js roofAdderFor),
   // already inside f.gross / f.netCost; named here so the price is not a mystery.
-  const roof = cell.roofCostAdder > 0 && cell.panels > 0 ? ` · incl. ${fmtCompact(cell.roofCostAdder)} roof work` : "";
+  const roof = cell.roofCostAdder > 0 && cell.panels > 0 ? ` · incl. ${fmtMoney(cell.roofCostAdder)} roof work` : "";
   if (mode === "cash") {
-    return { k: "Cash up front", v: fmtCompact(f.netCost),
-      d: (f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtCompact(f.gross)}` : "no incentive applied") + roof };
+    return { k: "Cash up front", v: fmtMoney(f.netCost),
+      d: (f.effectiveDiscount > 0 ? `${fmtPct(f.effectiveDiscount, 1)} off ${fmtMoney(f.gross)}` : "no incentive applied") + roof };
   }
   const gap = typeof ctx.cashNpv === "number" ? cell.npv - ctx.cashNpv : null;
-  const vsCash = gap === null ? "" : ` · vs paying cash ${gap >= 0 ? "+" : "−"}${fmtCompact(Math.abs(gap))}`;
+  const vsCash = gap === null ? "" : ` · vs paying cash ${gap >= 0 ? "+" : "−"}${fmtMoney(Math.abs(gap))}`;
   if (mode === "lease") {
     return { k: "Lease payment", v: fmtMoney(f.monthlyPayment || fin.financing.lease.monthly) + "/mo",
       d: `${fin.financing.lease.termYears} yr, ${fmtPct(fin.financing.lease.escalatorPct, 1)} escalator${vsCash}` };
@@ -403,11 +421,11 @@ function renderBand(state, ctx, cell) {
   } catch (e) { return; }
   if (!Number.isFinite(a) || !Number.isFinite(b)) return;
   const pct = (v) => fmtPct(v, 0).replace(/\s/g, "");
-  let text = `${fmtCompact(Math.min(a, b))} to ${fmtCompact(Math.max(a, b))} if rates rise ${pct(lo)} to ${pct(hi)} a year; `;
+  let text = `${fmtMoney(Math.min(a, b))} to ${fmtMoney(Math.max(a, b))} if rates rise ${pct(lo)} to ${pct(hi)} a year; `;
   const rows = Array.isArray(ctx.weatherRows) ? ctx.weatherRows : [];
   const p90 = rows.find((r) => r.key === "p90"), p10 = rows.find((r) => r.key === "p10");
   if (p90 && p10 && Number.isFinite(p90.npv) && Number.isFinite(p10.npv)) {
-    text += `${fmtCompact(Math.min(p90.npv, p10.npv))} to ${fmtCompact(Math.max(p90.npv, p10.npv))} from a dull to a sunny year.`;
+    text += `${fmtMoney(Math.min(p90.npv, p10.npv))} to ${fmtMoney(Math.max(p90.npv, p10.npv))} from a dull to a sunny year.`;
   } else {
     text += "weather years move it less.";
   }
@@ -538,14 +556,15 @@ function renderMarginLine(state, ctx) {
     : `${c.panels} panels, ${plural(c.batteries, "battery", "batteries")}`);
 
   if (flat.count === 0) {
-    node.appendChild(el("span", { text: `A clear winner: no other size comes within ${tol} of ${sizeOf(best)}.` }));
+    node.appendChild(el("p.note", { text: `A clear winner: no other size comes within ${tol} of ${sizeOf(best)}.` }));
     return;
   }
-  node.appendChild(el("strong", { text: `Flat region: ${flat.count} other ${flat.count === 1 ? "size is" : "sizes are"} within ${tol} of the best.` }));
+  const flatP = el("p.note", {}, [el("strong", { text: `Flat region: ${flat.count} other ${flat.count === 1 ? "size is" : "sizes are"} within ${tol} of the best.` })]);
+  node.appendChild(flatP);
   if (flat.altBattery) {
     const alt = flat.altBattery;
     const gap = sliceFmt(Math.abs(flat.altGap), objective);
-    node.appendChild(el("span", {
+    flatP.appendChild(el("span", {
       text: flat.altWithinTol
         ? ` With ${plural(alt.batteries, "battery", "batteries")} instead of ${best.batteries}, the best is ${alt.panels} panels, only ${gap} behind${unit}: effectively a tie, so choose on backup value, roof space or budget rather than on this number.`
         : ` The best with a different battery count (${sizeOf(alt)}) is ${gap} behind${unit}, so the battery count is the decisive part of this answer.`,
@@ -560,16 +579,18 @@ function renderCapLine(state, ctx, cap) {
   if (!cap) { node.hidden = true; return; }
   node.hidden = false;
   const best = ctx.priced && ctx.priced.best;
-  node.appendChild(el("strong", { text: `SCE sizing line: ${cap.panelsAt150} panels.` }));
-  node.appendChild(document.createTextNode(
+  const capP = el("p.note", {}, [el("strong", { text: `SCE sizing line: ${cap.panelsAt150} panels.` })]);
+  node.appendChild(capP);
+  capP.appendChild(document.createTextNode(
     ` Your last 12 months used ${fmtKwh(cap.annualKwh, 0)}; SCE counts each ${state.system.panelW} W panel as `
     + `${fmtKwh(cap.kwhPerPanel, 0)}/yr and refuses an application above 150%. Up to ${cap.panelsAt100} panels needs no `
     + `paperwork; ${cap.panelsAt100 + 1} to ${cap.panelsAt150} needs an affidavit that your usage will grow to match.`
     + (best && best.panels > cap.panelsAt150 ? ` The optimiser's pick of ${best.panels} is above the line.` : "")));
   if (state.system.maxPanels > cap.panelsAt150) {
-    node.appendChild(document.createTextNode(" "));
-    node.appendChild(el("button.chip-action", { type: "button", text: `Cap the search at ${cap.panelsAt150}`,
-      style: "font-size:11px;padding:2px 9px", on: { click: () => ctx.actions.setMaxPanels(cap.panelsAt150) } }));
+    node.appendChild(el("div", { style: "margin-top:6px" }, [
+      el("button.chip-action", { type: "button", text: `Cap the search at ${cap.panelsAt150}`,
+        on: { click: () => ctx.actions.setMaxPanels(cap.panelsAt150) } }),
+    ]));
   }
 }
 
@@ -623,7 +644,7 @@ function paybackTile(cell, fin, f) {
   const cashPos = cell.cashFlowPayback === 0 ? "cash-positive from day one" : `cash-positive after ${fmtYears(cell.cashFlowPayback)}`;
   if (mode === "loan") {
     return { k: "Pays for itself", v,
-      d: `incl. ${fmtCompact(f.totalInterest)} interest · loan gone yr ${f.loanPaidOffYear} · ${cashPos}` };
+      d: `incl. ${fmtMoney(f.totalInterest)} interest · loan gone yr ${f.loanPaidOffYear} · ${cashPos}` };
   }
   return { k: "Pays for itself", v, d: `${fin.financing.lease.termYears}-yr lease · ${cashPos}` };
 }

@@ -90,6 +90,12 @@ export function render(state, ctx) {
 
   if (ctx.week) {
     renderWeek({ before: ctx.week.before, after: ctx.week.after, hourLabels: ctx.week.labels });
+    // When the schedule changes nothing, the two lines coincide: say so rather than
+    // drawing a second legend entry for a line nobody can see.
+    const same = Array.isArray(ctx.week.before) && Array.isArray(ctx.week.after) && ctx.week.before.length === ctx.week.after.length
+      && ctx.week.before.every((v, i) => Math.abs(v - ctx.week.after[i]) < 1e-6);
+    const legend = $("l-week");
+    if (same && legend) legend.textContent = "As recorded — no change from recorded";
     const note = $("week-note");
     if (note) {
       note.textContent = `Week of ${ctx.week.label}. `

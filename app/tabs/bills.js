@@ -12,7 +12,7 @@
 
 import { el, clear, $ } from "../ui/dom.js";
 import { card } from "../ui/blocks.js";
-import { fmtCompact, fmtMoney, fmtNum, fmtPct } from "../ui/format.js";
+import { fmtMoney, fmtNum, fmtPct, fmtPer } from "../ui/format.js";
 import { renderMonthlyBills, renderComparisonTable } from "../charts/bills.js";
 import { renderMonthlyOutlay, renderWeatherBars, renderTornado } from "../charts/money.js";
 import * as K from "../ui/knobs.js";
@@ -30,6 +30,11 @@ export function rail(state, ctx) {
     K.price(ctx, false),
     K.incentives(false),
   ];
+}
+
+/** A folded "How to read this" for the part of a subtitle beyond its first sentence. */
+function readMore(text) {
+  return el("details.data-view", {}, [el("summary", { text: "How to read this" }), el("p.note", { text })]);
 }
 
 export function mount(pane) {
@@ -87,9 +92,9 @@ export function mount(pane) {
     card({
       id: "weather-card",
       title: "If the weather disagrees",
-      sub: "The same system run against every modelled weather year. P90 is the conservative low-sun case, "
-        + "P10 the optimistic one — the solar industry's exceedance convention.",
+      sub: "The same system run against every modelled weather year.",
       body: [
+        readMore("P90 is the conservative low-sun case, P10 the optimistic one — the solar industry's exceedance convention."),
         el("div.chart-box", { style: "height:210px" }, [el("canvas", { id: "c-weather" })]),
         el("div.legend", { id: "l-weather" }),
       ],
@@ -129,10 +134,10 @@ export function mount(pane) {
     card({
       id: "replay-card",
       title: "Does the model match your paper bill?",
-      sub: "Enter a billing period from a real bill in Settings and the model replays it out of your own "
-        + "meter readings. The kWh split should match almost exactly; the dollar gap is whatever the published "
-        + "rates leave out — taxes, franchise fees, a rate vintage.",
+      sub: "Enter a billing period from a real bill in Settings and the model replays it from your own meter readings.",
       body: [
+        readMore("The kWh split should match almost exactly; the dollar gap is whatever the published "
+          + "rates leave out — taxes, franchise fees, a rate vintage."),
         el("div.table-scroll", {}, [el("table", { id: "t-validate" })]),
         el("p.note", { id: "validate-note", style: "margin-top:8px", text: "No period replayed yet." }),
         el("p.note", { id: "climate-note", style: "margin-top:8px", text: "" }),
@@ -213,17 +218,17 @@ function renderBreakEven(state, ctx, cell) {
   const pair = (v, dp, unit) => {
     if (v === null || v === undefined) return "price does not decide it";
     if (v < 0) return "any price loses";
-    return `$${v.toFixed(dp)}${unit} sticker` + (disc > 0 ? ` · $${(v * (1 - disc)).toFixed(dp)}${unit} net` : "");
+    return `${fmtPer(v, unit, dp)} sticker` + (disc > 0 ? ` · ${fmtPer(v * (1 - disc), unit, dp)} net` : "");
   };
   const rows = [
     ["Break-even solar price", pair(ctx.breakEvenPerW, 2, "/W")],
     ["Break-even storage price", cell.battKWhTotal === 0 ? "— no storage" : pair(ctx.breakEvenPerKwh, 0, "/kWh")],
     ["LCOE of the solar", fmtMoney(cell.lcoe, 3) + "/kWh"],
-    ["Lifetime cost, with system", fmtCompact(cell.lifetimeCost)],
-    ["Lifetime cost, no system", fmtCompact(cell.finance && cell.finance.lifetimeCostNoSystem)],
+    ["Lifetime cost, with system", fmtMoney(cell.lifetimeCost)],
+    ["Lifetime cost, no system", fmtMoney(cell.finance && cell.finance.lifetimeCostNoSystem)],
   ];
-  if (state.fin.financing.mode === "loan" && cell.finance) rows.push(["Total interest paid", fmtCompact(cell.finance.totalInterest)]);
-  if (state.fin.financing.mode === "lease" && cell.finance) rows.push(["Total lease payments", fmtCompact(cell.finance.totalLeasePayments)]);
+  if (state.fin.financing.mode === "loan" && cell.finance) rows.push(["Total interest paid", fmtMoney(cell.finance.totalInterest)]);
+  if (state.fin.financing.mode === "lease" && cell.finance) rows.push(["Total lease payments", fmtMoney(cell.finance.totalLeasePayments)]);
   for (const [k, v] of rows) {
     node.appendChild(el("dt", { text: k }));
     node.appendChild(el("dd", { text: v }));

@@ -128,7 +128,7 @@ export function renderWeek({ before, after, hourLabels }) {
     },
     options: baseOpts({
       scales: {
-        x: { ticks: { autoSkip: false, font: { size: 10 } } },
+        x: { ticks: { autoSkip: false, font: { size: 12 } } },
         y: { beginAtZero: true, ticks: { callback: (v) => v + " kWh" } },
       },
       plugins: { tooltip: { callbacks: { label: (c) => " " + c.dataset.label + ": " + fmtNum(c.parsed.y, 2) + " kWh" } } },

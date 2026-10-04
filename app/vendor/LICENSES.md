@@ -12,6 +12,8 @@ SHA-512 values are the SRI hashes published by cdnjs (`https://api.cdnjs.com/lib
 | `fonts/IBMPlex-Mono-400-latin.woff2` | 10052 | IBM Plex Mono v20 | OFL-1.1 | https://fonts.gstatic.com/s/ibmplexmono/v20/-F63fjptAgt5VM-kVkqdyU8n1i8q131nj-o.woff2 |
 | `fonts/IBMPlex-Mono-500-latin.woff2` | 10060 | IBM Plex Mono v20 | OFL-1.1 | https://fonts.gstatic.com/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3twJwlBFgsAXHNk.woff2 |
 | `fonts/IBMPlex-Sans-var-latin.woff2` | 40240 | IBM Plex Sans v23 (variable; serves 400, 500, 600) | OFL-1.1 | https://fonts.gstatic.com/s/ibmplexsans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxeKYbSB4Zh.woff2 |
+| `fonts/SourceSerif4-500-latin.woff2` | 21228 | Source Serif 4 v15 (500) | OFL-1.1 | Google Fonts CSS API, latin subset, 2026-10-04; see `fonts/LICENSE-SourceSerif4.txt` |
+| `fonts/SourceSerif4-500italic-latin.woff2` | 21324 | Source Serif 4 v15 (500 italic) | OFL-1.1 | Google Fonts CSS API, latin subset, 2026-10-04; see `fonts/LICENSE-SourceSerif4.txt` |
 
 ## Hashes
 

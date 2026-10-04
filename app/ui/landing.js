@@ -136,7 +136,7 @@ function heroFigure() {
     t.textContent = text;
     node.appendChild(t);
   };
-  tag("What the roof makes", 10.5, 4.42, "var(--s2)");
+  tag("What the roof makes", 10.5, 4.42, "var(--ink-2)");
   tag("What the house uses", 4.6, 3.62, "var(--ink)");
   tag("evening peak, no sun", 18.5, 4.42, "var(--ink-2)");
 

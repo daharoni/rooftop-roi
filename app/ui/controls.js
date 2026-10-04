@@ -84,6 +84,13 @@ export class ControlRail {
     // The first group marked open starts open; opening another closes it.
     let opened = false;
     for (const g of this.groups) {
+      // An in-pane group renders its widgets into a host the tab mounted
+      // (g.inPane = element id), so the same spec drives the same renderer.
+      if (g.inPane) {
+        const host = document.getElementById(g.inPane);
+        if (host) { clear(host); for (const spec of g.items) host.appendChild(this._widget(spec, state)); }
+        continue;
+      }
       const body = el("div.group-body");
       for (const spec of g.items) body.appendChild(this._widget(spec, state));
       // A pinned group starts open at any width and sits outside the accordion.
