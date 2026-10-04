@@ -141,7 +141,7 @@ export function hardware(open = false) {
       reason: "ui", show: (s) => s.site.utilityId === "sce",
       footnote: () => "PTC rating × inverter efficiency. Only used for the SCE sizing line: SCE counts CEC-AC kW × 1,728 kWh/yr "
         + "against your last 12 months and refuses an application above 150%." },
-    { path: "system.battKWh", kind: "range", label: "Battery size, usable", min: 5, max: 20, step: 0.5, unit: " kWh each" },
+    { path: "system.battKWh", kind: "range", label: "Battery size, usable", min: 5, max: 30, step: 0.5, unit: " kWh each" },
     { path: "system.battKW", kind: "range", label: "Battery power", min: 2.5, max: 11.5, step: 0.5, unit: " kW each" },
     { path: "system.minReserve", kind: "range", label: "Reserved for backup", min: 0, max: 0.5, step: 0.05, pct: 0 },
     { path: "system.rte", kind: "range", label: "Round-trip efficiency", min: 0.8, max: 0.98, step: 0.01, pct: 0 },

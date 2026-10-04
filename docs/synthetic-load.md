@@ -57,3 +57,14 @@ a typical pattern. Monthly totals, and so the size of the bill, are exact. Expec
 savings number to be less reliable than from interval data, and the dashboard should say
 so whenever `meta.source === "synthetic"`. A Green Button file replaces all of this with
 the home's own hours.
+
+## Direction of the error for a household with an EV
+
+Rebuilding the demo household from its own twelve monthly totals and comparing against its real
+interval data (review, 2026-10-04): the synthetic year overstates the savings of a 20-panel,
+one-battery system by about $530 a year (+16%). The cause is structural: the house shape used
+here is evening-heavy, so kWh that in reality were charged overnight at the cheapest rate are
+spread into expensive evening hours, where solar plus a battery looks more valuable. The bill
+form therefore takes the EV's kWh out of the monthly totals and adds the EV back as its own
+load with its own schedule, which removes most of that bias; what remains is the reason the
+"Your data" card calls a bill-based result less certain.

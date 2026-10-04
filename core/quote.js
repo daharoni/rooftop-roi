@@ -148,6 +148,9 @@ export function compareQuote({ quote, priced, fin, system, panelW, roofAdderFor 
   const near = nearestCell(priced, panels, batteries);
   if (!near || !near.cell) return empty("incomplete");
   const cell = near.cell;
+  // A quote too small to reach the first grid step lands on "do nothing", whose
+  // gross is 0, so no price could be reproduced: treat it as not yet entered.
+  if (cell.panels === 0 && cell.batteries === 0) return empty("incomplete");
   const optimumCell = priced.best || priced.doNothing || cell;
   const baselineBill = priced.baseline ? priced.baseline.bill : 0;
   if (near.outside) return empty("outside-grid", { outside: near.outside, optimum: optimumCell });
@@ -192,10 +195,24 @@ export function compareQuote({ quote, priced, fin, system, panelW, roofAdderFor 
       lease: Object.assign({}, f.financing.lease, pos(q.monthly) && f.financing.mode === "lease" ? { monthly: q.monthly } : {}),
     }),
   });
-  const quoteRes = Finance.evaluate(simOf(cell, baselineBill), quoteFin);
-  const marketFin = Object.assign({}, fin, { roofCostAdder: roofAdderFor ? roofAdderFor(cell) : 0 });
+  let quoteRes = Finance.evaluate(simOf(cell, baselineBill), quoteFin);
+  if (dealerFee && dealerFee.source === "implied" && quoteRes.netCost > 0 && loan.sharePct > 0) {
+    // The lender finances the price net of any credit or rebate, so the fee implied
+    // by the quoted payment is measured against that net figure, not the sticker.
+    const financed = quoteRes.netCost * loan.sharePct;
+    const pct = Math.max(0, dealerFee.principal / financed - 1);
+    dealerFee.pctOfFinanced = pct;
+    dealerFee.dollars = Math.max(0, dealerFee.principal - financed);
+    dealerFee.pctOfPrice = dealerFee.dollars / q.price;
+    quoteFin.financing.loan.dealerFeePct = pct;
+    quoteRes = Finance.evaluate(simOf(cell, baselineBill), quoteFin);
+  }
+  // An array already on the roof carries no roof-work adder: main.js drops it from
+  // the Dashboard's pricing in that mode, so the Quote tab must too.
+  const roofFor = (c) => (roofAdderFor && !(f.existingKwDc > 0) ? roofAdderFor(c) : 0);
+  const marketFin = Object.assign({}, fin, { roofCostAdder: roofFor(cell) });
   const marketRes = Finance.evaluate(simOf(cell, baselineBill), marketFin);
-  const optFin = Object.assign({}, fin, { roofCostAdder: roofAdderFor ? roofAdderFor(optimumCell) : 0 });
+  const optFin = Object.assign({}, fin, { roofCostAdder: roofFor(optimumCell) });
   const optRes = Finance.evaluate(simOf(optimumCell, baselineBill), optFin);
 
   // ------------------------------------------------------------- production

@@ -30,24 +30,37 @@ export const STORAGE_KEY = "rooftop-roi:v1";
  * an old link keeps meaning what it meant when it was shared.
  *
  * Version policy, the same for a link and for a stored session:
- *   v absent        read as version 1 (links and sessions from before versioning).
+ *   v absent        a stored session is read as version 1 (from before versioning); a link
+ *                   is read as the current version (a hand-written link means today's defaults).
  *   v <= CODEC_VERSION   migrated forward and applied.
  *   v >  CODEC_VERSION   written by a newer build: every key this build
  *                   understands is still applied (each one passes its own schema),
  *                   unknown keys are ignored, and the result is flagged damaged so
  *                   the page can say some settings may not have come through.
- *   v unreadable    treated like a newer version.
+ *   v unreadable    treated like a newer version (current version, flagged damaged).
  */
 export const CODEC_VERSION = 2;
 
-/** Read a `v` from a link or a stored session; flags anything this build cannot fully vouch for. */
-function readVersion(raw, report) {
-  if (raw === undefined || raw === null || raw === "") return 1;
+/**
+ * Read a `v` from a link or a stored session; flags anything this build cannot fully vouch for.
+ * `absent` is what a missing `v` means: a stored session without one really is from before
+ * versioning (1), but a link without one is far more likely hand-written today than shared
+ * two days before versioning existed, so a link reads as the current version.
+ */
+function readVersion(raw, report, absent = 1) {
+  if (raw === undefined || raw === null || raw === "") return absent;
   const v = Number(raw);
-  if (!Number.isInteger(v) || v < 1) { flag(report, "v"); return 1; }
+  if (!Number.isInteger(v) || v < 1) { flag(report, "v"); return CODEC_VERSION; }
   if (v > CODEC_VERSION) { flag(report, "v"); return CODEC_VERSION; }
   return v;
 }
+
+/**
+ * Keys whose default changed in version 2.  A versioned link omits a key that sits at
+ * its default, so a v2 link that says nothing about the price means the v2 price; made
+ * explicit here because a link is applied over whatever session the reader already has.
+ */
+const V2_DEFAULT_KEYS = { cw: 2.75, rte: 0.88 };
 
 /**
  * from-version -> function(flat key/value object) returning the next version's
@@ -625,9 +638,10 @@ export function fromHash(hash, base, report) {
     if (key === null) { flag(report, "?"); continue; }
     kv[key] = pair.slice(i + 1);               // still encoded
   }
-  const version = readVersion(kv.v !== undefined ? safeDecode(kv.v) : undefined, report);
+  const version = readVersion(kv.v !== undefined ? safeDecode(kv.v) : undefined, report, CODEC_VERSION);
   delete kv.v;
   const flat = migrate(kv, version);
+  if (version >= 2) for (const [k, d] of Object.entries(V2_DEFAULT_KEYS)) if (!(k in flat)) flat[k] = String(d);
 
   for (const [key, raw] of Object.entries(flat)) {
     if (key === "roof") {

@@ -142,7 +142,7 @@ function heatPumpCard(load, ctx) {
       slider("Heating starts below", c, 10, 20, 0.5, (v) => set("heatpump.balanceC", v),
         (v) => `${fmtNum(v, 1)} \u00b0C (${fmtNum(v * 9 / 5 + 32, 0)} \u00b0F)`),
       el("p.ctl-note", { text: load.kwhByHour
-        ? "Shape follows the outdoor temperature at your site."
+        ? "Shape follows the outdoor temperature at your site. The modelled total follows the actual winters in your record, so it can differ from the slider."
         : "Waiting for weather." }),
       el("button.btn.btn-danger", { type: "button", text: "Remove this load", on: { click: () => ctx.actions.removeFlex(load.id) } }),
     ]),

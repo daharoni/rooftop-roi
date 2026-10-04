@@ -649,8 +649,16 @@ test("nullable quote numbers are omitted when null and rejected out of range", (
 
 test("the version 1 to 2 migration restores the old defaults a v1 link left out", () => {
   assert.equal(CODEC_VERSION, 2);
-  assert.equal(fromHash("tab=roof", freshState()).fin.costPerW, 3.0, "no v, no cw: the old default");
-  assert.equal(fromHash("tab=roof", freshState()).system.rte, 0.9);
+  assert.equal(fromHash("v=1&tab=roof", freshState()).fin.costPerW, 3.0, "v1, no cw: the old default");
+  assert.equal(fromHash("v=1&tab=roof", freshState()).system.rte, 0.9);
+  // A link with no version is read as today's: a hand-written "#tab=quote" must not price at $3.00.
+  assert.equal(fromHash("tab=quote", freshState()).fin.costPerW, 2.75, "no v on a link: current defaults");
+  assert.equal(fromHash("v=abc&tab=quote", freshState()).fin.costPerW, 2.75, "unreadable v: current defaults");
+  // A v2 link that omits cw/rte means the v2 defaults, even over a session that holds the old ones.
+  const oldSession = fromStorage({ hz: 20 }, freshState());
+  assert.equal(oldSession.fin.costPerW, 3.0);
+  assert.equal(fromHash("v=2&bkwh=12", oldSession).fin.costPerW, 2.75, "a v2 link beats the stored old price");
+  assert.equal(fromHash("v=2&bkwh=12", oldSession).system.rte, 0.88);
   assert.equal(fromHash("v=2&tab=roof", freshState()).fin.costPerW, 2.75, "v=2 means today's default");
   assert.equal(fromHash("v=2&tab=roof", freshState()).system.rte, 0.88);
   assert.equal(fromHash("v=1&cw=2.2", freshState()).fin.costPerW, 2.2, "an explicit value is kept");

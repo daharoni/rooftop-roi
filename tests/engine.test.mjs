@@ -1359,10 +1359,11 @@ test("NEM 2 credits roll month to month, NSC pays the surplus kWh at true-up, an
   near(out.nemExportValue * d.ctx.years,
        out.monthly.reduce((s, m) => s - m.exportCreditUsed - m.trueUp, 0), 1e-9, "nemExportValue = credits used + NSC");
 
-  // NEM 1 is identical except the credit is worth the full $0.30.
+  // NEM 1 credits the full $0.30 and, since that credit includes the non-bypassable
+  // charges, it can offset them too: the floor is the fixed charge alone.
   const p1 = nemParams(d, { billing: "nem1", ...X });
   const jun1 = Engine.runHours(Engine.buildScenario(d.ctx, p1), p1, true).monthly[0];
-  near(jun1.creditBalance, junExp * 0.30 - room(30, junImp), 1e-9, "NEM 1 banks retail with no NBC deduction");
+  near(jun1.creditBalance, junExp * 0.30 - 0.30 * junImp, 1e-9, "NEM 1 banks retail with no NBC deduction and no NBC floor");
 });
 
 test("existing solar: gross load is import - export + existing PV, clipped at zero", () => {
@@ -1413,9 +1414,11 @@ test("existing solar: both baselines carry the existing array; 0 batteries is th
     near(withB.pvKwh, arrayKwh, 1e-9, "the battery adds no PV");
     assert.ok(withB.bill <= res.bill + 1e-9, `${billing}: a battery never raises the bill here`);
   }
-  // No grid charging and no battery export under NEM, whatever the controls say.
+  // No grid charging and no battery export under NEM, whatever the controls say.  On this
+  // flat $0.30 plan a stored kWh is worth $0.30 against a $0.28 credit, so it only pays
+  // with no round-trip loss: rte 1 here, otherwise the dispatcher rightly leaves the pack empty.
   const p = nemParams(d, { billing: "nem2", existing: { planeId: "p1", panels: 1 }, panelsByPlane: [0],
-                           batteries: 1, gridCharge: true, strategy: "export_arbitrage", exportThreshold: 0 });
+                           batteries: 1, rte: 1, gridCharge: true, strategy: "export_arbitrage", exportThreshold: 0 });
   const h = Engine.runHours(Engine.buildScenario(d.ctx, p), p, true);
   assert.ok(h.chargeKwh > 0, "the battery does charge from the array");
   assert.equal(sum(h.hourly.gridToBatt), 0, "never charges from the grid");

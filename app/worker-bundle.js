@@ -2270,7 +2270,11 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
     // TOU-DR1/DR2: 130%; everyone else 100%), on the baseline season's calendar.
     const allow = (blSummer.indexOf(ctx.monthNum[m]) >= 0
                    ? r.baselineAllow.summer : r.baselineAllow.winter) * days * blPct;
-    const credit = r.baselineCredit * Math.min(mImpKwh[m], allow);
+    // Under NEM the energy charge is computed on net usage, so the baseline allowance
+    // is set against net kWh too; under Net Billing every imported kWh is billed.
+    const nem = r.billing === "nem2" || r.billing === "nem1";
+    const blKwh = nem ? Math.max(0, mImpKwh[m] - mExpKwh[m]) : mImpKwh[m];
+    const credit = r.baselineCredit * Math.min(blKwh, allow);
     const energy = mImpCost[m];
     const floor = Math.max(r.min * days, fixed);
     let subtotal = fixed + energy - credit;
@@ -2295,7 +2299,9 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
     // What export credit can never touch: the fixed charge and the month's NBCs, which
     // sit inside the retail import rates (or are added on top with applyNbc - either way
     // they are inside `energy`).  Never above the subtotal itself.
-    const nbc$ = (r.nbcPerKwh || 0) * mImpKwh[m];
+    // NEM 1 credits export at the full retail rate, non-bypassable charges included,
+    // so there is no NBC floor; NEM 2 and Net Billing keep the NBCs out of reach.
+    const nbc$ = r.billing === "nem1" ? 0 : (r.nbcPerKwh || 0) * mImpKwh[m];
     const creditFloor = Math.min(subtotal, Math.max(floor, fixed + nbc$));
     subtotalA[m] = subtotal; creditFloorA[m] = creditFloor; expKwhA[m] = expKwh; expCredA[m] = expCred;
     // ACC Plus earned on this month's creditable export.  It joins the credit bank below
@@ -2496,12 +2502,15 @@ function runHours(scn, params, detail) {
   const surplusDay = new Float64Array(nD);   // PV that exceeds load, i.e. chargeable
   const peakNeed = new Float64Array(nD);     // net load inside on/mid hours
   const peakStart = new Uint8Array(nD);
+  const chgVal = new Float64Array(nD);       // NEM: what the surplus would have earned as export credit
+  const dayMaxImp = new Float64Array(nD);    // NEM: the dearest import hour of the day, what a stored kWh can avoid
   for (let d = 0; d < nD; d++) peakStart[d] = 24;
   const valid = ctx.gapHours ? ctx.valid : null;
   for (let i = 0; i < N; i++) {
     if (valid && !valid[i]) continue;
     const dd = ctx.dayIdx[i], net = load[i] - pv[i];
-    if (net < 0) surplusDay[dd] -= net;
+    if (r.imp[i] > dayMaxImp[dd]) dayMaxImp[dd] = r.imp[i];
+    if (net < 0) { surplusDay[dd] -= net; chgVal[dd] += -net * r.exp[i]; }
     else if (r.period[i] <= 1) { peakNeed[dd] += net; if (ctx.hour[i] < peakStart[dd]) peakStart[dd] = ctx.hour[i]; }
   }
 
@@ -2544,9 +2553,20 @@ function runHours(scn, params, detail) {
     let surplus = P - pvToLoad, deficit = L - pvToLoad;
     let chg = 0, dis = 0, gcharge = 0, battExp = 0;
 
+    // Under NEM a stored kWh gives up roughly a retail export credit, so the pack is only
+    // worth filling on a day with an import hour dear enough to beat that credit after
+    // two passes through the inverter; otherwise the surplus is better exported.
+    let nemCredit = 0, nemWorth = true;
+    if (nemRun && cap > 0) {
+      const d0 = surplusDay[day] > EPS ? day : (day > 0 ? day - 1 : day);
+      nemCredit = surplusDay[d0] > EPS ? chgVal[d0] / surplusDay[d0] : 0;
+      const dNext = day + 1 < nD ? day + 1 : day;
+      nemWorth = Math.max(dayMaxImp[day], dayMaxImp[dNext]) * eff * eff > nemCredit;
+    }
+
     if (!backup && cap > 0) {
       // 1) soak up surplus PV
-      if (surplus > EPS) {
+      if (surplus > EPS && nemWorth) {
         const room = (cap - soc) / eff;
         chg = Math.min(surplus, maxP, room);
         if (chg > 0) { soc += chg * eff; surplus -= chg; }
@@ -2565,6 +2585,9 @@ function runHours(scn, params, detail) {
           level = floorKwh + Math.max(0, peakNeed[refDay] / eff - refill);
           if (level > cap) level = cap;
         }
+        // Under NEM, spending a stored kWh where the import it avoids is worth no more
+        // than the credit it gave up, after losses, only loses the round-trip: hold.
+        if (nemRun && r.imp[i] * eff * eff <= nemCredit) level = cap;
         const avail = Math.max(0, soc - level) * eff;
         dis = Math.min(deficit, maxP, avail);
         if (dis > 0) { soc -= dis / eff; deficit -= dis; }
@@ -2701,7 +2724,7 @@ const DEFAULTS = {
   planes: [],                 // [{ id, profile: Float64Array(8760), panels, shading }]
   panelsByPlane: null,        // optional override of planes[].panels
   panelW: 460, batteries: 1, battKWh: 10, battKW: 5,
-  rte: 0.90, minReserve: 0.20,
+  rte: 0.90, minReserve: 0.20,   // engine fallback only; the app always passes system.rte (0.88 default)
   flex: [], baseLoadScale: 1,
   planId: "TOU-D-PRIME", providerId: "cpa_green", applyNbc: false,
   weatherKey: "tmy",

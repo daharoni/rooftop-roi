@@ -1023,13 +1023,13 @@ function pickCell(panels, batteries) {
   }, "finance");
 }
 
-function addPreset(kind) {
+function addPreset(kind, overrides = null) {
   if (!Core.flexload) { toast("The load library is not loaded."); return; }
   const templates = Core.flexload.presets();
   const tpl = templates.find((t) => t.id === kind) || templates[0];
   const s = State.get();
   const detectedEv = s.flex.find((f) => f.kind === "ev" && f.source === "detected");
-  const next = JSON.parse(JSON.stringify(tpl));
+  const next = Object.assign(JSON.parse(JSON.stringify(tpl)), overrides || {});
   next.id = kind + "-" + Date.now().toString(36);
   if (kind === "ev2" && detectedEv) {
     next.annualKwh = detectedEv.annualKwh;
@@ -1101,7 +1101,10 @@ const ACTIONS = {
   removePlane: (id) => State.update((s) => { s.roof.planes = s.roof.planes.filter((p) => p.id !== id); }, "roof"),
   resetPlanes: () => State.update((s) => { s.roof.planes = [defaultPlane("p1", "South face")]; }, "roof"),
   updateFlex: (id, path, value) => {
-    let heatPumpChanged = false;
+    const before = State.get().flex.find((x) => x.id === id);
+    if (!before) return;
+    // A heat pump's series is rebuilt from the new settings before the one simulation runs.
+    const heatPumpChanged = before.kind === "heatpump" && path.startsWith("heatpump.");
     State.update((s) => {
       const f = s.flex.find((x) => x.id === id);
       if (!f) return;
@@ -1109,12 +1112,12 @@ const ACTIONS = {
         // Same heat, a better machine: the electricity falls as the COP rises.  Without
         // this the series is rescaled to annualKwh and the COP slider would change nothing.
         const was = Number(f.heatpump.cop) || 3;
-        const kwh = Math.round((Number(f.heatpump.annualKwh) || f.annualKwh || 0) * was / Number(value) / 10) * 10;
+        const raw = (Number(f.heatpump.annualKwh) || f.annualKwh || 0) * was / Number(value);
+        const kwh = Math.min(8000, Math.max(500, Math.round(raw / 10) * 10));   // the slider's own range
         f.heatpump.annualKwh = kwh; f.annualKwh = kwh;
       }
       State.setPath(f, path, value);
       if (f.kind === "heatpump" && path === "heatpump.annualKwh") f.annualKwh = value;
-      heatPumpChanged = f.kind === "heatpump" && path.startsWith("heatpump.");
     }, heatPumpChanged ? "silent" : "sim");
     if (heatPumpChanged) rebuildHeatPumps("sim");
   },
@@ -1347,7 +1350,17 @@ async function onMonthlyBills(spec) {
   landingError("");
   landingNotice(null);
   try {
-    const loadSet = Core.synthload.synthesize({ monthlyKwh: spec.monthlyKwh, tz: "America/Los_Angeles" });
+    // The bills already contain the EV and the pool.  Their kWh come out of the monthly
+    // totals before the house's shape is built, and go back in as loads with their own
+    // schedule, so nothing is counted twice and the EV can be moved into the day.
+    const presets = Core.flexload ? Core.flexload.presets() : [];
+    const kwhOf = (id) => { const t = presets.find((x) => x.id === id); return t ? t.annualKwh : 0; };
+    const removed = (spec.ev ? kwhOf("evp") : 0) + (spec.pool ? kwhOf("pool") : 0);
+    const total = spec.monthlyKwh.reduce((a, b) => a + b, 0);
+    // Never strip more than 80% of a month: a small bill with a big EV is a mis-tick, not a negative house.
+    const share = total > 0 ? Math.min(0.8, removed / total) : 0;
+    const monthlyKwh = spec.monthlyKwh.map((m) => m * (1 - share));
+    const loadSet = Core.synthload.synthesize({ monthlyKwh, tz: "America/Los_Angeles" });
     State.update((s) => {
       s.ui.demo = false; s.ui.existingSolarAck = false;
       s.existing = { kwDc: 0, planeId: null, nem: "none" };
@@ -1368,7 +1381,7 @@ async function onMonthlyBills(spec) {
       } catch (err) { console.warn("ZIP could not be located:", err && err.message); }
     }
     await adoptLoadSet(loadSet, spec.zip);
-    if (spec.ev && !State.get().flex.some((f) => f.kind === "ev")) addPreset("evp");
+    if (spec.ev && !State.get().flex.some((f) => f.kind === "ev")) addPreset("evp", { name: "Electric vehicle" });
     if (spec.pool && !State.get().flex.some((f) => f.kind === "pool")) addPreset("pool");
   } catch (err) {
     console.error(err);

@@ -279,7 +279,10 @@ function renderHeadline(state, ctx, cell) {
   note.appendChild(document.createTextNode(
     (existing ? " The panel count is fixed at your existing system; only the battery changes." : "")
     + ` Produces ${fmtNum(cell.pvKwh, 0)} kWh/yr, keeps ${fmtPct(cell.solarFraction, 0)} of it on site, exports `
-    + `${fmtNum(cell.exportKwh, 0)} kWh, cycles the pack ${fmtNum(cell.cycles, 0)}×/yr. LCOE ${fmtMoney(cell.lcoe, 3)}/kWh.`
+    + `${fmtNum(cell.exportKwh, 0)} kWh, cycles the pack ${fmtNum(cell.cycles, 0)}×/yr.`
+    // LCOE divides new hardware by the whole array's output, so it means nothing when
+    // the array was already there.
+    + (ctx.existingMode ? "" : ` LCOE ${fmtMoney(cell.lcoe, 3)}/kWh.`)
     + (ctx.detail && ctx.detail.forfeitedCredit > 1
       ? ` Note: ${fmtMoney(ctx.detail.forfeitedCredit)}/yr of export credit never gets used and is written off at `
         + "true-up — the tariff will not pay for production beyond what this house can absorb."

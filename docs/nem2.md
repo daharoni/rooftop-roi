@@ -94,3 +94,13 @@ escalates with retail in `core/finance.js`. The export dollars are still reporte
   weather year, not the sunshine that actually fell on the recorded days. On a day that was
   cloudier than the model, the rebuilt load is too high by the difference, and the other way
   round on a sunnier day.
+
+## Dispatch and baseline under NEM (review fixes, 2026-10-04)
+
+- The battery charges only on a day whose dearest import hour, after the round-trip loss, is worth
+  more than the export credit a stored kWh gives up, and it holds its charge through hours that are
+  not. Without this rule a flat-ish plan had the pack discharging into off-peak hours and losing
+  the round trip, so two batteries saved less than one.
+- The baseline allowance is set against net kWh (import minus export) under NEM, as the energy
+  charge is computed on net usage; under Net Billing every imported kWh is billed.
+- NEM 1 credit includes the non-bypassable charges, so it can offset them; NEM 2 cannot.

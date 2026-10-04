@@ -119,8 +119,8 @@ export function renderBillForm(host, options = {}) {
     ]),
 
     el("div.bill-checks", {}, [
-      el("label.bill-check", { htmlFor: "bill-ev" }, [ev, " We charge an EV at home"]),
-      el("label.bill-check", { htmlFor: "bill-pool" }, [pool, " We have a pool pump"]),
+      el("label.bill-check", { htmlFor: "bill-ev" }, [ev, " We charge an EV at home (its charging is in these bills)"]),
+      el("label.bill-check", { htmlFor: "bill-pool" }, [pool, " We have a pool pump (it is in these bills)"]),
     ]),
 
     el("p.ctl-note", {
