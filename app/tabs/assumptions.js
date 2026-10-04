@@ -139,7 +139,9 @@ function renderQuality(state, ctx) {
   const notes = [].concat(meta.notes || []).filter(Boolean);
   if (notes.length) {
     warn.appendChild(el("details.data-view", { open: false }, [
-      el("summary", { text: `What the parser noticed reading your file (${notes.length})` }),
+      el("summary", { text: (ctx.loadSet && ctx.loadSet.meta && ctx.loadSet.meta.source === "synthetic"
+        ? `What the model assumed about your year (${notes.length})`
+        : `What the parser noticed reading your file (${notes.length})`) }),
       el("ul", { style: "margin:6px 0 0;padding-left:18px" },
         notes.map((n) => el("li", { style: "font-size:12px;color:var(--ink-2);margin-bottom:3px", text: n }))),
     ]));
@@ -218,8 +220,11 @@ function renderRates(state, ctx) {
 
 // Shorten a note to its first two sentences; the full text sits behind "more".
 function twoSentences(text) {
-  const parts = String(text || "").match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [String(text || "")];
-  return parts.length > 2 ? { short: parts.slice(0, 2).join("").trim(), full: String(text).trim() } : { short: String(text).trim(), full: null };
+  // A sentence ends at . ! or ? followed by a space and a capital, and only when the
+  // character before the stop is a lower-case letter, a digit or a bracket, so decision
+  // numbers such as "D.23-12-005" and "A.4" do not count as sentence ends.
+  const parts = String(text || "").split(/(?<=[a-z0-9)][.!?])\s+(?=[A-Z"(])/);
+  return parts.length > 2 ? { short: parts.slice(0, 2).join(" ").trim(), full: String(text).trim() } : { short: String(text).trim(), full: null };
 }
 
 function expandable(text, cls = "") {

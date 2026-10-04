@@ -312,8 +312,11 @@ export function evaluate(sim, f) {
   // Roof work (re-roofing a face, conduit runs, structural fixes) is the household's
   // own bill: it is not part of the system's sticker price, so no vendor pass-through,
   // tax credit or rebate reaches it, and under a lease it is still paid up front.
-  const roofCost = watts > 0 ? f.roofCostAdder : 0;
-  const gross = solarCost + storageCost + (watts > 0 || sim.battKWhTotal > 0 ? f.adder : 0);
+  // Nothing new on the roof (an existing array and no battery) is "do nothing": no
+  // adder, no roof work, no O&M and no resale, so its NPV is exactly zero.
+  const nothingNew = newWatts <= 0 && !(sim.battKWhTotal > 0);
+  const roofCost = newWatts > 0 ? f.roofCostAdder : 0;
+  const gross = solarCost + storageCost + (!nothingNew ? f.adder : 0);
   const disc = effectiveDiscount(f);
   const discounted = gross * (1 - disc);
   // A leased system is never bought, so no homeowner credit or rebate applies to it.
@@ -417,13 +420,13 @@ export function evaluate(sim, f) {
     const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
     // O&M, replacements and resale are the owner's: the household under cash or a
     // loan, the lessor under a lease until a buyout hands the system over.
-    const o = owns ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
+    const o = owns && !nothingNew ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
     let ex = 0;
     if (owns) {
       if (sim.battKWhTotal > 0 && battSwap) ex += storageCost * f.battReplFraction;
       if (newWatts > 0 && !f.microinverters && invRepl.indexOf(y) >= 0) ex += newWatts * f.inverterPerW;
     }
-    const resale = (owns || (ownsAtH && y === H)) ? f.resaleValue : 0;
+    const resale = (owns || (ownsAtH && y === H)) && !nothingNew ? f.resaleValue : 0;
     const earned = sav + xr - o - ex + (y === H ? resale : 0);
     const net = earned - pay[y];
     cf.push(net); netSav.push(earned); savings.push(sav); extraRev.push(xr); om.push(o); extras.push(ex); payments.push(pay[y]);

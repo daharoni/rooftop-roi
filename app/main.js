@@ -1019,7 +1019,8 @@ async function onSiteChange(site) {
 function pickCell(panels, batteries) {
   State.update((s) => {
     s.system.override.batteries = batteries;
-    s.system.override.panelsByPlane = { __total: panels };
+    // Battery-only mode has one panel count, so there is nothing to pin (and no token for the link).
+    s.system.override.panelsByPlane = ctx.existingMode ? null : { __total: panels };
   }, "finance");
 }
 
@@ -1113,7 +1114,7 @@ const ACTIONS = {
         // this the series is rescaled to annualKwh and the COP slider would change nothing.
         const was = Number(f.heatpump.cop) || 3;
         const raw = (Number(f.heatpump.annualKwh) || f.annualKwh || 0) * was / Number(value);
-        const kwh = Math.min(8000, Math.max(500, Math.round(raw / 10) * 10));   // the slider's own range
+        const kwh = Math.min(8000, Math.max(500, Math.round(raw)));   // the slider's own range
         f.heatpump.annualKwh = kwh; f.annualKwh = kwh;
       }
       State.setPath(f, path, value);

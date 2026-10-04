@@ -139,6 +139,25 @@ function renderEmpty(host, q) {
 
 function renderOutside(host, cmp, ctx) {
   const o = cmp.outside;
+  const s = typeof ctx.getState === "function" ? ctx.getState() : null;
+  const roofCap = s ? s.roof.planes.reduce((a, p) => a + (p.maxPanels || 0), 0) : null;
+  if (o.axis === "panels" && roofCap !== null && o.needed > roofCap) {
+    // The search knob is not the limit: the traced roof is.
+    const act = ctx.actions || {};
+    host.appendChild(card({
+      id: "quote-outside", title: "This quote needs more roof than you have traced",
+      body: [
+        el("p", { text: `The quote has ${plural(o.needed, "panel", "panels")} at ${s.system.panelW} W; your roof faces hold `
+          + `${plural(roofCap, "panel", "panels")} in total. Either the installer counts on roof you have not drawn, or the `
+          + "quote is for a smaller panel than the Hardware setting. Add a face or raise a face's panel count on the Roof tab, "
+          + "or check the quote's panel wattage." }),
+        act.goTab ? el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" }, [
+          el("button.btn.btn-primary", { type: "button", text: "Open the Roof tab", on: { click: () => act.goTab("roof") } }),
+        ]) : null,
+      ],
+    }));
+    return;
+  }
   const knob = o.axis === "panels" ? "Most panels to consider" : "Most batteries to consider";
   const what = o.axis === "panels"
     ? `${plural(o.needed, "panel", "panels")}` : `${plural(o.needed, "battery", "batteries")}`;

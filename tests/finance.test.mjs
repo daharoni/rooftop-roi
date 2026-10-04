@@ -624,3 +624,17 @@ test("breakEven supports costPerBattery", () => {
   const be = Finance.breakEven(sim, { ...FLAT, costPerBattery: 100 }, "costPerBattery");
   near(Finance.evaluate(sim, { ...FLAT, costPerBattery: be }).npv, 0, 1e-6, "NPV zero at the break-even unit price");
 });
+
+test("an existing array with no battery is 'do nothing': no adder, O&M or resale, NPV exactly 0", () => {
+  const sim = { savings: 0, importSavings: 0, exportRevenue: 0, bill: 1000, baselineBill: 1000,
+    pvKwh: 8000, kwdc: 5, battKWhTotal: 0, batteries: 0 };
+  const f = { costPerW: 2.75, adder: 1500, omPerYear: 150, resaleValue: 3000, roofCostAdder: 2500,
+    existingKwDc: 5, incentiveMode: "none", horizon: 25 };
+  const r = Finance.evaluate(sim, f);
+  assert.equal(r.netCost, 0, "nothing is bought");
+  assert.equal(r.npv, 0, "and nothing is earned or spent over the horizon");
+  // One battery on the same array pays for the battery and its O&M only.
+  const withB = Finance.evaluate({ ...sim, battKWhTotal: 13.5, batteries: 1, savings: 300, importSavings: 300 },
+    { ...f, costPerKwh: 1000 });
+  assert.ok(withB.netCost > 13500 && withB.netCost < 13500 + 1500 + 1e-6, "battery plus the adder, no roof work, no panels");
+});

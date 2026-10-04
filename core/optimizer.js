@@ -181,6 +181,9 @@ export function searchGrid(ctx, params, opts) {
 }
 
 /** Attach financial metrics to every simulated cell and pick the winner. */
+/** No new panels and no battery.  With an existing array, `panels` counts it, so `newPanels` decides. */
+const isDoNothing = (c) => (c.newPanels !== undefined && c.newPanels !== null ? c.newPanels : c.panels) === 0 && c.batteries === 0;
+
 export function priceGrid(grid, finance, objective, basis) {
   // Tolerate priceGrid(grid, fin, basis) as the architecture doc writes it.
   if (basis === undefined && (objective === "sameFlex" || objective === "asRecorded")) {
@@ -228,11 +231,11 @@ export function priceGrid(grid, finance, objective, basis) {
   let best = null;
   const better = OBJECTIVES[obj].better;
   cells.forEach(function (c) {
-    if (c.panels === 0 && c.batteries === 0) return;   // "do nothing" is the baseline, not a candidate
+    if (isDoNothing(c)) return;   // "do nothing" is the baseline, not a candidate
     if (!best || better(c, best)) best = c;
   });
   // Doing nothing still wins if every real option destroys value.
-  const doNothing = cells.find((c) => c.panels === 0 && c.batteries === 0);
+  const doNothing = cells.find(isDoNothing);
   if (best && best.npv <= 0 && obj === "npv") best.beatenByDoingNothing = true;
   return { cells, best, doNothing,
            panelList: grid.panelList, battList: grid.battList, planes: grid.planes,

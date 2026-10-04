@@ -310,7 +310,8 @@ function backupTile(cell, f) {
   if (kwh <= 0) return { k: "Backup power", v: "none", d: "no battery · a grid-tied array shuts off in an outage" };
   // The household's own valuation of backup (and any grid-services payment), when set.
   const valued = f.extraRevenue > 0
-    ? ` · valued at ${fmtMoney(f.resilienceValue || 0)}/yr` + (f.vppRevenue > 0 ? ` + ${fmtMoney(f.vppRevenue)}/yr grid services` : "")
+    ? [f.resilienceValue > 0 ? `valued at ${fmtMoney(f.resilienceValue)}/yr` : "", f.vppRevenue > 0 ? `${fmtMoney(f.vppRevenue)}/yr grid services` : ""]
+      .filter(Boolean).map((t) => ` · ${t}`).join("")
     : "";
   if (!perDay) return { k: "Backup power", v: fmtNum(kwh, 0) + " kWh", d: "usable storage" + valued };
   const hours = kwh / perDay * 24;
@@ -373,7 +374,10 @@ function renderBand(state, ctx, cell) {
       accPlusRevenue: cell.accPlusRevenue, bill: cell.bill, baselineBill: ctx.baselineBill,
       pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
     };
-    const at = (escalation) => evaluate(sim, { ...state.fin, escalation, roofCostAdder: cell.roofCostAdder || 0 }).npv;
+    // main.js's finEff carries the NGOM adder, the roof adder rule and the existing-array
+    // watts; pricing from raw state.fin would buy an existing array all over again.
+    const base = typeof ctx.finEff === "function" ? ctx.finEff(cell.roofCostAdder || 0) : { ...state.fin, roofCostAdder: cell.roofCostAdder || 0 };
+    const at = (escalation) => evaluate(sim, { ...base, escalation }).npv;
     a = at(lo); b = at(hi);
   } catch (e) { return; }
   if (!Number.isFinite(a) || !Number.isFinite(b)) return;
@@ -455,6 +459,7 @@ function whySentence(state, ctx, cap) {
 
 /** SCE's sizing lines for this household; null for other utilities or before any meter data is loaded. */
 function capFor(state, ctx) {
+  if (ctx.existingMode) return null;   // the array is already up; SCE's sizing line is for a new application
   return sizingCapFor(state.site.utilityId, ctx.recentAnnualKwh, { panelW: state.system.panelW, acFactor: state.system.acFactor });
 }
 
@@ -474,7 +479,9 @@ function renderMarginLine(state, ctx) {
   const unit = objective === "irr" ? "" : objective === "payback" ? "" : ` over ${state.fin.horizon} years`;
   const tol = sliceFmt(flat.tol, objective);
   const best = flat.best;
-  const sizeOf = (c) => `${c.panels} panels, ${plural(c.batteries, "battery", "batteries")}`;
+  const sizeOf = (c) => (ctx.existingMode
+    ? plural(c.batteries, "battery", "batteries")
+    : `${c.panels} panels, ${plural(c.batteries, "battery", "batteries")}`);
 
   if (flat.count === 0) {
     node.appendChild(el("span", { text: `A clear winner: no other size comes within ${tol} of ${sizeOf(best)}.` }));
@@ -584,7 +591,9 @@ function renderFlex(state, ctx) {
     const when = s.mode === "spread"
       ? `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · ${s.daysPerWeek ?? 5} of 7 days · `
         + `${fmtPct(s.daylightFraction ?? 0.9, 0)} inside ${fmtHour(s.window?.[0] ?? 8)}–${fmtHour(s.window?.[1] ?? 15)}`
-      : `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · as recorded`;
+      : f.kind === "heatpump"
+        ? `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · shaped by your site's outdoor temperature`
+        : `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · as recorded`;
     host.appendChild(el("dt", { text: f.name }));
     host.appendChild(el("dd", { text: when }));
   }
