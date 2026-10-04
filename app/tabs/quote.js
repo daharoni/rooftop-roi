@@ -46,7 +46,7 @@ export function mount(pane) {
   pane.appendChild(el("div", { id: "quote-empty" }));
   pane.appendChild(card({
     id: "quote-compare", title: "Your quote against this model",
-    sub: "The same house, the same rates and the same weather, priced three ways.",
+    sub: "The same house, the same rates and the same weather, priced three ways. This is a modelled comparison, not a promise about the installer's work.",
     body: [el("div", { id: "quote-compare-body" })],
   }));
   pane.appendChild(card({
@@ -122,7 +122,7 @@ function renderEmpty(host, q) {
   const have = [q.kwDc ? "size" : null, q.price ? "price" : null].filter(Boolean);
   host.appendChild(card({
     id: "quote-intro", title: "Check a quote",
-    sub: "Got a proposal from an installer? Put its numbers in the left rail and see how it compares.",
+    sub: "Got a proposal from an installer? Enter its numbers in the Your quote settings panel. On a phone, Settings is below this message.",
     body: [
       el("p.note", { text: "You need three things from the proposal:" }),
       el("ul.quote-list", {}, [

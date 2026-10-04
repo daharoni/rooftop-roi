@@ -743,6 +743,7 @@ let mountedTab = null;
  */
 function buildTabStrip() {
   const strip = clear($("tabs"));
+  strip.setAttribute("aria-orientation", "horizontal");
   for (const id of State.TABS) {
     const mod = TAB_MODULES[id];
     const selected = State.get().ui.tab === id;
@@ -761,7 +762,9 @@ function buildTabStrip() {
 
 function onTabKey(e) {
   const ids = State.TABS;
-  const at = ids.indexOf(normalizeTab(State.get().ui.tab));
+  const focused = document.activeElement && document.activeElement.id;
+  const focusedId = focused && focused.startsWith("tab-") ? focused.slice(4) : "";
+  const at = ids.indexOf(focusedId) >= 0 ? ids.indexOf(focusedId) : ids.indexOf(normalizeTab(State.get().ui.tab));
   const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: ids.length - 1 }[e.key];
   if (to === undefined) return;
   e.preventDefault();
@@ -824,14 +827,15 @@ function buildRailJump() {
   if (!railNode || !pane) return;
   let railInView = false;
   const btn = el("button.rail-jump", { id: "rail-jump", type: "button", text: "Settings",
-    "aria-label": "Jump to the settings" });
+    "aria-label": "Jump to the settings", "aria-controls": "rail-controls pane" });
   const paint = () => {
     btn.textContent = railInView ? "Results ↑" : "Settings ↓";
     btn.setAttribute("aria-label", railInView ? "Jump back to the results" : "Jump to the settings");
   };
   btn.addEventListener("click", () => {
     const target = railInView ? pane : railNode;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
     if (railInView) pane.focus({ preventScroll: true });
     else {
       const first = railNode.querySelector("summary, input, select, button");
@@ -926,6 +930,9 @@ function renderTopBar(s) {
   if (s.flex.length) bits.push(s.flex.length === 1 ? s.flex[0].name : `${s.flex.length} flexible loads`);
   if (s.roof.planes.length) bits.push(`${s.roof.planes.length} roof ${s.roof.planes.length === 1 ? "face" : "faces"}`);
   clear(chip);
+  chip.appendChild(el("span.tag" + (s.ui.demo ? ".tag-warn" : ".tag-good"), {
+    text: s.ui.demo ? "Demo household" : "Your household",
+  }));
   chip.appendChild(el("span.mono", { text: bits[0] || "no data" }));
   if (bits.length > 1) chip.appendChild(el("span", { text: bits.slice(1).join(" · ") }));
 }
@@ -1941,6 +1948,34 @@ function showLanding() {
   document.body.classList.remove("in-app");
 }
 
+/** Pause the current run while someone chooses a different household. */
+function changeHousehold() {
+  if (!inApp) return;
+  supersedeQuestion();
+  if (worker) { worker.terminate(); worker = null; workerReady = false; }
+  bootGen++;
+  solarSeq++;
+  if (weatherAbort) weatherAbort.abort();
+  weatherAbort = null;
+  weatherMemo = { key: "", promise: null };
+  showLanding();
+  landingError("");
+  landingNotice({
+    tone: "info",
+    text: "Your current results are still here while you choose a different household.",
+    actions: [{
+      label: "Return to current results",
+      primary: true,
+      onClick: async () => {
+        landingNotice(null);
+        await enterApp();
+      },
+    }],
+  });
+  const start = $("start");
+  if (start) start.focus({ preventScroll: true });
+}
+
 /** Back to a working landing page with the reason on it (e.g. the engine refused the file). */
 function backToLanding(message) {
   if (worker) { worker.terminate(); worker = null; workerReady = false; }
@@ -2072,7 +2107,31 @@ async function shareLink() {
 }
 
 function bindShell() {
+  const dataActions = document.querySelector("details.data-actions");
+  if (dataActions) {
+    const summary = dataActions.querySelector("summary");
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !dataActions.open) return;
+      e.preventDefault();
+      dataActions.open = false;
+      if (summary) summary.focus();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (dataActions.open && !dataActions.contains(e.target)) dataActions.open = false;
+    });
+  }
+  const skip = document.querySelector(".skip-link");
+  if (skip) skip.addEventListener("click", (e) => {
+    const pane = $("pane");
+    if (!pane || $("shell").hidden) return;
+    e.preventDefault();
+    pane.focus({ preventScroll: true });
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    pane.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+  });
   $("btn-forget").addEventListener("click", forgetEverything);
+  const household = $("btn-household");
+  if (household) household.addEventListener("click", changeHousehold);
   $("btn-share").addEventListener("click", shareLink);
   $("btn-copy").addEventListener("click", async () => {
     const ok = await copyToClipboard(summaryText(State.get(), ctx));

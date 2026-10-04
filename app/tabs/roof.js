@@ -44,8 +44,8 @@ export function mount(pane, state, ctx) {
     id: "roof-builder-card",
     title: "Your roof",
     tag: { id: "roof-source-tag", text: "simple" },
-    sub: "Draw the faces you would actually put panels on. Every face gets its own tilt, direction and "
-      + "shading, and the optimiser decides how many panels each one deserves.",
+    sub: "Give the model a rough sketch of the roof faces that could hold panels. One face is enough to start; "
+      + "the map or the simple fields both work. Exact measurements are not required for a first pass.",
     body: [el("div", { id: "roof-builder" })],
   }));
 
@@ -119,7 +119,7 @@ function simpleBuilder(host, state, ctx) {
       on: { click: () => { ctx.actions.resetPlanes(); draw(); } } }),
   ]));
   host.appendChild(el("p.note", { style: "margin-top:10px",
-    text: "180° is due south, 90° east, 270° west. A 4:12 pitch is about 18°, 6:12 about 27°, 9:12 about 37°." }));
+    text: "If you use the simple fields: pitch is roof steepness, and direction is the compass heading — 180° south, 90° east, 270° west. A rough estimate is enough to begin." }));
   draw();
 }
 

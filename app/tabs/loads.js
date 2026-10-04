@@ -81,7 +81,7 @@ export function render(state, ctx) {
   if (!flex.length) {
     host.appendChild(el("p.note", {
       text: "Nothing flexible was detected in your meter history, and you have not added anything. "
-        + "Solar still pays for itself against the load you have — flexible loads just make it pay more.",
+        + "You can still compare solar and storage against your household usage. Moving some usage into daylight may change the result.",
     }));
   }
 
@@ -164,7 +164,7 @@ function loadCard(load, state, ctx) {
     }
     if (det.chargerKW) facts.push(["Charger", fmtNum(det.chargerKW, 1) +
       (det.chargerSource === "stated" ? " kW stated" : " kW inferred")]);
-    if (det.confidence !== undefined) facts.push(["Confidence", fmtPct(det.confidence, 0)]);
+    if (det.confidence !== undefined) facts.push(["Detection confidence (estimated)", fmtPct(det.confidence, 0)]);
   }
   facts.push(["Energy", fmtKwh(load.annualKwh * (load.scale ?? 1), 0) + "/yr"]);
 
@@ -203,8 +203,8 @@ function loadCard(load, state, ctx) {
 
 /** One labelled control, with the figure it currently reads beside the label. */
 function row(labelText, control, valueNode) {
-  return el("div.ctl", {}, [
-    el("div.ctl-head", {}, [el("label", { text: labelText }), valueNode || null]),
+  return el("label.ctl", {}, [
+    el("span.ctl-head", {}, [el("span", { text: labelText }), valueNode || null]),
     control,
   ]);
 }
@@ -213,8 +213,8 @@ function slider(labelText, value, min, max, step, onInput, fmt) {
   const val = el("span.ctl-val", { text: fmt(value) });
   const input = el("input", {
     type: "range", min, max, step, value,
-    "aria-label": labelText,
-    on: { input: (e) => { val.textContent = fmt(Number(e.target.value)); onInput(Number(e.target.value)); } },
+    "aria-label": labelText, "aria-valuetext": fmt(value),
+    on: { input: (e) => { val.textContent = fmt(Number(e.target.value)); e.target.setAttribute("aria-valuetext", val.textContent); onInput(Number(e.target.value)); } },
   });
   return row(labelText, input, val);
 }

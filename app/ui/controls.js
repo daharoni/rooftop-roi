@@ -79,7 +79,6 @@ export class ControlRail {
     this._shown = [];
     this.state = state;
     clear(this.root);
-    const wide = typeof window === "undefined" || window.innerWidth > 1000;
     // The rail is an accordion: one group open at a time, so a long list of
     // knobs never pushes the one being dragged off the bottom of the screen.
     // The first group marked open starts open; opening another closes it.
@@ -88,7 +87,10 @@ export class ControlRail {
       const body = el("div.group-body");
       for (const spec of g.items) body.appendChild(this._widget(spec, state));
       // A pinned group starts open at any width and sits outside the accordion.
-      const startOpen = g.pinned ? true : g.open !== false && wide && !opened;
+      // Keep the first explicitly-open group available on phones too. The
+      // mobile jump button lands on this rail; leaving every group collapsed
+      // forces an extra discovery tap before the first setting is reachable.
+      const startOpen = g.pinned ? true : g.open !== false && !opened;
       if (startOpen && !g.pinned) opened = true;
       const details = el("details.group", { open: startOpen }, [
         el("summary", { text: g.group }), body,
@@ -124,11 +126,12 @@ export class ControlRail {
       w.control = el("input", { type: "checkbox", id, checked: !!value, on: { change: (e) => emit(e.target.checked) } });
       wrap.appendChild(el("label.switch", { htmlFor: id }, [w.control, el("span", { text: spec.label })]));
     } else if (spec.kind === "seg") {
-      wrap.appendChild(this._head(spec, id, "").row);
-      w.control = el("div.seg", { id, role: "group", "aria-label": spec.label });
-      for (const o of spec.opts) {
+      const head = this._head(spec, id, "", { forControl: false });
+      wrap.appendChild(head.row);
+      w.control = el("div.seg", { id, role: "group", "aria-labelledby": id + "-label" });
+      for (const [i, o] of spec.opts.entries()) {
         w.control.appendChild(el("button", {
-          type: "button", text: o.t, "aria-pressed": String(o.v === value),
+          type: "button", id: id + "-option-" + i, text: o.t, "aria-pressed": String(o.v === value),
           on: { click: () => emit(o.v) },
         }));
       }
@@ -141,11 +144,20 @@ export class ControlRail {
     } else if (spec.kind === "number" || spec.kind === "text" || spec.kind === "date") {
       wrap.appendChild(this._head(spec, id, "").row);
       let timer = null;
-      const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-      const later = (v) => { cancel(); timer = setTimeout(() => { timer = null; emit(v); }, 350); };
+      w.pendingInput = false;
+      const cancel = () => {
+        if (timer) { clearTimeout(timer); timer = null; }
+        w.pendingInput = false;
+      };
+      const later = (v) => {
+        cancel();
+        w.pendingInput = true;
+        timer = setTimeout(() => { timer = null; w.pendingInput = false; emit(v); }, 350);
+      };
       w.control = el("input", {
         type: spec.kind, id, min: spec.min, max: spec.max, step: spec.step,
-        placeholder: spec.placeholder, value: value ?? "",
+        placeholder: spec.placeholder, inputMode: spec.inputMode || (spec.kind === "number" ? "decimal" : undefined),
+        autocomplete: spec.autocomplete, value: value ?? "",
         on: {
           // Commit while typing, but only a finished, in-range number: "2" in a
           // field whose minimum is 100 is a number on its way, not an answer.
@@ -203,22 +215,35 @@ export class ControlRail {
       wrap.appendChild(w.control);
     }
 
-    if (spec.note) wrap.appendChild(el("div.ctl-note", { text: spec.note }));
+    const describedBy = [];
+    if (spec.note) {
+      const noteId = "note-" + id;
+      wrap.appendChild(el("div.ctl-note", { id: noteId, text: spec.note }));
+      describedBy.push(noteId);
+    }
     if (spec.warn) {
-      w.warn = el("div.ctl-warn", { id: "warn-" + id, hidden: true });
+      const warnId = "warn-" + id;
+      w.warn = el("div.ctl-warn", { id: warnId, hidden: true, "aria-live": "polite" });
       wrap.appendChild(w.warn);
+      describedBy.push(warnId);
     }
     if (spec.footnote) {
-      w.foot = el("div.ctl-note", { id: "foot-" + id });
+      const footId = "foot-" + id;
+      w.foot = el("div.ctl-note", { id: footId });
       wrap.appendChild(w.foot);
+      describedBy.push(footId);
     }
+    if (w.control && describedBy.length) w.control.setAttribute("aria-describedby", describedBy.join(" "));
     this.widgets.push(w);
     return wrap;
   }
 
-  _head(spec, id, valueText) {
+  _head(spec, id, valueText, opts = {}) {
     const val = el("span.ctl-val", { text: valueText });
-    const row = el("div.ctl-head", {}, [el("label", { htmlFor: id, text: spec.label }), val]);
+    const labelAttrs = { id: id + "-label", text: spec.label };
+    if (opts.forControl !== false) labelAttrs.htmlFor = opts.forControl || id;
+    if (opts.forControl === false) labelAttrs.style = "font-size:12px;color:var(--ink-2)";
+    const row = el("div.ctl-head", {}, [el(opts.forControl === false ? "span.ctl-head-label" : "label", labelAttrs), val]);
     return { row, val };
   }
 
@@ -248,7 +273,7 @@ export class ControlRail {
         }
         w.control.value = v === null || v === undefined ? "" : String(v);
       } else {
-        if (document.activeElement !== w.control) w.control.value = v ?? "";
+        if (document.activeElement !== w.control && !w.pendingInput) w.control.value = v ?? "";
         if (w.value) {
           const text = formatValue(spec, v);
           w.value.textContent = text;

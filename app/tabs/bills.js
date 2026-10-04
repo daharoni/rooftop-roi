@@ -35,6 +35,31 @@ export function rail(state, ctx) {
 export function mount(pane) {
   clear(pane);
 
+  // Keep the long evidence page scannable without changing the URL. Buttons
+  // focus the destination as well as scrolling, so keyboard and screen-reader
+  // users get the same orientation as sighted mouse users.
+  const jumpTo = (id) => {
+    const target = $(id);
+    if (!target) return;
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+  };
+  const jump = (label, id) => el("button", {
+    type: "button", class: "btn section-jump", text: label,
+    on: { click: () => jumpTo(id) },
+  });
+  pane.appendChild(el("nav.section-jumps", { "aria-label": "On this page" }, [
+    el("span.section-jumps-label", { text: "On this page" }),
+    jump("Bill now", "bill-card"),
+    jump("Monthly outlay", "outlay-card"),
+    jump("Weather", "weather-card"),
+    jump("Rate plans", "plans-card"),
+    jump("Sensitivity", "tornado-card"),
+    jump("Check a bill", "replay-card"),
+  ]));
+
   pane.appendChild(card({
     id: "bill-card",
     title: "Where the bill goes",
@@ -104,7 +129,7 @@ export function mount(pane) {
     card({
       id: "replay-card",
       title: "Does the model match your paper bill?",
-      sub: "Enter a billing period from a real bill in the left rail and the model replays it out of your own "
+      sub: "Enter a billing period from a real bill in Settings and the model replays it out of your own "
         + "meter readings. The kWh split should match almost exactly; the dollar gap is whatever the published "
         + "rates leave out — taxes, franchise fees, a rate vintage.",
       body: [
@@ -130,11 +155,10 @@ export function render(state, ctx) {
     const note = $("outlay-note");
     if (note) {
       note.textContent = after < before
-        ? `Average month: ${fmtMoney(before, 0)} today, ${fmtMoney(after, 0)} with the system and its payment — `
-          + `${fmtMoney(before - after, 0)} a month lighter from day one.`
-        : `Average month: ${fmtMoney(before, 0)} today, ${fmtMoney(after, 0)} with the system and its payment — `
-          + `${fmtMoney(after - before, 0)} a month heavier at first. The saving arrives later, as rates rise `
-          + "and the payment does not.";
+        ? `Under these assumptions, the average month is ${fmtMoney(before, 0)} today and ${fmtMoney(after, 0)} with the system and its payment — `
+          + `${fmtMoney(before - after, 0)} lighter from day one in this model.`
+        : `Under these assumptions, the average month is ${fmtMoney(before, 0)} today and ${fmtMoney(after, 0)} with the system and its payment — `
+          + `${fmtMoney(after - before, 0)} heavier at first. It only becomes lighter later if the modeled rates rise enough and the payment stays level; check the sensitivity below.`;
     }
   }
 
@@ -215,7 +239,7 @@ function renderReplay(state, ctx) {
   const v = ctx.replay;
   if (!v) {
     table.appendChild(el("tbody", {}, [el("tr", {}, [
-      el("td", { text: "Enter a billing period in the left rail and press Replay this period." }),
+      el("td", { text: "Enter a billing period in Settings and press Replay this period." }),
     ])]));
     return;
   }
