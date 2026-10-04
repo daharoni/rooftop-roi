@@ -1461,6 +1461,75 @@ test("worker grid with an existing array sweeps batteries only, at the existing 
   assert.deepEqual(g2.panelList, [0, 1, 2, 3]);
 });
 
+test("worker: an existing NEM 2 array also runs every cell under Net Billing (no ACC Plus) as `after`", () => {
+  const src = readFileSync(new URL("../app/worker-bundle.js", import.meta.url), "utf8");
+  const out = [];
+  const shim = { postMessage: (m) => out.push(m), onmessage: null };
+  new Function("self", src)(shim);
+  const d = nemData({ fullYear: true });
+  shim.onmessage({ data: { type: "init", load: d.ctx.load, tariffs: d.ctx.tariffs, solar: null } });
+  const params = { planes: [{ id: "p1", profile: d.profile, panels: 30, maxPanels: 30, shading: { annual: 0 } }],
+                   panelW: 500, battKWh: 10, battKW: 5, planId: "FLAT", providerId: "sce",
+                   strategy: "self_consumption", climateCreditOff: true,
+                   billing: "nem2", existing: { planeId: "p1", panels: 2 } };
+  shim.onmessage({ data: { type: "grid", id: 1, params, maxBatteries: 2 } });
+  const grid = out.find((m) => m.type === "grid").grid;
+  const prog = out.filter((m) => m.type === "progress");
+  assert.equal(prog[prog.length - 1].total, 6, "progress counts both regimes");
+  assert.equal(prog[prog.length - 1].done, 6);
+  // The NBT run, done by hand.
+  const pN = nemParams(d, { billing: "nbt", accPlusAdder: 0, existing: { planeId: "p1", panels: 2 },
+                            planes: params.planes, panelW: 500, panelsByPlane: [2] });
+  for (const c of grid.cells) {
+    assert.ok(c.after, "every cell carries `after`");
+    assert.equal(c.billing, "nem2", "the cell itself is still the legacy run");
+    const ref = Engine.simulate(d.ctx, Object.assign({}, pN, { batteries: c.batteries }));
+    near(c.after.bill, ref.bill, 1e-9, `${c.batteries}b NBT bill`);
+    near(c.after.savingsVsSameFlex, ref.savingsVsSameFlex, 1e-9, "NBT saving");
+    // Under Net Billing the existing array already exports in the no-battery baseline, so the
+    // battery's export revenue is the increment over it and the import saving is the rest.
+    const xS = ref.exportRevenue - ref.baselineSameFlex.exportRevenue;
+    const xA = ref.exportRevenue - ref.baselineAsRecorded.exportRevenue;
+    near(c.after.exportRevenue, xS, 1e-9, "NBT export revenue is the increment over the array-only baseline");
+    near(c.after.exportRevenueVsAsRecorded, xA, 1e-9, "as-recorded export increment");
+    near(c.after.importSavingsVsSameFlex, ref.savingsVsSameFlex - xS, 1e-9, "NBT import saving is the rest");
+    near(c.after.importSavingsVsAsRecorded, ref.savingsVsAsRecorded - xA, 1e-9, "NBT import saving, as recorded");
+    if (c.batteries === 0) {
+      near(c.after.exportRevenue, 0, 1e-9, "no battery: nothing added to the array's own exports");
+      near(c.after.importSavingsVsSameFlex, 0, 1e-9, "no battery: no import saving");
+    }
+    assert.equal(c.after.accPlusRevenue, 0, "no ACC Plus for a legacy array rolling over");
+    for (const k of ["savingsVsAsRecorded", "importSavingsVsSameFlex", "pvKwh", "importKwh", "exportKwh"]) {
+      assert.equal(typeof c.after[k], "number", k);
+    }
+  }
+  assert.equal(grid.cells[0].after.bill, grid.afterBaselineSameFlex.bill, "0 batteries is the NBT baseline");
+  assert.equal(typeof grid.afterBaselineAsRecorded.bill, "number");
+  assert.ok(grid.afterBaselineSameFlex.bill !== grid.baselineSameFlex.bill, "the regimes bill differently");
+
+  out.length = 0;
+  shim.onmessage({ data: { type: "detail", id: 2, params, panelsByPlane: [2], batteries: 1,
+                           weatherKeys: [{ key: "tmy", label: "Typical", group: "t" }] } });
+  const det = out.find((m) => m.type === "detail");
+  assert.ok(det, JSON.stringify(out.filter((m) => m.type === "error")));
+  const a = det.detail.after, c1 = grid.cells[1].after;
+  near(a.savings, c1.savingsVsSameFlex, 1e-9, "detail `after` agrees with the grid cell");
+  near(a.baselineBill, grid.afterBaselineSameFlex.bill, 1e-9, "after.baselineBill");
+  near(a.baselineBillAsRecorded, grid.afterBaselineAsRecorded.bill, 1e-9, "after.baselineBillAsRecorded");
+  for (const k of ["savingsAsRecorded", "importSavings", "importSavingsAsRecorded", "exportRevenue", "accPlusRevenue", "bill"]) {
+    assert.equal(typeof a[k], "number", k);
+  }
+  near(det.detail.weather[0].after.savings, a.savings, 1e-9, "each weather row carries `after`");
+
+  // Net Billing (new-system) grids and details carry no `after`.
+  out.length = 0;
+  shim.onmessage({ data: { type: "grid", id: 3, params: Object.assign({}, params, { existing: null, billing: "nbt" }),
+                           maxPanelsTotal: 2, maxBatteries: 1, step: 1 } });
+  const g2 = out.find((m) => m.type === "grid").grid;
+  assert.ok(g2.cells.every((c) => c.after === undefined));
+  assert.equal(g2.afterBaselineSameFlex, undefined);
+});
+
 test("a manual flex load with its own hourly series adds exactly that series and is never subtracted", () => {
   // A heat pump: a manual load whose kwhByHour was built from weather, never metered.
   const N = ctx.N;

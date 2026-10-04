@@ -620,9 +620,11 @@ export function mountRoofBuilder(el, opts = {}) {
     ensureLeaflet().then((lib) => { L = lib; buildMap(); }).catch(() => showOffline('lib'));
   }
 
+  function openZoom() { return Math.min(20, TILE_PROVIDERS[TILE_PROVIDER].maxNativeZoom); }
+
   function buildMap() {
     map = L.map(mapEl, { zoomControl: false, doubleClickZoom: false, attributionControl: true })
-      .setView([st.site.lat, st.site.lon], 20);
+      .setView([st.site.lat, st.site.lon], openZoom());
     L.control.zoom({ position: 'topright' }).addTo(map);
     const tp = TILE_PROVIDERS[TILE_PROVIDER];
     tiles = L.tileLayer(tp.url.replace('{key}', encodeURIComponent(tp.key || '')),
@@ -721,9 +723,12 @@ export function mountRoofBuilder(el, opts = {}) {
 
   function closeDraft() {
     if (draft.length < 3) return;
+    // A crossing (bow-tie) ring has no area, so it would save as a 0-panel face. Keep the
+    // draft open, show the message, and let the person undo the last corner.
+    if (!isSimplePolygon(draft)) { showCrossing(true); return; }
     const polygon = draft.slice();
     cancelDraw();
-    showCrossing(!isSimplePolygon(polygon));
+    showCrossing(false);
     const p = adoptPlane({ name: 'Roof face', tilt: 26.6, azimuth: 180, polygon });
     st.planes.push(p);
     st.selectedId = p.id;
@@ -836,8 +841,17 @@ export function mountRoofBuilder(el, opts = {}) {
           draggable: true, icon: L.divIcon({ className: '', html: '<div class="rb-vertex"></div>', iconSize: [0, 0] }),
           keyboard: false, zIndexOffset: 700,
         }).addTo(map);
+        let before = null;
+        mk.on('dragstart', () => { before = p.polygon.map((q) => q.slice()); });
         mk.on('drag', (e) => { p.polygon[i] = [e.latlng.lat, e.latlng.lng]; poly.setLatLngs(p.polygon); showCrossing(!isSimplePolygon(p.polygon)); });
         mk.on('dragend', () => {
+          // A drag that leaves the ring crossing itself is undone: the face keeps its last simple shape.
+          if (before && !isSimplePolygon(p.polygon)) {
+            p.polygon = before;
+            drawFace(p);
+            showCrossing(true);
+            return;
+          }
           p.azimuth = round1(azimuthFromGutter(p.polygon, p.gutterEdge));
           if (!metaOf(p.id).renamed) p.name = defaultName(p.azimuth, p.id);
           relayout(p); syncMapDetail(); renderFaces(); emit();
@@ -1113,7 +1127,7 @@ export function mountRoofBuilder(el, opts = {}) {
       st.site = { lat: +site.lat, lon: +site.lon };
       st.editingSite = false;
       renderSite();
-      if (map) map.setView([st.site.lat, st.site.lon], map.getZoom() < 18 ? 20 : map.getZoom());
+      if (map) map.setView([st.site.lat, st.site.lon], map.getZoom() < 18 ? openZoom() : map.getZoom());
       else if (st.path === 'map') openMap();
       if (st.path === 'simple') syncSimple();
     },

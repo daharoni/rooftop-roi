@@ -27,6 +27,10 @@ const svg = (tag, attrs) => {
   return node;
 };
 
+// The last bill spec the person typed or submitted, so Back and a failed
+// build do not cost them twelve figures.
+let lastBill = null;
+
 export function renderLanding(root, handlers) {
   clear(root);
 
@@ -167,9 +171,12 @@ function startPanel(handlers) {
     const loc = locationBlock(); if (loc) loc.hidden = false;
   }
   function showBills() {
+    // A ZIP already typed in the location field carries over, so it is not asked twice.
+    const z = zip.value.trim();
     const form = renderBillForm(door, {
-      onSubmit: (spec) => { if (handlers.onMonthlyBills) handlers.onMonthlyBills(spec); },
-      onBack: showDrop,
+      initial: lastBill || (/^\d{5}$/.test(z) ? { zip: z } : null),
+      onSubmit: (spec) => { lastBill = spec; if (handlers.onMonthlyBills) handlers.onMonthlyBills(spec); },
+      onBack: (partial) => { if (partial) lastBill = partial; showDrop(); },
       seasonalSplit: handlers.seasonalSplit,
     });
     const loc = locationBlock(); if (loc) loc.hidden = true;
@@ -226,6 +233,7 @@ function startPanel(handlers) {
             + "(about 75 m), along with your IP address. No address or ZIP is sent from the map." }),
       ]),
     ]),
+    el("p.note", { id: "landing-location-status", hidden: true }),
     ]),
 
     utilityGuide(),
@@ -333,7 +341,7 @@ function glyph(kind) {
 
 /**
  * A blocking notice in the start panel: a message plus explicit choices.
- *   landingNotice({ tone: "bad"|"warn", text, actions: [{ label, primary, onClick }] })
+ *   landingNotice({ tone: "bad"|"warn"|"info", text, actions: [{ label, primary, onClick }] })
  * landingNotice(null) hides it.
  */
 export function landingNotice(spec) {
@@ -342,8 +350,8 @@ export function landingNotice(spec) {
   clear(node);
   node.hidden = !spec;
   if (!spec) return;
-  node.className = "note banner" + (spec.tone === "bad" ? " banner-bad" : "");
-  node.setAttribute("role", "alert");
+  node.className = "note banner" + (spec.tone === "bad" ? " banner-bad" : spec.tone === "info" ? " banner-info" : "");
+  node.setAttribute("role", spec.tone === "info" ? "status" : "alert");
   node.style.marginTop = "10px";
   node.appendChild(el("p", { style: "margin:0 0 8px", text: spec.text }));
   if (spec.actions && spec.actions.length) {
@@ -369,6 +377,14 @@ export function userMessageOf(err, fallback) {
   return GENERIC_ERROR;
 }
 
+/** A plain confirmation line under the address/ZIP row ("Using Agoura Hills, CA"); empty text hides it. */
+export function landingLocation(text) {
+  const node = $("landing-location-status");
+  if (!node) return;
+  node.textContent = text || "";
+  node.hidden = !text;
+}
+
 export function landingError(message) {
   const node = $("landing-error");
   if (!node) return;
@@ -377,4 +393,4 @@ export function landingError(message) {
   node.className = "note banner banner-bad";
 }
 
-export default { renderLanding, landingError, landingNotice, userMessageOf };
+export default { renderLanding, landingLocation, landingError, landingNotice, userMessageOf };

@@ -54,7 +54,8 @@ state = {
   fin:    FinanceInputs,             // see finance.js DEFAULTS + financing block below
                                      // v2: costPerBattery, resilienceValue, vppPerBattery, microinverters
   quote:  { kwDc, batteries, battKWh, price, annualKwh, monthly },   // the Quote tab's inputs; null = not entered
-  existing: { kwDc: 0, planeId: null, nem: "none"|"nem2"|"nem1" },  // solar already on the roof (battery add-on mode)
+  existing: { kwDc: 0, planeId: null, nem: "none"|"nem2"|"nem1", since: null },  // solar already on the roof (battery add-on mode);
+                                     // `since` = year switched on; the 20-year NEM term ends at since+20 (docs/nem2.md)
   ui:     { tab, basis, season, weatherKey, objective }
 }
 ```
@@ -129,8 +130,11 @@ Schema is exactly `data/tariffs/sce.json` (documented in `docs/tariffs-sce.md`):
 - `plans[].eligibility` and `plans[].default: true` for the utility's default residential plan
 - `meta.rates_effective`, `meta.sources[]`, and `meta.confidence` per section are mandatory.
 `core/tariff.js` exposes `loadLibrary()`, `forZip(zip)`, `plan(t, id)`, `rateAt(t, plan, provider, date, hour)`,
-`exportRateAt(t, date, hour)`, `validate(t)` (also used by `tests/validate-tariffs.mjs`), and
-`fromBill({...})` to build a custom tariff from a form.
+`exportRateAt(t, date, hour)`, `validate(t)` (also used by `tests/validate-tariffs.mjs`),
+`fromBill({...})` to build a custom tariff from a form, and `freshness(meta)` /
+`freshnessNotice(t)`: how long since `meta.as_of` (fresh < 180 days, aging to 365, stale after),
+shown as a dismissable app banner and on the Assumptions rates card; `npm run check:fresh`
+(a CI step on every push and on the nightly run) fails when any rate book is stale.
 
 ## core/engine.js API (generalize the prototype)
 
@@ -215,7 +219,10 @@ quality, rate effective dates, incentives in force this year).  Control declarat
 `app/ui/knobs.js` and are shared between tabs; new controls join an existing rail group rather
 than opening a new one (battery product presets from `app/ui/presets.js` under Hardware, the
 fixed per-unit battery cost under Price, the VPP payment under Incentives, the microinverter
-switch under Wear).  Under the NPV the dashboard states a range across 3–8% rate escalation and a
+switch under Wear; "Your existing solar" appears only in battery add-on mode via a group-level
+`show(state)`).  The rail is an accordion, one group open at a time, except a group marked
+`pinned: true` (the Quote tab's "Your quote"), which stays open.  Number fields commit while
+typing once the value is in range (350 ms debounce) and clamp on blur.  Under the NPV the dashboard states a range across 3–8% rate escalation and a
 one-sentence reason for the chosen size.  Results re-render live (finance-only changes instant; simulation changes
 debounced, run in a Blob worker with a main-thread fallback).  "Share link" copies the URL: the
 fragment already carries every non-default setting, the roof faces and the load schedules, plus

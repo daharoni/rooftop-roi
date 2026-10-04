@@ -897,6 +897,40 @@ export function describe(t, p, providerId) {
   };
 }
 
+/* ------------------------------------------------------------------- freshness */
+const DAY_MS = 86400000;
+const UTILITY_SHORT = { pge: "PG&E", sce: "SCE", sdge: "SDG&E" };
+
+/** How old a rate book is, from meta.as_of. level: fresh (<180 days), aging (180-365),
+ *  stale (>365), unknown (no parsable as_of). `today` is a Date (UTC calendar day is used). */
+export function freshness(meta, today = new Date()) {
+  const m = meta && typeof meta.as_of === "string" && /^(\d{4})-(\d{2})-(\d{2})$/.exec(meta.as_of);
+  if (!m) return { days: null, months: null, level: "unknown" };
+  const asOf = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  const now = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  if (!Number.isFinite(asOf) || !Number.isFinite(now)) return { days: null, months: null, level: "unknown" };
+  const days = Math.max(0, Math.floor((now - asOf) / DAY_MS));
+  const months = Math.floor(days / 30.4375);
+  const level = days < 180 ? "fresh" : days <= 365 ? "aging" : "stale";
+  return { days, months, level };
+}
+
+/** A one-sentence warning for an aging or stale rate book, else null (fresh, unknown, custom). */
+export function freshnessNotice(t, today = new Date()) {
+  if (!t || !t.meta) return null;
+  if (typeof t.meta.notes === "string" && t.meta.notes.startsWith("CUSTOM TARIFF")) return null;
+  const f = freshness(t.meta, today);
+  if (f.level !== "aging" && f.level !== "stale") return null;
+  const u = t.utility || {};
+  const name = UTILITY_SHORT[u.id || t.id] || u.name || t.id || "utility";
+  const d = new Date(t.meta.as_of + "T00:00:00Z");
+  const when = MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + d.getUTCFullYear();
+  const head = "The " + name + " rate book in this tool was last checked on " + when + ", ";
+  return f.level === "aging"
+    ? head + f.months + " months ago. Rates may have moved since; the Assumptions tab has the dates."
+    : head + "over a year ago. Rates have almost certainly changed; treat the dollar figures as approximate.";
+}
+
 /* --------------------------------------------------------------------- default */
 
 const Tariff = {
@@ -909,7 +943,7 @@ const Tariff = {
   exportRateAt, exportMatrix, accPlusAdder,
   fixedChargePerDay, minimumChargePerDay, climateCredit,
   netSurplusRate, nonBypassablePerKwh,
-  validate, fromBill, describe,
+  validate, fromBill, describe, freshness, freshnessNotice,
   holidaysForYear, isWeekendOrHoliday, partsOf,
 };
 export default Tariff;

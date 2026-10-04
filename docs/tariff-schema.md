@@ -81,7 +81,7 @@ hour) combination to prove it.
 
 | field | type | required | notes |
 |---|---|---|---|
-| `as_of` | `YYYY-MM-DD` | yes | When the file was researched. |
+| `as_of` | `YYYY-MM-DD` | yes | The day someone last checked this file against the utility's published rates (not the effective date). The app and CI read it for freshness: under 180 days is fresh, 180 to 365 days is aging (a notice in the app and a CI warning), over 365 days is stale (a firmer notice, and `npm run check:fresh` fails). Re-check the rates and bump `as_of` to clear it. |
 | `rates_effective` | `YYYY-MM-DD` | **yes (error)** | The effective date printed on the rate source. Not the research date. |
 | `sources[]` | array | **yes (error)** | `{ title, url, used_for }`. `url` is required; `used_for` must say which numbers came from it. `local:` URLs are allowed for a customer bill. |
 | `confidence` | object | yes (warning) | Per-section `high` / `medium` / `low`, either as a bare string or `{ level, note }`. Section keys are free-form but should at minimum cover `rates`, `schedules`, `baseline`, `fixed_charge`, `export_rates`, `providers`. |

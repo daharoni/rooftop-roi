@@ -9,6 +9,7 @@
 import { el, clear, $ } from "../ui/dom.js";
 import { card } from "../ui/blocks.js";
 import { fmtNum, fmtPct } from "../ui/format.js";
+import { freshness, freshnessNotice } from "../../core/tariff.js";
 
 export const id = "assumptions";
 export const label = "Assumptions";
@@ -186,6 +187,12 @@ function firstSolarModel(state) {
   return p && p.model;
 }
 
+function compiledText(meta) {
+  if (!meta.as_of) return "—";
+  const f = freshness(meta);
+  return f.months === null ? meta.as_of : `${meta.as_of} (${f.months} months ago)`;
+}
+
 function renderRates(state, ctx) {
   const table = clear($("t-rates"));
   const t = ctx.tariff;
@@ -201,7 +208,7 @@ function renderRates(state, ctx) {
     ["Rates effective", t.meta.rates_effective || "—", conf.rates],
     ["Rate schedules", "hours and seasons per plan", conf.schedules],
     ["Generation providers", `${Object.keys(t.providers || {}).length} priced`, conf.providers],
-    ["File compiled", t.meta.as_of || "—", null],
+    ["File compiled", compiledText(t.meta), null],
     ["Export rate vintage", (t.nbt && t.nbt.vintage) || "—", conf.nbt || conf.export_rates],
     ["Export lock-in", t.nbt && t.nbt.lock_in_years ? `${t.nbt.lock_in_years} years from permission to operate` : "—", null],
     ["Net surplus compensation", t.nbt ? `$${fmtNum(t.nbt.net_surplus_compensation_per_kwh, 5)}/kWh` : "—", conf.nbt || conf.export_rates],
@@ -216,6 +223,10 @@ function renderRates(state, ctx) {
     el("td.n", { text: String(value) }),
     el("td", {}, confidenceCell(confidence)),
   ]))));
+  const old = $("rates-fresh");
+  if (old) old.remove();
+  const notice = freshnessNotice(t);
+  if (notice) table.parentNode.parentNode.appendChild(el("p.ctl-warn", { id: "rates-fresh", text: notice }));
 }
 
 // Shorten a note to its first two sentences; the full text sits behind "more".

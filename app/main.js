@@ -26,7 +26,7 @@
 import * as State from "./state.js";
 import { $, el, clear, readTokens, toast } from "./ui/dom.js";
 import { ControlRail, defaultReason } from "./ui/controls.js";
-import { renderLanding, landingError, landingNotice, userMessageOf } from "./ui/landing.js";
+import { renderLanding, landingError, landingNotice, landingLocation, userMessageOf } from "./ui/landing.js";
 import { futureTitle } from "./ui/knobs.js";
 import { summaryText, copyToClipboard } from "./ui/summary.js";
 import { destroyAll } from "./charts/base.js";
@@ -306,8 +306,14 @@ function existingModeOf(s) {
   const nem = ex.nem === "nem2" || ex.nem === "nem1" ? ex.nem : null;
   if (!nem || !Number.isFinite(kwDc) || kwDc <= 0 || !(s.roof.planes || []).length) return null;
   const planeId = s.roof.planes.some((p) => p.id === ex.planeId) ? ex.planeId : s.roof.planes[0].id;
-  return { kwDc, nem, planeId };
+  // NEM 1 and NEM 2 run 20 years from the array's permission to operate; after that the
+  // same panels are billed under Net Billing.  `since` unknown (null) means "never switches".
+  const since = Number.isInteger(ex.since) ? ex.since : null;
+  const legacyYears = since === null ? null : Math.max(0, since + NEM_TERM_YEARS - new Date().getFullYear());
+  const termEndsYear = since === null ? null : since + NEM_TERM_YEARS;
+  return { kwDc, nem, planeId, since, legacyYears, termEndsYear };
 }
+const NEM_TERM_YEARS = 20;
 
 /** The existing array as a count of the panel size the engine models. */
 const existingPanelsOf = (xm, panelW) => Math.max(1, Math.round(xm.kwDc * 1000 / panelW));
@@ -315,7 +321,7 @@ const existingPanelsOf = (xm, panelW) => Math.max(1, Math.round(xm.kwDc * 1000 /
 function simParams() {
   const s = State.get();
   const xm = existingModeOf(s);
-  ctx.existingMode = xm ? { kwDc: xm.kwDc, nem: xm.nem } : null;
+  ctx.existingMode = xm ? { kwDc: xm.kwDc, nem: xm.nem, since: xm.since, legacyYears: xm.legacyYears, termEndsYear: xm.termEndsYear } : null;
   return {
     // Existing solar: the engine bills on the legacy agreement and rebuilds usage from
     // import - export + the existing panels' output; the worker sweeps batteries only.
@@ -436,11 +442,17 @@ function finEff(roofCostAdder = 0) {
   // made of, so the two agree exactly); no roof-face adder for panels already up, and no
   // NGOM, which is a Net Billing meter.
   const xm = existingModeOf(s);
+  // Kept current here too: a change to the switch-on year is finance-only, so simParams
+  // (which also sets it) does not run, and the term copy would read a stale year.
+  ctx.existingMode = xm ? { kwDc: xm.kwDc, nem: xm.nem, since: xm.since, legacyYears: xm.legacyYears, termEndsYear: xm.termEndsYear } : null;
   const existingKwDc = xm ? existingPanelsOf(xm, s.system.panelW) * s.system.panelW / 1000 : 0;
   return Object.assign({}, s.fin, {
     adder: s.fin.adder + (s.system.ngom && !xm ? ngomCost : 0),
     roofCostAdder: !xm && Number.isFinite(roofCostAdder) && roofCostAdder > 0 ? roofCostAdder : 0,
     existingKwDc,
+    // Years of the horizon still on the legacy agreement; finance switches to the cell's
+    // Net Billing figures (`sim.after`) after them.  null: no switch modelled.
+    legacyYears: xm ? xm.legacyYears : null,
   });
 }
 
@@ -569,6 +581,7 @@ function repriceAndRender() {
       exportRevenue: ctx.selected.exportRevenue, accPlusRevenue: ctx.selected.accPlusRevenue, bill: ctx.selected.bill,
       baselineBill: ctx.baselineBill, pvKwh: ctx.selected.pvKwh,
       kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal, batteries: ctx.selected.batteries,
+      after: ctx.selected.after || null,
     };
     ctx.breakEvenPerW = Core.finance.breakEven(sim, finSel, "costPerW");
     ctx.breakEvenPerKwh = Core.finance.breakEven(sim, finSel, "costPerKwh");
@@ -612,6 +625,7 @@ function afterDetail() {
         accPlusRevenue: w.accPlusRevenue, bill: w.bill, baselineBill: w.baselineBill,
         pvKwh: w.pvKwh, kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal,
         batteries: ctx.selected.batteries,
+        after: w.after || null,
       }, finSel);
       return { key: w.key, label: w.label, npv: f.npv, savings: f.firstYearSavings,
                pv: w.pvKwh, perKw: ctx.selected.kwdc ? w.pvKwh / ctx.selected.kwdc : null };
@@ -964,6 +978,8 @@ function onControlSet(path, value, spec) {
       }
     }
   }, reason);
+  // The existing-array banner names the array, the agreement and its term.
+  if (path.startsWith("existing.") && inApp) renderBanner();
 }
 
 /**
@@ -1536,8 +1552,19 @@ const EXISTING_FORM_NOTICE = "Tell us about the solar you already have. The pane
 function existingModeBanner(xm) {
   const kw = Math.round(xm.kwDc * 10) / 10;
   const plan = xm.nem === "nem1" ? "NEM 1" : "NEM 2";
+  const horizon = Number(State.get().fin.horizon) || 25;
+  let term;
+  if (xm.legacyYears === null) {
+    term = ` Enter the year it was switched on (Your existing solar, in the settings) to model the end of its ${NEM_TERM_YEARS}-year term.`;
+  } else if (xm.legacyYears === 0) {
+    term = ` That agreement ended in ${xm.termEndsYear}, so everything here is priced under Net Billing.`;
+  } else if (xm.legacyYears < horizon) {
+    term = ` ${plan} runs to ${xm.termEndsYear}; from year ${xm.legacyYears + 1} the battery is valued under Net Billing.`;
+  } else {
+    term = ` ${plan} runs to ${xm.termEndsYear}, past the end of this plan.`;
+  }
   return `Your ${kw} kW array stays on ${plan}; only the battery is new. Adding more than 1 kW or 10% of panels `
-    + "would move the whole system to Net Billing, which this mode does not model.";
+    + "would move the whole system to Net Billing, which this mode does not model." + term;
 }
 
 /** Landing: the two-question form for an existing array, then on into the app. */
@@ -1549,11 +1576,11 @@ function showExistingForm() {
   host.appendChild(slot);
   const prior = State.get().existing || {};
   const form = renderExistingForm(slot, {
-    initial: { kwDc: Number(prior.kwDc) || null, nem: prior.nem },
-    onSubmit: ({ kwDc, nem }) => {
+    initial: { kwDc: Number(prior.kwDc) || null, nem: prior.nem, since: Number.isInteger(prior.since) ? prior.since : null },
+    onSubmit: ({ kwDc, nem, since }) => {
       State.update((st) => {
         const planeId = (st.roof.planes[0] || {}).id || null;
-        st.existing = { kwDc, planeId, nem };
+        st.existing = { kwDc, planeId, nem, since: Number.isInteger(since) ? since : null };
         st.ui.existingSolarAck = true;
       }, "silent");
       landingNotice(null);
@@ -1563,6 +1590,8 @@ function showExistingForm() {
   });
   form.focus();
 }
+const LINK_ON_LANDING = "The settings from that link are loaded. They will apply as soon as you add your meter "
+  + "file or your bills, or try the demo household.";
 const EXISTING_SOLAR_BANNER = "This meter already exports power (NEM 1 or 2). You chose to continue, so import "
   + "is treated as your full usage and your existing panels are ignored. These results are not your real bill.";
 
@@ -1879,8 +1908,16 @@ async function applyLocation(hit) {
     if (elevation !== null) s.site.elevationM = elevation;
     s.site.addressLabel = hit.label || null;      // memory only; never persisted
   }, "silent");
-  toast(`Location set to ${hit.label || `${hit.lat.toFixed(3)}, ${hit.lon.toFixed(3)}`}.`);
+  const where = hit.label || `${hit.lat.toFixed(3)}, ${hit.lon.toFixed(3)}`;
+  toast(`Location set to ${where}.`);
+  // The landing's own confirmation line: a toast at the bottom of a tall page is easy to miss.
+  if (typeof landingLocation === "function") {
+    landingLocation(`Location set to ${where}. The sunlight for this spot is fetched once you add your data.`);
+  }
   if (ctx.loadSet) {
+    // The existing-solar form is open on the landing: a location change must not replace
+    // it with the two-choice notice and lose what was typed.  It resumes on submit.
+    if (!inApp && $("existing-kw")) return;
     if (!inApp) { await proceedIfClear(); return; }
     // A new utility is a new rate book, so the worker is re-initialised.
     if (worker || bootGen) await bootWorker();
@@ -1915,6 +1952,9 @@ function backToLanding(message) {
  * The persistent strip above the workbench: a block reason, the existing-solar
  * warning once acknowledged, or a question from ask().
  */
+/** Which rate book a dismissal applied to, so a switch of utility brings the notice back. */
+const tariffKey = (t) => (t && t.utility && t.utility.id) || (t && t.meta && t.meta.as_of) || "?";
+
 function renderBanner(question) {
   // Redrawing without the open question removes its buttons, so it is superseded.
   if (!question) supersedeQuestion();
@@ -1939,6 +1979,13 @@ function renderBanner(question) {
     items.push({ tone: "warn", text: existingModeBanner(xm) });
   } else if (ctx.loadSet && State.get().ui.existingSolarAck && hasExistingSolar(ctx.loadSet)) {
     items.push({ tone: "bad", text: EXISTING_SOLAR_BANNER });
+  }
+  // A rate book that has not been checked for months: say so once per utility, dismissable.
+  const fresh = Core.tariff && typeof Core.tariff.freshnessNotice === "function" && ctx.tariff
+    ? Core.tariff.freshnessNotice(ctx.tariff) : null;
+  if (fresh && ctx.freshnessDismissed !== tariffKey(ctx.tariff)) {
+    items.push({ tone: "warn", text: fresh,
+      actions: [{ label: "Dismiss", onClick: () => { ctx.freshnessDismissed = tariffKey(ctx.tariff); renderBanner(); } }] });
   }
   node.hidden = !items.length;
   for (const it of items) {
@@ -2063,6 +2110,15 @@ function bindShell() {
       next.ui.tab = normalizeTab(next.ui.tab);
       State.replace(next, "load");
       if (report.damaged) toast(DAMAGED_LINK);
+      if (!inApp) {
+        // Pasted while the landing is up: the settings are in, but there is nothing to
+        // show them on until the person adds data. Say so instead of doing nothing.
+        if (ctx.loadSet) { proceedIfClear(); return; }
+        if (!report.damaged && location.hash.replace(/^#/, "")) {
+          landingNotice({ tone: "info", text: LINK_ON_LANDING });
+        }
+        return;
+      }
       if (ctx.loadSet && inApp) {
         if (mountedTab && typeof mountedTab.unmount === "function") mountedTab.unmount();
         mountedTab = null;

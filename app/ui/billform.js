@@ -23,6 +23,8 @@ const roundKwh = (v) => Math.round(v * 10) / 10;
 /**
  * renderBillForm(host, { onSubmit(spec), onBack, onSplit(annual) -> number[12], seasonalSplit })
  * spec = { monthlyKwh: number[12], zip, ev, pool }.
+ * options.initial has the same shape (entries may be null for blank) and prefills the form;
+ * onBack(partial) receives what is typed so far in that shape.
  * `seasonalSplit` (the integrator's shaped split) wins over `onSplit`; with neither,
  * the annual total is divided evenly.
  */
@@ -79,6 +81,14 @@ export function renderBillForm(host, options = {}) {
     return { monthlyKwh: kwh, zip: z, ev: ev.checked, pool: pool.checked };
   }
 
+  // What is typed right now, valid or not, so Back can hand it to the next open.
+  function snapshot() {
+    return {
+      monthlyKwh: cells.map((c) => { const t = c.value.trim(); return t === "" ? null : (Number.isFinite(parseKwh(t)) ? parseKwh(t) : null); }),
+      zip: zip.value.trim(), ev: ev.checked, pool: pool.checked,
+    };
+  }
+
   function submit() {
     const spec = collect();
     if (spec && onSubmit) onSubmit(spec);
@@ -91,6 +101,16 @@ export function renderBillForm(host, options = {}) {
   yearly.addEventListener("keydown", enter(applyYearly));
   // Clear a stale error as soon as the person starts correcting it.
   for (const n of [...cells, zip]) n.addEventListener("input", () => { if (!error.hidden) ok(); });
+
+  const init = options.initial;
+  if (init) {
+    if (Array.isArray(init.monthlyKwh)) init.monthlyKwh.slice(0, 12).forEach((v, i) => {
+      cells[i].value = v === null || v === undefined || v === "" ? "" : String(roundKwh(Number(v)));
+    });
+    if (init.zip) zip.value = String(init.zip);
+    ev.checked = !!init.ev;
+    pool.checked = !!init.pool;
+  }
 
   clear(host);
   host.appendChild(el("div.billform", {}, [
@@ -133,11 +153,11 @@ export function renderBillForm(host, options = {}) {
 
     el("div.bill-actions", {}, [
       el("button.btn.btn-primary.btn-lg", { type: "button", text: "Build my year", on: { click: submit } }),
-      el("button.btn-link", { type: "button", text: "Back", on: { click: () => { if (onBack) onBack(); } } }),
+      el("button.btn-link", { type: "button", text: "Back", on: { click: () => { if (onBack) onBack(snapshot()); } } }),
     ]),
   ]));
 
-  return { focus: () => cells[0].focus(), collect };
+  return { focus: () => cells[0].focus(), collect, snapshot };
 }
 
 export default { renderBillForm };

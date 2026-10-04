@@ -548,13 +548,11 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
   .hero-num { font-size: 38px; }
   .calls li { grid-template-columns: minmax(0, 1fr); gap: 1px; }
   .topbar { flex-wrap: wrap; padding: 8px 14px; }
-  /* Four actions in one sideways-scrolling row rather than two stacked rows above the answer. */
+  /* Four actions wrap onto their own row so every one is visible without scrolling. */
   .topbar-right {
-    margin-left: 0; width: 100%; flex-wrap: nowrap; justify-content: flex-start;
-    overflow-x: auto; scrollbar-width: none; gap: 6px;
+    margin-left: 0; width: 100%; flex-wrap: wrap; justify-content: flex-start; gap: 6px;
   }
-  .topbar-right::-webkit-scrollbar { display: none; }
-  .topbar-right .btn { flex: none; padding: 5px 9px; }
+  .topbar-right .btn { flex: 0 1 auto; padding: 5px 9px; white-space: nowrap; }
   .tabs { padding: 0 6px; }
   .tabs button { padding: 9px 10px 8px; }
 }
@@ -619,3 +617,6 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
 .existing-form select { max-width: 100%; }
 .existing-form .ctl-note { margin: 4px 0 0; }
 .existing-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Informational landing notice (a pasted link while the landing is up). */
+.banner-info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }

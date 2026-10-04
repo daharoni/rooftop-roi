@@ -184,6 +184,26 @@ export function searchGrid(ctx, params, opts) {
 /** No new panels and no battery.  With an existing array, `panels` counts it, so `newPanels` decides. */
 const isDoNothing = (c) => (c.newPanels !== undefined && c.newPanels !== null ? c.newPanels : c.panels) === 0 && c.batteries === 0;
 
+/**
+ * The Net Billing stream of an existing-array cell (worker existingGrid's `cell.after`)
+ * on the chosen basis, in the shape Finance.evaluate reads as `sim.after`; null when
+ * the cell has none.
+ */
+function afterFor(c, grid, asRec) {
+  const a = c.after;
+  if (!a) return null;
+  const savings = asRec ? a.savingsVsAsRecorded : a.savingsVsSameFlex;
+  // The battery's export increment over the no-battery baseline on this basis (the
+  // existing array already exports without it), falling back to the total for old cells.
+  const perBasis = asRec ? a.exportRevenueVsAsRecorded : a.exportRevenueVsSameFlex;
+  const exportRevenue = perBasis !== undefined ? perBasis : (a.exportRevenue || 0);
+  let importSavings = asRec ? a.importSavingsVsAsRecorded : a.importSavingsVsSameFlex;
+  if (importSavings === undefined) importSavings = savings - exportRevenue;
+  const base = asRec ? grid.afterBaselineAsRecorded : grid.afterBaselineSameFlex;
+  return { savings, importSavings, exportRevenue, accPlusRevenue: a.accPlusRevenue || 0,
+           bill: a.bill, baselineBill: base ? base.bill : undefined };
+}
+
 export function priceGrid(grid, finance, objective, basis) {
   // Tolerate priceGrid(grid, fin, basis) as the architecture doc writes it.
   if (basis === undefined && (objective === "sameFlex" || objective === "asRecorded")) {
@@ -203,11 +223,14 @@ export function priceGrid(grid, finance, objective, basis) {
     const accPlusRev = c.accPlusRevenue || 0;
     let importSav = asRec ? c.importSavingsVsAsRecorded : c.importSavingsVsSameFlex;
     if (importSav === undefined) importSav = savings - exportRev;
-    const fin = Finance.evaluate({
+    const after = afterFor(c, grid, asRec);
+    const sim = {
       savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, baselineBill: baseline.bill,
       pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal, batteries: c.batteries,
-    }, finance);
+    };
+    if (after) sim.after = after;
+    const fin = Finance.evaluate(sim, finance);
     return {
       panels: c.panels, panelsByPlane: c.panelsByPlane, planeIds: c.planeIds,
       batteries: c.batteries, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
@@ -225,6 +248,7 @@ export function priceGrid(grid, finance, objective, basis) {
       firstYearMonthlyOutlay: fin.firstYearMonthlyOutlay,
       currentMonthlyBill: fin.currentMonthlyBill,
       financingMode: fin.financingMode, monthlyPayment: fin.monthlyPayment,
+      after, regimeChangeYear: fin.regimeChangeYear,
       finance: fin,
     };
   });
@@ -257,6 +281,9 @@ export function tornado(cell, finance, baselineBill, flexVariants) {
     accPlusRevenue: o.accPlusRevenue === undefined ? cell.accPlusRevenue : o.accPlusRevenue,
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
     pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
+    // The Net Billing stream after a legacy term ends rides along unchanged (the
+    // flex variants are simulated on the legacy regime only).
+    after: cell.after,
   });
   const sim = simOf(cell);
   const base = Finance.evaluate(sim, finance).npv;

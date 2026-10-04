@@ -74,11 +74,9 @@ escalates with retail in `core/finance.js`. The export dollars are still reporte
   more than 1 kW, moves the whole system to Net Billing. This mode adds no panels at all, so
   the rule is never crossed; a household weighing more panels plus a battery should run the
   ordinary mode, which models the whole system under Net Billing.
-- **The end of the legacy term.** A NEM 2 agreement lasts 20 years from the array's
-  permission to operate, after which the system moves to the tariff of the day (today, Net
-  Billing). The 25-year finance horizon keeps NEM billing throughout. For an array that is
-  already several years old that overstates the later years; a shorter finance horizon is the
-  simple way to see how much it matters.
+- **The end of the legacy term** is modelled; see "When the term ends" below. What is not:
+  the tariff of the day after the term is assumed to be today's Net Billing Tariff, priced on
+  today's export matrix, with no ACC Plus adder.
 - **CCA variants.** A Community Choice Aggregator runs its own NEM programme for the
   generation share of the bill: some credit generation at a premium, some cash out annually
   at a different rate, some on a different settlement month. The engine credits the bundled
@@ -104,3 +102,64 @@ escalates with retail in `core/finance.js`. The export dollars are still reporte
 - The baseline allowance is set against net kWh (import minus export) under NEM, as the energy
   charge is computed on net usage; under Net Billing every imported kWh is billed.
 - NEM 1 credit includes the non-bypassable charges, so it can offset them; NEM 2 cannot.
+
+## When the term ends
+
+NEM 1 and NEM 2 last 20 years from the array's permission to operate. After that the same
+panels are billed under the Net Billing Tariff, where a battery is usually worth more: exports
+earn the low ACC export price, so every kWh kept in the house instead is worth the import price.
+
+**In the app.** The existing-solar form asks a third question, the year the array was switched
+on (prefilled 2019 for NEM 2, 2013 for NEM 1; stored as `existing.since`, link key `xyr`). The
+rail group "Your existing solar" (Dashboard, shown only when an existing array is set) lets the
+person change size, plan and year afterwards. The app banner names the agreement, the year it
+ends and the plan year the switch lands in; the dashboard's why-line says whether the battery
+earns more, less or about the same under Net Billing, with the two first-year figures. If the
+year is blank, the model assumes the agreement never ends and both lines say how to model it.
+On the demo household, a 5 kW existing array on NEM 2 since 2016 (ten years left in 2026) moves
+one battery's NPV by about +$2.5k against never switching, and two batteries' by about +$2.9k.
+
+**Inputs.** `finance.legacyYears = max(0, since + 20 − current year)`, where `since` is the year
+the array was switched on (`state.existing.since`, link key `xyr`). Years `1..legacyYears` of the
+horizon are billed on the legacy agreement, later years on Net Billing. `null` (year unknown)
+means it never switches, the old behaviour; `0` means the term has already ended and the whole
+horizon is Net Billing.
+
+**Worker.** With `params.existing` set and billing `"nem2"` / `"nem1"`, `grid` runs each battery
+cell twice: once as before and once with `{ billing: "nbt", accPlusAdder: 0 }` (a legacy array
+rolling over does not get the ACC Plus adder, which is for new 2023 to 2027 interconnections),
+against Net Billing baselines built once. The pack keeps its NEM-era setup in that run: no grid
+charging and no export arbitrage (it was installed non-exporting and solar-charged, and the
+rollover does not change the hardware). Each cell carries
+
+    cell.after = { savingsVsSameFlex, savingsVsAsRecorded, importSavingsVsSameFlex,
+                   importSavingsVsAsRecorded, exportRevenueVsSameFlex, exportRevenueVsAsRecorded,
+                   exportRevenue (= VsSameFlex), accPlusRevenue, bill, pvKwh, importKwh, exportKwh }
+
+Under Net Billing the array already exports in the no-battery baseline, so the battery's export
+revenue is the *increment* over that baseline (usually negative, the pack keeps midday surplus
+at home) and the import saving is the rest of the bill saving. The engine's usual split
+(saving minus total export revenue) is only right for a baseline with no panels, and would
+understate the escalating import share here. The grid carries `afterBaselineSameFlex: { bill }` and `afterBaselineAsRecorded: { bill }`.
+Progress counts both runs. `detail` adds `after = { savings, savingsAsRecorded, importSavings,
+importSavingsAsRecorded, exportRevenue, accPlusRevenue, bill, baselineBill,
+baselineBillAsRecorded }` to the result and to every `weather[i]` row. A new-system (Net
+Billing) run carries no `after`.
+
+**Optimizer.** `priceGrid` turns `cell.after` into the finance stream for the chosen basis,
+`{ savings, importSavings, exportRevenue, accPlusRevenue, bill, baselineBill }`, and the
+priced cell carries `after` and `regimeChangeYear`. `tornado` re-prices with the same `after`.
+
+**Finance.** `evaluate(sim, f)` reads `sim.after`. For every year `y > legacyYears` the import
+saving, export revenue and ACC Plus share come from `after`, escalated and degraded exactly as
+the legacy stream would have been in that year (`escalation^(y−1)`, export escalation, the
+panel/pack blend). The lifetime-cost bill series uses `after.baselineBill` from the switch on,
+for both the with-system and the no-system arm: the household without a battery rolls over
+too. `firstYearSavings` and the monthly-outlay figures use whichever regime year 1 is on.
+Results add `regimeChangeYear` (`legacyYears + 1` when the switch falls inside the horizon,
+else `null`) and `legacyYears` (as used, or `null` when nothing switches). With no `after`, or
+`legacyYears` null, every number is unchanged (tested).
+
+**Simplification.** The Net Billing stream is simulated once on today's load and today's
+export matrix and scaled like the legacy one. The real export matrix in the switch year is
+not known, and the household's load in year 10 will not be today's.

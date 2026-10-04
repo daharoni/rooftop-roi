@@ -40,6 +40,16 @@
  * panel axis at the existing array (every panel on the existing plane) and sweeps the
  * battery count only: the cells keep searchGrid's shape, with a one-entry panelList.
  *
+ * Existing array on NEM 1 / NEM 2 (params.existing set, billing not "nbt"): every grid
+ * cell also runs under Net Billing with accPlusAdder 0 and carries it as `cell.after`
+ * { savingsVsSameFlex, savingsVsAsRecorded, importSavingsVsSameFlex,
+ *   importSavingsVsAsRecorded, exportRevenue, accPlusRevenue, bill, pvKwh, importKwh,
+ *   exportKwh }; the grid gains afterBaselineSameFlex / afterBaselineAsRecorded
+ * ({ bill }) and progress counts both runs.  "detail" adds `after` { savings,
+ * savingsAsRecorded, importSavings, importSavingsAsRecorded, exportRevenue,
+ * accPlusRevenue, bill, baselineBill, baselineBillAsRecorded } to the result and to each
+ * weather row.  Finance switches to it after f.legacyYears (docs/nem2.md).
+ *
  * `params.planes` may omit `profile`: the worker fills it from the cached SolarProfiles
  * for that plane at `params.weatherKey`, which is why init carries the solar bundle.
  * ========================================================================== */
@@ -99,6 +109,42 @@
     return { label: "Flexible load kWh/yr", low: mk(0.8), high: mk(1.2) };
   }
 
+  /**
+   * The params an existing array is billed on once its NEM 1 / NEM 2 term has ended:
+   * Net Billing with the same panels, and no ACC Plus adder (that adder is for new
+   * 2023-2027 interconnections, not a legacy array rolling over).
+   */
+  function nbtVariant(p) {
+    // The pack was installed for a NEM array: non-exporting and solar-charged only.  It
+    // stays that way after the rollover (same hardware, same interconnection), so no
+    // grid charging and no export arbitrage in the Net Billing years either.
+    return Object.assign({}, p, { billing: "nbt", accPlusAdder: 0, gridCharge: false,
+      strategy: p.strategy === "export_arbitrage" ? "tou_arbitrage" : p.strategy });
+  }
+
+  /**
+   * The battery's export and import split under Net Billing.  The existing array already
+   * exports in the no-battery baseline, so the battery's export revenue is the INCREMENT
+   * over that baseline (usually negative: the pack keeps midday surplus at home), and the
+   * import saving is the rest of the bill saving.  attachSavings' split (savings minus
+   * total export revenue) is only right for a baseline with no panels.
+   */
+  function splitVs(r, baseline) {
+    var x = r.exportRevenue - baseline.exportRevenue;
+    var a = (r.accPlusRevenue || 0) - (baseline.accPlusRevenue || 0);
+    return { exportRevenue: x, accPlusRevenue: a, importSavings: baseline.bill - r.bill - x };
+  }
+
+  /** The NBT run of a detail/weather simulation, in the shape finance reads as `sim.after`. */
+  function afterOf(r) {
+    var vS = splitVs(r, r.baselineSameFlex), vA = splitVs(r, r.baselineAsRecorded);
+    return { savings: r.savingsVsSameFlex, savingsAsRecorded: r.savingsVsAsRecorded,
+             importSavings: vS.importSavings, importSavingsAsRecorded: vA.importSavings,
+             exportRevenue: vS.exportRevenue, exportRevenueAsRecorded: vA.exportRevenue,
+             accPlusRevenue: vS.accPlusRevenue, bill: r.bill,
+             baselineBill: r.baselineSameFlex.bill, baselineBillAsRecorded: r.baselineAsRecorded.bill };
+  }
+
   var MAX_EXISTING_BATTERIES = 20;   // optimizer.MAX_SEARCH_BATTERIES
 
   /**
@@ -118,11 +164,32 @@
     if (maxB > MAX_EXISTING_BATTERIES) maxB = MAX_EXISTING_BATTERIES;
     var battList = [], cells = [];
     for (var nb = 0; nb <= maxB; nb++) battList.push(nb);
+    // The same cells once more under Net Billing, for the years after the legacy term
+    // ends (docs/nem2.md, "When the term ends"): same panels, no ACC Plus adder.
+    // Only for a legacy agreement: an existing array already on Net Billing has no term.
+    var legacy = p.billing !== "nbt";
+    var pNbt = legacy ? nbtVariant(p) : null;
+    var bN = legacy ? E.baselines(ctx, pNbt, false) : null;
+    var per = legacy ? 2 : 1, total = per * battList.length;
     for (var i = 0; i < battList.length; i++) {
-      var res = E.runHours(scn, Object.assign({}, p, { panelsByPlane: alloc.slice(), batteries: battList[i] }), false);
+      var q = { panelsByPlane: alloc.slice(), batteries: battList[i] };
+      var res = E.runHours(scn, Object.assign({}, p, q), false);
       E.attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
+      if (legacy) {
+        post({ type: "progress", id: m.id, done: 2 * i + 1, total: total });
+        var rN = E.runHours(bN.scnSame, Object.assign({}, pNbt, q), false);
+        E.attachSavings(rN, bN.sameFlex.bill, bN.asRecorded.bill);
+        var vS = splitVs(rN, bN.sameFlex), vA = splitVs(rN, bN.asRecorded);
+        res.after = {
+          savingsVsSameFlex: rN.savingsVsSameFlex, savingsVsAsRecorded: rN.savingsVsAsRecorded,
+          importSavingsVsSameFlex: vS.importSavings, importSavingsVsAsRecorded: vA.importSavings,
+          exportRevenueVsSameFlex: vS.exportRevenue, exportRevenueVsAsRecorded: vA.exportRevenue,
+          exportRevenue: vS.exportRevenue, accPlusRevenue: vS.accPlusRevenue, bill: rN.bill,
+          pvKwh: rN.pvKwh, importKwh: rN.importKwh, exportKwh: rN.exportKwh,
+        };
+      }
       cells.push(res);
-      post({ type: "progress", id: m.id, done: i + 1, total: battList.length });
+      post({ type: "progress", id: m.id, done: per * (i + 1), total: total });
     }
     var order = [];
     for (var n = 0; n < xs.panels; n++) order.push(xs.planeIndex);
@@ -131,6 +198,8 @@
       planes: scn.planes.map(function (pl, k) { return { id: pl.id, name: pl.name, cap: k === xs.planeIndex ? xs.panels : 0 }; }),
       allocationOrder: order, greedyBatteries: 0,
       baselineSameFlex: b.sameFlex, baselineAsRecorded: b.asRecorded,
+      afterBaselineSameFlex: legacy ? { bill: bN.sameFlex.bill } : null,
+      afterBaselineAsRecorded: legacy ? { bill: bN.asRecorded.bill } : null,
       flexShiftOnlySavings: b.asRecorded.bill - b.sameFlex.bill,
       weatherKey: scn.weatherKey,
       years: ctx.years !== undefined ? ctx.years : ctx.nDays / 365, hours: ctx.N,
@@ -175,13 +244,19 @@
       res.providers = E.billOnAllProviders(ctx, params);
       res.schedule = scheduleStrip(params.planId);
       res.flexVariants = flexVariants(m.params, m.panelsByPlane, m.batteries);
+      // An existing array on NEM 1 / NEM 2: the same system under Net Billing, for the
+      // years after the legacy term ends.
+      var legacy = !!params.existing && params.billing !== "nbt";
+      if (legacy) res.after = afterOf(E.simulate(ctx, nbtVariant(params), {}));
       // One run per weather year, so the UI can show the production spread.
       res.weather = (m.weatherKeys || []).map(function (w) {
         var q = hydrate(Object.assign({}, params, { weatherKey: w.key, planes: (m.params.planes || []) }));
         var s = E.simulate(ctx, q, {});
-        return { key: w.key, label: w.label, group: w.group, pvKwh: s.pvKwh, bill: s.bill,
-                 savings: s.savingsVsSameFlex, importSavings: s.importSavingsVsSameFlex,
-                 exportRevenue: s.exportRevenue, accPlusRevenue: s.accPlusRevenue, baselineBill: s.baselineSameFlex.bill };
+        var row = { key: w.key, label: w.label, group: w.group, pvKwh: s.pvKwh, bill: s.bill,
+                    savings: s.savingsVsSameFlex, importSavings: s.importSavingsVsSameFlex,
+                    exportRevenue: s.exportRevenue, accPlusRevenue: s.accPlusRevenue, baselineBill: s.baselineSameFlex.bill };
+        if (legacy) row.after = afterOf(E.simulate(ctx, nbtVariant(q), {}));
+        return row;
       });
       // The hourly arrays are only meaningful to the charts that ask for them.
       if (!m.wantHourly) delete res.hourly;

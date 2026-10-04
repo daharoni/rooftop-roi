@@ -69,12 +69,14 @@ export class ControlRail {
     this.onSet = onSet;
     this.groups = [];
     this.widgets = [];
+    this._shown = [];
   }
 
   /** Rebuild the rail from a new group list (called on every tab change). */
   build(groups, state) {
     this.groups = groups || [];
     this.widgets = [];
+    this._shown = [];
     this.state = state;
     clear(this.root);
     const wide = typeof window === "undefined" || window.innerWidth > 1000;
@@ -85,17 +87,20 @@ export class ControlRail {
     for (const g of this.groups) {
       const body = el("div.group-body");
       for (const spec of g.items) body.appendChild(this._widget(spec, state));
-      const startOpen = g.open !== false && wide && !opened;
-      if (startOpen) opened = true;
+      // A pinned group starts open at any width and sits outside the accordion.
+      const startOpen = g.pinned ? true : g.open !== false && wide && !opened;
+      if (startOpen && !g.pinned) opened = true;
       const details = el("details.group", { open: startOpen }, [
         el("summary", { text: g.group }), body,
       ]);
+      if (g.pinned) details.dataset.pinned = "1";
       details.addEventListener("toggle", () => {
-        if (!details.open) return;
+        if (!details.open || g.pinned) return;
         for (const other of this.root.querySelectorAll("details.group[open]")) {
-          if (other !== details) other.open = false;
+          if (other !== details && !other.dataset.pinned) other.open = false;
         }
       });
+      if (g.show) this._shown.push({ g, details });
       this.root.appendChild(details);
     }
     this.refresh(state);
@@ -135,11 +140,31 @@ export class ControlRail {
       wrap.appendChild(w.control);
     } else if (spec.kind === "number" || spec.kind === "text" || spec.kind === "date") {
       wrap.appendChild(this._head(spec, id, "").row);
+      let timer = null;
+      const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+      const later = (v) => { cancel(); timer = setTimeout(() => { timer = null; emit(v); }, 350); };
       w.control = el("input", {
         type: spec.kind, id, min: spec.min, max: spec.max, step: spec.step,
         placeholder: spec.placeholder, value: value ?? "",
         on: {
+          // Commit while typing, but only a finished, in-range number: "2" in a
+          // field whose minimum is 100 is a number on its way, not an answer.
+          input: (e) => {
+            if (spec.kind !== "number") return;
+            const text = String(e.target.value).trim();
+            if (text === "") { cancel(); if (spec.nullable) later(null); return; }
+            const n = Number(text);
+            if (!Number.isFinite(n)) { cancel(); return; }
+            if ((spec.min !== undefined && n < spec.min) || (spec.max !== undefined && n > spec.max)) { cancel(); return; }
+            later(clampNumber(spec, text));
+          },
+          keydown: (e) => {
+            if (e.key !== "Enter" || spec.kind !== "number") return;
+            e.preventDefault();
+            e.target.dispatchEvent(new Event("change", { bubbles: true }));
+          },
           change: (e) => {
+            cancel();
             if (spec.kind !== "number") { emit(e.target.value); return; }
             const v = clampNumber(spec, e.target.value);
             const prev = getPath(this.state || state, spec.path);
@@ -200,6 +225,7 @@ export class ControlRail {
   /** Re-sync every widget's value, visibility, warning and footnote. */
   refresh(state) {
     this.state = state;
+    for (const { g, details } of this._shown) details.hidden = !g.show(state);
     for (const w of this.widgets) {
       const spec = w.spec;
       w.wrap.hidden = !!(spec.show && !spec.show(state));
