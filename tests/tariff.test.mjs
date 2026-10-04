@@ -82,8 +82,9 @@ test("holidays use the weekend schedule, including observed-on-Monday", () => {
   const h2027 = T.holidaysForYear(2027);
   assert.ok(h2027.has("2027-1-1"));
 
-  // 2028-01-01 is a Saturday -> observed Friday 2027-12-31 (a weekday).
+  // 2028-01-01 is a Saturday: a weekend day anyway, and NOT moved to Friday 2027-12-31.
   assert.ok(T.holidaysForYear(2028).has("2028-1-1"));
+  assert.equal(T.isWeekendOrHoliday("2027-12-31"), false, "no Saturday-to-Friday shift across the year end");
 
   // 2023-01-01 was a Sunday -> observed MONDAY 2023-01-02.  This is the case the
   // schema note is about: a Monday that must bill as a weekend.
@@ -91,10 +92,25 @@ test("holidays use the weekend schedule, including observed-on-Monday", () => {
   assert.ok(h2023.has("2023-1-2"), "New Year's observed Monday 2023-01-02");
   assert.equal(T.isWeekendOrHoliday("2023-01-02"), true);
 
-  // 2026-07-04 is a Saturday -> observed Friday 2026-07-03.
+  // 2026-07-04 is a Saturday.  The utilities' rule (SCE and SDG&E tariff text: "No
+  // change will be made for holidays falling on Saturday"; PG&E's 111 weekend/holiday
+  // days in 2026) does NOT move it to Friday 2026-07-03, which bills as a weekday.
   const h2026 = T.holidaysForYear(2026);
-  assert.ok(h2026.has("2026-7-3"), "Independence Day observed Friday 2026-07-03");
-  assert.equal(T.isWeekendOrHoliday("2026-07-03"), true);
+  assert.ok(h2026.has("2026-7-4"));
+  assert.ok(!h2026.has("2026-7-3"), "no Saturday-to-Friday observance");
+  assert.equal(T.isWeekendOrHoliday("2026-07-03"), false);
+  const p = T.defaultPlan(utilities.sce);
+  assert.equal(T.periodAt(p, "2026-07-03", 17).dayType, "weekday", "Friday 2026-07-03 is a weekday");
+  // Sunday 2022-12-25 -> Monday 2022-12-26 bills as a weekend.
+  assert.equal(T.isWeekendOrHoliday("2022-12-26"), true, "Christmas observed Monday 2022-12-26");
+
+  // 2026 counts 111 weekend + holiday days, as pge.json's export note says.
+  let n = 0;
+  for (let doy = 0; doy < 365; doy++) {
+    const d = new Date(Date.UTC(2026, 0, 1 + doy));
+    if (T.isWeekendOrHoliday({ y: 2026, m: d.getUTCMonth() + 1, d: d.getUTCDate() })) n++;
+  }
+  assert.equal(n, 111, "104 weekend days + 7 weekday holidays in 2026");
 
   // Floating holidays land on Mondays/Thursdays by construction.
   assert.ok(h2026.has("2026-5-25"), "Memorial Day 2026-05-25");
@@ -340,8 +356,10 @@ test("exportRateAt picks the right cell, and holidays read the weekend table", (
     // 2026-08-12 is a Wednesday; 2026-08-15 a Saturday.
     close(T.exportRateAt(t, "2026-08-12", 17), wd[7][17], 1e-12, id + " weekday cell");
     close(T.exportRateAt(t, "2026-08-15", 17), we[7][17], 1e-12, id + " weekend cell");
-    // 2026-07-03, the observed Independence Day, must read the WEEKEND table.
-    close(T.exportRateAt(t, "2026-07-03", 17), we[6][17], 1e-12, id + " observed-holiday cell");
+    // Wednesday 2026-11-11, Veterans Day, must read the WEEKEND table...
+    close(T.exportRateAt(t, "2026-11-11", 17), we[10][17], 1e-12, id + " weekday-holiday cell");
+    // ...and Friday 2026-07-03 the WEEKDAY one (Saturday holidays are not moved to Friday).
+    close(T.exportRateAt(t, "2026-07-03", 17), wd[6][17], 1e-12, id + " Friday before a Saturday holiday");
     // The adder is excluded from the matrix and added on request.
     const adder = T.accPlusAdder(t);
     close(T.exportRateAt(t, "2026-08-12", 17, { includeAdder: true }), wd[7][17] + adder, 1e-12,

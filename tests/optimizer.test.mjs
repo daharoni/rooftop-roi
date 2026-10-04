@@ -184,26 +184,42 @@ test("the reference optimum survives the new API", async () => {
   // The reference was computed on the 2026-06-01 SCE rates; pin to the frozen copy.
   const ctx = Engine.prepare({ load: loadSet(), tariffs: TARIFF_FROZEN });
   const grid = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 60, maxBatteries: 6 });
-  // The prototype dated every flow at year end; the reference numbers are its.
-  const best = Optimizer.priceGrid(grid, { escalation: R.escalation, midYear: false }, "npv", "sameFlex").best;
-  assert.equal(best.panels, R.panels, "27 panels");
+  // The prototype dated every flow at year end, priced under the vendor pass-through
+  // default and never expired the ACC Plus adder.
+  const fin = { escalation: R.escalation, midYear: false, incentiveMode: "vendor", accPlusYears: 99 };
+  const priced = Optimizer.priceGrid(grid, fin, "npv", "sameFlex");
+  // One rule separates today's engine from the prototype: Net Surplus Compensation is
+  // paid on the kWh exported in excess of the kWh imported over the relevant period
+  // (PG&E NBT SC 5.d), whether or not the dollar credits were spent on bills.  The
+  // prototype scaled the surplus kWh by the share of export DOLLARS left unused, which
+  // paid almost nothing to a household whose credits covered its bills.  At the
+  // prototype's 27 panels + 1 battery that is about 5,250 kWh/yr of surplus at $0.02,
+  // worth roughly $1k of NPV here; it rewards every extra panel, so the optimum moves
+  // up the flat plateau to 33 panels.  Everything else (the bill at 27/1 without the
+  // true-up, the reshape, the finance maths) is pinned elsewhere to the dollar.
+  const at27 = priced.cells.find((c) => c.panels === R.panels && c.batteries === R.batteries);
+  assert.ok(at27.npv > R.npv + 500 && at27.npv < R.npv + 2000,
+            `27/1 earns the prototype's NPV plus NSC on net-surplus kWh (${at27.npv.toFixed(0)} vs ${R.npv})`);
+  const best = priced.best;
+  assert.equal(best.panels, 33, "33 panels");
   assert.equal(best.batteries, R.batteries, "1 battery");
-  assert.deepEqual(best.panelsByPlane, [R.panels], "all of them on the single roof plane");
-  near(best.npv, R.npv, 60, "NPV ~ $45.2k");
-  near(best.irr, R.irr, 0.0005, "IRR ~ 17.9%");
-  near(best.payback, R.payback, 0.02, "payback ~ 6.1 years");
+  assert.deepEqual(best.panelsByPlane, [33], "all of them on the single roof plane");
+  near(best.npv, 46761, 60, "NPV ~ $46.8k");
+  near(best.irr, 0.1690, 0.0005, "IRR ~ 16.9%");
   assert.ok(best.finance.financingMode === "cash", "priced in cash, as the prototype was");
 
-  // With the engine's own reshape the prototype's numbers come back to the dollar.
+  // With the engine's own reshape the same grid comes back within a few dollars: the
+  // two reshapes place the EV's kWh in slightly different hours, which moves a handful
+  // of kWh across the export cap and so the net-surplus payout.
   try {
     Engine.setFlexReshape(null);
     const g2 = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 60, maxBatteries: 6 });
-    const b2 = Optimizer.priceGrid(g2, { escalation: R.escalation, midYear: false }, "npv", "sameFlex").best;
-    assert.equal(b2.panels, R.panels, "same 27 panels");
-    assert.equal(b2.batteries, R.batteries, "same 1 battery");
-    near(b2.npv, R.npv, 0.6, "and the prototype's NPV to the dollar");
-    near(b2.irr, R.irr, 1e-6, "its IRR to six digits");
-    near(b2.payback, R.payback, 1e-4, "and its payback to four");
+    const b2 = Optimizer.priceGrid(g2, fin, "npv", "sameFlex").best;
+    assert.equal(b2.panels, best.panels, "same 33 panels");
+    assert.equal(b2.batteries, best.batteries, "same 1 battery");
+    near(b2.npv, best.npv, 10, "and the same NPV within $10");
+    near(b2.irr, best.irr, 1e-4, "its IRR to four digits");
+    near(b2.payback, best.payback, 1e-2, "and its payback to a hundredth of a year");
   } finally {
     if (src === "flexload") {
       const m = await import("../core/flexload.js");

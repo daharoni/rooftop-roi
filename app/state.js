@@ -156,7 +156,7 @@ const SCALARS = [
   ["prov", "tariff.providerId", "str", { re: ID_RE, max: 48 }],
   ["tum", "fin.trueUpMonth", "num", { min: 1, max: 12, int: true }],
 
-  ["pw", "system.panelW", "num", { min: 100, max: 1000 }],
+  ["pw", "system.panelW", "num", { min: 350, max: 560 }],   // the knob's range (app/ui/knobs.js)
   ["acf", "system.acFactor", "num", { min: 0.5, max: 1 }],
   ["bkwh", "system.battKWh", "num", { min: 1, max: 100 }],
   ["bkw", "system.battKW", "num", { min: 0.5, max: 50 }],
@@ -397,9 +397,34 @@ function planeFromStored(p, i) {
   return plane;
 }
 
-/** A stored flexible load, or null when it is not an object at all. */
+/** The flexible-load kinds core/flexload.js knows how to reshape, and the schedule modes. */
+export const FLEX_KINDS = ["ev", "pool", "custom"];
+const FLEX_MODES = ["asRecorded", "spread"];
+
+/**
+ * Whether a stored or linked flexible load describes a real load at all.  Field
+ * coercion (below) repairs a bad number inside a sound entry; this refuses an
+ * entry with nothing sound to repair - an unknown kind, no positive finite
+ * annual kWh, or a schedule that is not a schedule - which would otherwise come
+ * back as a silent 0-kWh "custom" load (`fromStorage({ flex: [{}] })`).
+ */
+function isUsableFlex(kind, annualKwh, schedule) {
+  if (!FLEX_KINDS.includes(kind)) return false;
+  const kwh = typeof annualKwh === "string" && annualKwh.trim() !== "" ? Number(annualKwh) : annualKwh;
+  if (typeof kwh !== "number" || !Number.isFinite(kwh) || kwh <= 0) return false;
+  if (schedule === undefined) return true;          // the hash form: fields checked one by one
+  if (!isPlainObject(schedule)) return false;
+  if (schedule.mode !== undefined && !FLEX_MODES.includes(schedule.mode)) return false;
+  for (const k of ["window", "overnightWindow"]) {
+    if (schedule[k] !== undefined && !(Array.isArray(schedule[k]) && schedule[k].length === 2)) return false;
+  }
+  return true;
+}
+
+/** A stored flexible load, or null when it is not an object or not a usable load (see isUsableFlex). */
 function flexFromStored(f, i) {
   if (!isPlainObject(f)) return null;
+  if (!isUsableFlex(f.kind, f.annualKwh, f.schedule === undefined ? {} : f.schedule)) return null;
   const s = isPlainObject(f.schedule) ? f.schedule : {};
   const w = Array.isArray(s.window) ? s.window : [];
   const ow = Array.isArray(s.overnightWindow) ? s.overnightWindow : [];
@@ -561,7 +586,12 @@ export function fromHash(hash, base, report) {
     }
     if (key === "flex") {
       const toks = splitTokens(raw, report, key);
-      if (toks) state.flex = toks.map(flexFromFields);
+      if (!toks) continue;
+      // Same rule as storage: a token naming an unknown kind or no energy is dropped, not
+      // turned into a 0-kWh custom load.  (Mode and windows are coerced field by field.)
+      const ok = toks.filter((t) => isUsableFlex(t[1], t[2]));
+      if (ok.length < toks.length) flag(report, key);
+      if (ok.length || !toks.length) state.flex = ok.map(flexFromFields);   // nothing usable: keep base
       continue;
     }
     if (key === "ovp") {

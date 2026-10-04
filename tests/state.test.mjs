@@ -493,7 +493,7 @@ test("storage: a null plane does not crash toHash on every reload", () => {
   assert.deepEqual(s.roof.planes, []);
   assert.equal(rep.damaged, true);
   assert.doesNotThrow(() => toHash(s));
-  const t = fromStorage({ v: 1, planes: "nope", flex: [3, null, { kind: "ev" }] }, freshState(), {});
+  const t = fromStorage({ v: 1, planes: "nope", flex: [3, null, { kind: "ev", annualKwh: 2500 }] }, freshState(), {});
   assert.deepEqual(t.roof.planes, []);
   assert.equal(t.flex.length, 1);
   assert.equal(t.flex[0].kind, "ev");
@@ -507,8 +507,8 @@ test("storage: stored planes and loads go through the link's field coercion", ()
       costAdder: 1e12, polygon: [[34, -118], ["x", 1]], gutterEdge: [0, 9] },
       { id: "p2", name: "ok", tilt: 25, azimuth: 200, maxPanels: 12, shading: { annual: 0.1 }, costAdder: 0,
         polygon: [[34, -118], [34.1, -118], [34.1, -118.1]], gutterEdge: [0, 1] }],
-    flex: [{ id: "ev1", kind: "rocket", name: "Car", source: "detected", annualKwh: -5,
-      schedule: { mode: "teleport", daysPerWeek: 99, window: "8-15", maxKW: "fast", followSolar: false, hoursPerDay: 4 },
+    flex: [{ id: "ev1", kind: "custom", name: "Car", source: "robot", annualKwh: 2500,
+      schedule: { daysPerWeek: 99, window: [8, 99], maxKW: "fast", followSolar: false, hoursPerDay: 4 },
       scale: 1, detection: { confidence: 0.8 } }],
   }, freshState(), rep);
   const [a, b] = s.roof.planes;
@@ -525,8 +525,9 @@ test("storage: stored planes and loads go through the link's field coercion", ()
   assert.deepEqual(b.gutterEdge, [0, 1]);
   const f = s.flex[0];
   assert.equal(f.kind, "custom");
-  assert.equal(f.annualKwh, 0);
-  assert.equal(f.schedule.mode, "asRecorded");
+  assert.equal(f.source, "manual");
+  assert.equal(f.annualKwh, 2500);
+  assert.equal(f.schedule.mode, "asRecorded", "no mode stays as recorded, never silently spread");
   assert.equal(f.schedule.daysPerWeek, 5);
   assert.deepEqual(f.schedule.window, [8, 15]);
   assert.equal(f.schedule.followSolar, false);
@@ -536,7 +537,7 @@ test("storage: stored planes and loads go through the link's field coercion", ()
 
 test("storage: a __proto__ key never becomes a prototype, and `in` never reads through one", () => {
   const raw = JSON.parse('{"v":1,"__proto__":{"cw":9,"planes":[null]},"ovp":{"__proto__":3,"p1":4},'
-    + '"customTariff":{"__proto__":{"polluted":true},"plans":[]},"flex":[{"id":"f1","kind":"ev","detection":{"__proto__":{"x":1}}}]}');
+    + '"customTariff":{"__proto__":{"polluted":true},"plans":[]},"flex":[{"id":"f1","kind":"ev","annualKwh":3000,"detection":{"__proto__":{"x":1}}}]}');
   const rep = {};
   let s;
   assert.doesNotThrow(() => { s = fromStorage(raw, freshState(), rep); });
@@ -573,4 +574,41 @@ test("a link whose roof list is unreadable keeps the stored roof instead of a bl
   assert.equal(s.system.override.panelsByPlane, null);
   assert.equal(rep.damaged, true);
   assert.deepEqual([...new Set(rep.keys)].sort(), ["ovp", "roof"]);
+});
+
+test("storage and links drop flexible loads that describe no real load", () => {
+  // fromStorage({ flex: [{}] }) used to come back as a silent 0-kWh custom load.
+  const rep = {};
+  const empty = fromStorage({ v: 1, flex: [{}] }, freshState(), rep);
+  assert.deepEqual(empty.flex, []);
+  assert.equal(rep.damaged, true);
+  assert.ok(rep.keys.includes("flex"));
+
+  const good = { id: "ev1", kind: "ev", annualKwh: 3000, source: "manual", name: "Car",
+    schedule: { mode: "spread", daysPerWeek: 5, window: [9, 15] } };
+  const bad = [
+    { ...good, id: "k", kind: "rocket" },                        // unknown kind
+    { ...good, id: "z", annualKwh: 0 },                          // no energy
+    { ...good, id: "n", annualKwh: -5 },
+    { ...good, id: "i", annualKwh: Infinity },
+    { ...good, id: "s", annualKwh: "lots" },
+    { ...good, id: "x", schedule: "nightly" },                   // schedule is not an object
+    { ...good, id: "m", schedule: { mode: "teleport" } },        // unknown mode
+    { ...good, id: "w", schedule: { mode: "spread", window: "8-15" } },   // window not a pair
+  ];
+  const r2 = {};
+  const s = fromStorage({ v: 1, flex: [good, ...bad] }, freshState(), r2);
+  assert.deepEqual(s.flex.map((f) => f.id), ["ev1"]);
+  assert.equal(s.flex[0].schedule.mode, "spread");
+  assert.equal(r2.keys.filter((k) => k === "flex").length, bad.length);
+
+  // A stored session's loads survive a link whose every flex token is unusable.
+  const base = clone(s);
+  const r3 = {};
+  const viaLink = fromHash("v=1&flex=f1:rocket:3000:manual;f2:ev:0:manual", base, r3);
+  assert.deepEqual(viaLink.flex.map((f) => f.id), ["ev1"]);
+  assert.equal(r3.damaged, true);
+  // ...and a mixed link keeps the usable token only.
+  const mixed = fromHash("v=1&flex=f1:rocket:3000:manual;f2:pool:1800:manual", freshState(), {});
+  assert.deepEqual(mixed.flex.map((f) => [f.id, f.kind, f.annualKwh]), [["f2", "pool", 1800]]);
 });

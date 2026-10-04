@@ -9,6 +9,7 @@
  * ========================================================================== */
 
 import { el, clear, $ } from "./dom.js";
+import { DISCLAIMER } from "./blocks.js";
 import { CLAIM, EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote } from "../privacy.js";
 
 /* Averaged summer weekday from data/demo/*.csv, and the TMY profile for 15 July
@@ -47,16 +48,18 @@ export function renderLanding(root, handlers) {
   root.appendChild(pipeline());
 
   root.appendChild(el("p.disclaimer", {
-    text: "A planning tool, not financial advice and not a quote. Utility rates change every year and the "
-      + "export-credit tables change with them — check the effective dates on the Assumptions tab before you "
-      + "trust a figure to the dollar. A real installer's production estimate and a real vendor's price sheet "
-      + "both beat this model.",
+    text: DISCLAIMER + " The rate tables carry effective dates on the Assumptions tab; a real installer's "
+      + "production estimate and a real vendor's price sheet both beat this model.",
   }));
 
   root.appendChild(el("footer.landing-foot", {}, [
     el("span", {}, [el("a", { href: "https://github.com/daharoni/rooftop-roi", target: "_blank", rel: "noopener", text: "Source on GitHub" })]),
     el("span", { text: "MIT licence" }),
     el("span", { text: "No accounts, no cookies, no tracking" }),
+    // Open-Meteo's free tier is CC BY 4.0 and the licence asks for a visible credit.
+    el("span", {}, ["Weather data by ",
+      el("a", { href: "https://open-meteo.com/", target: "_blank", rel: "noopener", text: "Open-Meteo.com" }),
+      " (", el("a", { href: "https://creativecommons.org/licenses/by/4.0/", target: "_blank", rel: "noopener license", text: "CC BY 4.0" }), ")"]),
   ]));
 
   adoptGeocodeNote().then((note) => {

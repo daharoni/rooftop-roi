@@ -1,18 +1,20 @@
 // core/pv.js — hourly PV production model (kWh AC per kW DC installed).
 //
-// A faithful JS port of docs/reference-pv-model.py, which was validated against PVGIS v5.2
-// PVcalc driven by PVGIS-NSRDB (the satellite radiation family PVWatts uses) for the
-// reference site: annual within 1.55%, every month within ~5% after the bias correction.
+// A JS port of docs/reference-pv-model.py, which was validated against PVGIS v5.2 PVcalc
+// driven by PVGIS-NSRDB (the satellite radiation family PVWatts uses) for the reference
+// site. One deliberate departure since 2026-10: wind is converted km/h -> m/s before the
+// Sandia cell-temperature term (the prototype fed km/h in, ~3.3% high). The prototype's
+// SoCal bias table was removed (2026-10-03); see BIAS_CORRECTIONS and docs/solar-model.md.
 //
 // Model chain (PVWatts-like, no dependencies):
 //   NOAA solar position at the interval midpoint
 //   -> HDKR transposition to the array plane (0.2 ground albedo)
 //   -> ASHRAE b0 = 0.05 incidence-angle modifier on beam + circumsolar, 0.96 on the rest
-//   -> Sandia roof-mount module temperature from ambient temperature and 10 m wind
+//   -> Sandia roof-mount module temperature from ambient temperature and 10 m wind (m/s)
 //   -> linear temperature coefficient (default -0.35 %/degC)
 //   -> flat system losses (default 14%)
 //   -> PVWatts part-load inverter curve at 96% nominal, hard clipping at the DC/AC ratio
-//   -> optional per-month bias correction onto PVGIS-NSRDB.
+//   -> optional caller-supplied per-month bias factors (none by default).
 //
 // Output indexing: Float64Array(8760), LOCAL STANDARD TIME (no DST),
 // index = (dayOfYear-1)*24 + hour, Feb 29 dropped. See docs/solar-model.md.
@@ -44,23 +46,34 @@ export const DEFAULTS = {
 };
 
 /**
- * Per-month multiplicative bias corrections, model -> reference irradiance database.
+ * Regional per-month IRRADIANCE corrections, keyed by id. EMPTY since 2026-10-03: no
+ * region is corrected, so `biasCorrection: "auto"` (the default) is uncorrected everywhere.
  *
- * These are REGION SPECIFIC: they were fitted at the reference site (Agoura Hills, CA) by
- * dividing PVGIS-NSRDB monthly yields by this model's 11-year monthly means. They mostly
- * correct ERA5's known reanalysis bias against satellite irradiance in coastal southern
- * California (ERA5 misses the May/June marine layer burn-off and thin cirrus). Applying
- * them outside that climate would be guesswork, so `"auto"` restricts them to the box
- * they were fitted in. See docs/solar-model.md.
+ * History. Until 2026-10 a "pvgis-nsrdb-socal" table applied inside a lat/lon box around
+ * the LA basin / Conejo / Ventura coast. Its last refit divided PVGIS-NSRDB's H(i)_m by
+ * this model's POA AFTER the incidence-angle loss (b0 = 0.05 beam, 0.96 diffuse), but
+ * PVGIS H(i) is BEFORE its own angle loss (PVGIS reports that separately as l_aoi), so
+ * every factor carried a spurious +2.45%. Like for like (model POA with
+ * { b0: 0, iamDiffuse: 1 }), ERA5 at the reference site (Agoura Hills, 34.15 N 118.75 W,
+ * tilt 20, az 180, Open-Meteo 2015-2025) reads 0.97% ABOVE NSRDB annually (model 2242.4
+ * vs PVGIS 2220.8 kWh/m2), i.e. a consistent correction would be ~0.99 (months 0.94-1.02).
+ * A 1% annual adjustment is below the model's other uncertainties (ERA5 grid, the flat
+ * 14% loss stack, shading), and a box edge creates a step that no user can see, so the
+ * table and box were removed rather than refitted. See docs/solar-model.md section 5.
+ *
+ * Known regional ERA5-vs-NSRDB POA biases (like for like, 11-year means) are a STATED
+ * UNCERTAINTY, not a correction: Agoura Hills +1.0%, San Jose +2.6%, Sacramento -1.4%,
+ * Fresno ~+0.5%, San Diego coast ~+11.8% (ERA5 sends too much sun to the marine-layer
+ * coast). Effect of the removal at the reference site, 11-year mean kWh/kW: 1572.1 (old
+ * table) -> 1548.8 (uncorrected; reviewer's PVWatts-style band 1,514-1,668). San Jose
+ * 1525.3 and Sacramento 1443.4 were never inside the box and do not move.
+ *
+ * The `biasCorrection` option still accepts "none" | false | "auto" | a 12-number array
+ * (your own factors), and an entry added here ({ id, factors[12], box }) would be honoured
+ * by "auto" inside its box. Fit any new table on irradiance, like for like: PVGIS H(i)_m
+ * divided by this model's POA with { b0: 0, iamDiffuse: 1 }.
  */
-export const BIAS_CORRECTIONS = {
-  "pvgis-nsrdb-socal": {
-    id: "pvgis-nsrdb-socal",
-    factors: [1.022, 0.967, 1.0378, 1.0002, 1.0379, 1.0311, 1.014, 1.0531, 1.0134, 0.9926, 1.0034, 0.984],
-    box: { latMin: 32.5, latMax: 35.6, lonMin: -120.6, lonMax: -116.0 },
-    reference: "PVGIS v5.2 PVcalc, radiation_db=PVGIS-NSRDB, lat 34.15 lon -118.75 (site rounded to the weather grid), tilt 20 az 180",
-  },
-};
+export const BIAS_CORRECTIONS = Object.freeze({});
 
 /** The "bias correction is off" factors. Copied out on every return so no caller can
  *  mutate the disabled state out from under every other caller. */
@@ -237,11 +250,16 @@ export function poaHdkr(ghi, dni, dhi, elevation, solarAz, e0n, tilt, azimuth, o
   return { beam: beamOut, diffuse: diffOut, poa: beamOut + diffOut, aoi };
 }
 
+/** km/h -> m/s. */
+export const KMH_TO_MS = 1 / 3.6;
+
 /**
  * kWh AC per kW DC for one hour at the given plane-of-array irradiance.
- * `wind` is 10 m wind speed in the units core/weather.js supplies (km/h — see docs).
+ * `windMs` is 10 m wind speed in **m/s**, the unit the Sandia coefficients are fitted in.
+ * (core/weather.js supplies km/h; hourlyProfile converts. Before 2026-10 the km/h number
+ * went in unconverted — modules ran ~10 C cool, output +3.3% — see docs/solar-model.md.)
  */
-export function acFromPoa(poa, tamb, wind, opts = {}) {
+export function acFromPoa(poa, tamb, windMs, opts = {}) {
   if (poa <= 0) return 0;
   const losses = opts.losses ?? DEFAULTS.losses;
   const dcAcRatio = opts.dcAcRatio ?? DEFAULTS.dcAcRatio;
@@ -249,7 +267,7 @@ export function acFromPoa(poa, tamb, wind, opts = {}) {
   const gamma = opts.tempCoeff ?? DEFAULTS.tempCoeff;
   const sapm = opts.sapm ?? DEFAULTS.sapm;
 
-  const tmod = poa * Math.exp(sapm.a + sapm.b * wind) + tamb;
+  const tmod = poa * Math.exp(sapm.a + sapm.b * windMs) + tamb;
   const tcell = tmod + (poa / 1000) * sapm.dT;
   let pdc = (poa / 1000) * (1 + gamma * (tcell - 25));
   pdc *= 1 - losses;
@@ -322,11 +340,13 @@ export function hourlyProfile(weatherYear, opts = {}) {
 
   const g = geometryFor(weatherYear, lat, lon);
   const { ghi, dni, dhi, temp, wind } = weatherYear;
+  // Weather years carry km/h (Open-Meteo's unit); one that says m/s is used as is.
+  const toMs = weatherYear.units?.wind === "m/s" ? 1 : KMH_TO_MS;
   const out = new Float64Array(HOURS);
   for (let i = 0; i < HOURS; i++) {
     const p = poaHdkr(ghi[i], dni[i], dhi[i], g.elev[i], g.az[i], g.e0n[i], tilt, azimuth, opts);
     if (p.poa <= 0) continue;
-    const ac = acFromPoa(p.poa, temp[i], wind[i], opts);
+    const ac = acFromPoa(p.poa, temp[i], wind[i] * toMs, opts);
     out[i] = ac * bias[MONTH_OF_HOUR[i] - 1];
   }
   return out;

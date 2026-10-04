@@ -2,18 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-hashes' 'sha256-2Kn0Onr1bMf2lx5Ho9d9D7NM3c9xgVkp596Ukeq89oc='; img-src 'self' data: blob: https://server.arcgisonline.com https://basemap.nationalmap.gov https://api.maptiler.com; connect-src 'self' https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com https://api.open-meteo.com https://archive-api.open-meteo.com; worker-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rooftop ROI</title>
 <meta name="description" content="Does rooftop solar plus a battery beat leaving the same cash in the market? Simulated hour by hour against your own utility interval data, under California Net Billing rules. Your data never leaves this browser.">
 <meta name="color-scheme" content="light dark">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app/vendor/fonts/plex.css">
 <link rel="stylesheet" href="app/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🏠</text></svg>">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
-        integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="app/vendor/chart.umd.min.js"></script>
 </head>
 <body>
 

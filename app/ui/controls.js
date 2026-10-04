@@ -157,12 +157,16 @@ export class ControlRail {
       const head = this._head(spec, id, formatValue(spec, value));
       w.value = head.val;
       wrap.appendChild(head.row);
+      // aria-valuetext: a screen reader announces "$2.75/W" or "5.0%", not the raw 2.75 or 0.05.
       w.control = el("input", {
         type: "range", id, min: spec.min, max: spec.max, step: spec.step, value,
+        "aria-valuetext": formatValue(spec, value),
         on: {
           input: (e) => {
             // Paint the number immediately; the simulation catches up behind it.
-            head.val.textContent = formatValue(spec, Number(e.target.value));
+            const text = formatValue(spec, Number(e.target.value));
+            head.val.textContent = text;
+            e.target.setAttribute("aria-valuetext", text);
             emit(Number(e.target.value));
           },
         },
@@ -215,7 +219,11 @@ export class ControlRail {
         w.control.value = v === null || v === undefined ? "" : String(v);
       } else {
         if (document.activeElement !== w.control) w.control.value = v ?? "";
-        if (w.value) w.value.textContent = formatValue(spec, v);
+        if (w.value) {
+          const text = formatValue(spec, v);
+          w.value.textContent = text;
+          if (w.control.type === "range") w.control.setAttribute("aria-valuetext", text);
+        }
       }
     }
   }

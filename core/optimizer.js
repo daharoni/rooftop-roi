@@ -196,17 +196,19 @@ export function priceGrid(grid, finance, objective, basis) {
     const savings = asRec ? c.savingsVsAsRecorded : c.savingsVsSameFlex;
     // The two halves of the saving escalate at different rates, so they travel apart.
     const exportRev = c.exportRevenue || 0;
+    // The ACC Plus share of exportRev: finance stops it after the nine-year lock.
+    const accPlusRev = c.accPlusRevenue || 0;
     let importSav = asRec ? c.importSavingsVsAsRecorded : c.importSavingsVsSameFlex;
     if (importSav === undefined) importSav = savings - exportRev;
     const fin = Finance.evaluate({
-      savings, importSavings: importSav, exportRevenue: exportRev,
+      savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, baselineBill: baseline.bill,
       pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
     }, finance);
     return {
       panels: c.panels, panelsByPlane: c.panelsByPlane, planeIds: c.planeIds,
       batteries: c.batteries, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
-      savings, importSavings: importSav, exportRevenue: exportRev,
+      savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, importKwh: c.importKwh, exportKwh: c.exportKwh,
       pvKwh: c.pvKwh, pvKwhByPlane: c.pvKwhByPlane, loadKwh: c.loadKwh, baseLoadKwh: c.baseLoadKwh,
       cycles: c.cycles, selfSufficiency: c.selfSufficiency,
@@ -249,6 +251,7 @@ export function findCell(priced, panels, batteries) {
 export function tornado(cell, finance, baselineBill, flexVariants) {
   const simOf = (o) => ({
     savings: o.savings, importSavings: o.importSavings, exportRevenue: o.exportRevenue,
+    accPlusRevenue: o.accPlusRevenue === undefined ? cell.accPlusRevenue : o.accPlusRevenue,
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
     pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal,
   });

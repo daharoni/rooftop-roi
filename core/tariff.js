@@ -37,6 +37,8 @@
  *     correct simulation never reads the filler because the schedule never names it.
  * ========================================================================== */
 
+import Periods from "./periods.js";
+
 /** Utilities the library ships, in the order the UI should offer them. */
 export const UTILITY_IDS = ["sce", "pge", "sdge"];
 
@@ -50,66 +52,27 @@ const PERIOD_LABELS = {
 
 /* ------------------------------------------------------------------ calendar */
 
-function nthWeekday(year, month, weekday, n) {
-  const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  return 1 + ((weekday - first + 7) % 7) + (n - 1) * 7;
-}
-function lastWeekday(year, month, weekday) {
-  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const last = new Date(Date.UTC(year, month - 1, days)).getUTCDay();
-  return days - ((last - weekday + 7) % 7);
-}
+/* The holiday list, the weekend rule and the schedule/override lookup live in
+   core/periods.js, shared with core/engine.js so the two can never disagree. */
 
 /**
  * The eight holidays on which California IOUs bill the WEEKEND schedule, for one
- * year, as a Set of "y-m-d" keys (month and day unpadded).
- *
- * Fixed-date holidays are entered on BOTH their actual date and their observed
- * date (Saturday -> the Friday before, Sunday -> the Monday after).  The actual
- * date matters when it is a weekday; the observed date is what makes a Monday
- * behave like a weekend when New Year's Day lands on a Sunday.  Adding both is
- * safe: the extra entry is always itself a weekend day.
+ * year, as a Set of "y-m-d" keys (month and day unpadded).  Fixed-date holidays are
+ * entered on their actual date, and a Sunday one also on the Monday after (a
+ * Saturday one is not moved to Friday); see core/periods.js.
  */
 export function holidaysForYear(year) {
-  const s = new Set();
-  const add = (m, d) => s.add(year + "-" + m + "-" + d);
-  const addObserved = (m, d) => {
-    add(m, d);
-    const dow = new Date(Date.UTC(year, m - 1, d)).getUTCDay();
-    if (dow === 6) {                                  // Saturday -> Friday before
-      const p = new Date(Date.UTC(year, m - 1, d - 1));
-      add(p.getUTCMonth() + 1, p.getUTCDate());
-    } else if (dow === 0) {                           // Sunday -> Monday after
-      const n = new Date(Date.UTC(year, m - 1, d + 1));
-      add(n.getUTCMonth() + 1, n.getUTCDate());
-    }
-  };
-  addObserved(1, 1);                                  // New Year's Day
-  add(2, nthWeekday(year, 2, 1, 3));                  // Presidents' Day
-  add(5, lastWeekday(year, 5, 1));                    // Memorial Day
-  addObserved(7, 4);                                  // Independence Day
-  add(9, nthWeekday(year, 9, 1, 1));                  // Labor Day
-  addObserved(11, 11);                                // Veterans Day
-  add(11, nthWeekday(year, 11, 4, 4));                // Thanksgiving
-  addObserved(12, 25);                                // Christmas
-  return s;
-}
-
-const holidayCache = new Map();
-function holidaySet(year) {
-  let s = holidayCache.get(year);
-  if (!s) { s = holidaysForYear(year); holidayCache.set(year, s); }
-  return s;
+  return Periods.holidaysForYear(year);
 }
 
 /** True when this date is one of the eight observed holidays. */
 function isHoliday(p) {
-  return holidaySet(p.y).has(p.y + "-" + p.m + "-" + p.d);
+  return Periods.isHoliday(p.y, p.m, p.d);
 }
 
 /** True when the WEEKEND schedule applies: Saturday, Sunday, or a holiday. */
 function billsAsWeekend(p) {
-  return p.dow === 0 || p.dow === 6 || isHoliday(p);
+  return Periods.billsAsWeekend(p.y, p.m, p.d, p.dow);
 }
 
 /**
@@ -336,8 +299,7 @@ export function defaultProvider(t) {
 
 /** "summer" or "winter" for a plan and a month (1-12). */
 export function seasonOf(p, month) {
-  const months = (p && p.summer_months) || [];
-  return months.indexOf(+month) >= 0 ? "summer" : "winter";
+  return Periods.seasonOf(p, month);
 }
 
 /**
@@ -350,28 +312,10 @@ export function periodAt(p, date, hour) {
   if (!p || !p.schedule) throw new Error("tariff: periodAt needs a plan with a schedule");
   const t = partsOf(date, hour);
   const holiday = isHoliday(t);
-  const weekend = billsAsWeekend(t);
-  const season = seasonOf(p, t.m);
-  const dayType = weekend ? "weekend" : "weekday";
-  const bySeason = p.schedule[season];
-  if (!bySeason) throw new Error("tariff: plan " + p.id + " has no " + season + " schedule");
-  const row = bySeason[dayType] || bySeason.weekday;
-  let period = row[t.hour];
-  if (!period) throw new Error("tariff: plan " + p.id + " " + season + "/" + dayType + " hour " + t.hour + " has no period");
-
-  /* Month-scoped overrides.  The summer/winter split cannot express a window that
-     covers only part of a season - SDG&E's March/April weekday 10am-2pm
-     super-off-peak is the live example - so a plan may carry a short override list
-     that is applied after the base lookup.  Last match wins. */
-  let overridden = false;
-  for (const ov of (p.schedule_overrides || [])) {
-    if (ov.months && ov.months.indexOf(t.m) < 0) continue;
-    if (ov.daytype && ov.daytype !== dayType) continue;
-    if (ov.hours && ov.hours.indexOf(t.hour) < 0) continue;
-    period = ov.period;
-    overridden = true;
-  }
-
+  /* Season, schedule row and the month-scoped schedule_overrides (SDG&E EV-TOU-2's
+     March/April weekday 10am-2pm super-off-peak) are core/periods.js periodFor(),
+     the same function core/engine.js buildRates() prices every hour with. */
+  const { season, dayType, period, overridden } = Periods.periodFor(p, t.m, billsAsWeekend(t), t.hour);
   return { season, dayType, period, holiday, overridden, month: t.m, hour: t.hour, dow: t.dow };
 }
 

@@ -25,24 +25,56 @@
  *   lease  no upfront at all, escalating annual payments and an optional buyout;
  *          a third party owns the system, so no homeowner incentive applies and
  *          O&M / inverter / battery replacement are not the customer's problem.
- * Savings accrue in all three.
+ * Savings accrue in all three - under a lease only while the household has the
+ * system.  When a lease term ends before the horizon:
+ *   buyout > 0   the buyout is paid in the last term year and the household owns
+ *                the system from the next year on: savings continue, and O&M,
+ *                replacements and the resale credit become the owner's, as for cash.
+ *   buyout = 0   the system goes back to the lessor (the conservative reading of a
+ *                California lease/PPA with renew-or-remove at end of term), so the
+ *                savings stop with the payments.  Renewing is a new contract this
+ *                model does not price.
+ *
+ * Replacements (inverter every inverterYear, battery every battReplYear) recur at
+ * every multiple of their interval, but only while at least REPLACE_MIN_REMAINING
+ * years of the horizon remain after the replacement year: nobody budgets a new
+ * inverter in year 24 of a 25-year analysis whose terminal value is zero.  On the
+ * default 25-year horizon that books the inverter at 12 (not 24) and the battery at
+ * 20 - exactly what the single-replacement rule used to give.  The battery's
+ * capacity-fade clock restarts at every replacement that is booked, and only then.
+ *
+ * Defaults mirror the app's State.DEFAULTS.fin (app/state.js ~line 101-111), which
+ * is the source of truth for anything a person sees; these only fill keys a caller
+ * leaves out (tests, the optimizer called without a full finance block).  Keep the
+ * overlapping keys equal; tests/finance.test.mjs pins the two that once drifted.
  * ========================================================================== */
+
+/** Years of horizon that must remain after a replacement for it to be booked. */
+export const REPLACE_MIN_REMAINING = 3;
 
 export const DEFAULTS = {
   costPerW: 3.00,            // $/W DC, installed, before incentives
   costPerKwh: 1000,          // $/kWh usable storage, installed
   adder: 0,                  // fixed install adder (panel upgrade, trenching, ...)
+  // Per-roof-face extra install cost (long conduit runs, tile roof, steep pitch...).
+  // Charged whenever there are panels; hardware-agnostic, so it never enters the
+  // panel/pack degradation blend.
+  roofCostAdder: 0,
   taxCreditPct: 0,           // homeowner-claimed 25D - terminated for 2026 installs
   // How a third-party credit reaches the customer.  "none" | "discount" | "vendor".
-  incentiveMode: "vendor",
+  // "none" to match app/state.js (State.DEFAULTS.fin.incentiveMode).
+  incentiveMode: "none",
   discountPct: 0,            // mode "discount": straight % off system price
   vendorCreditPct: 0.40,     // mode "vendor": the credit the vendor claims - context only
   passThroughPct: 0.34,      // mode "vendor": points off the system price they pass on
   sgipPerKwh: 0,             // SGIP storage rebate, $/kWh usable (closed as of 2026)
   rebates: 0,                // any other one-off rebate $ (CPA Sun Storage, ...)
   horizon: 25,               // analysis years
-  escalation: 0.045,         // retail rate escalation, nominal $/yr
+  escalation: 0.05,          // retail rate escalation, nominal $/yr (app/state.js)
   exportEscalation: 0.0,     // export credits are locked to a fixed ACC vintage
+  // The ACC Plus adder is locked for nine years from interconnection and then ends;
+  // from year accPlusYears + 1 the sim's accPlusRevenue is taken back out.
+  accPlusYears: 9,
   investReturn: 0.07,        // nominal return on the same cash in the market
   discountRate: 0.025,       // inflation / real-terms discount
   panelDeg: 0.005,           // /yr production loss
@@ -95,7 +127,21 @@ export function withDefaults(f) {
       buyout: Math.max(0, num(g.lease && g.lease.buyout, D.lease.buyout)),
     },
   };
+  o.roofCostAdder = Math.max(0, o.roofCostAdder);
+  o.accPlusYears = Math.max(0, o.accPlusYears);
   return o;
+}
+
+/**
+ * The years in 1..H at which a part with a service life of `every` years is
+ * replaced: every multiple of the (rounded) interval that leaves at least
+ * REPLACE_MIN_REMAINING years of horizon after it.  `every` <= 0 means never.
+ */
+export function replacementYears(every, H) {
+  const n = Math.round(every), out = [];
+  if (!(n >= 1)) return out;
+  for (let y = n; y <= H - REPLACE_MIN_REMAINING; y += n) out.push(y);
+  return out;
 }
 
 /**
@@ -205,7 +251,15 @@ export function amortize(principal, apr, termYears) {
  *               pvKwh, kwdc, battKWhTotal }
  *             `savings` is year-1 bill savings in dollars; `bill` the with-system
  *             annual bill; `baselineBill` today's annual bill.
+ *             Optional `accPlusRevenue`: year-1 dollars of ACC Plus adder credit,
+ *             a part of `exportRevenue` (and so of `savings`), not on top of it.
+ *             It is removed from every year after f.accPlusYears (default 9),
+ *             escalated and degraded exactly as the export revenue it sits in.
+ *             Missing or 0 changes nothing.
  * @param f    finance inputs (see DEFAULTS)
+ * @returns    among the rest, `irr` (levered, the household's own cash) with
+ *             `irrReason` - null when irr is a number, else why it is undefined:
+ *             "no money down", "never repays" or "no unique rate".
  */
 export function evaluate(sim, f) {
   f = withDefaults(f);
@@ -214,9 +268,16 @@ export function evaluate(sim, f) {
   // Backward compatible: a sim that carries only `savings` is treated as all-import.
   const exportRev = sim.exportRevenue || 0;
   const importSav = sim.importSavings !== undefined ? sim.importSavings : (sim.savings - exportRev);
+  // The adder is a slice of the export credit, so it can never exceed it or go below 0:
+  // a hand-built sim with a stray value is clamped rather than inventing savings.
+  const accPlusRev = Math.min(Math.max(0, +sim.accPlusRevenue || 0), Math.max(0, exportRev));
   const watts = sim.kwdc * 1000;
   const solarCost = watts * f.costPerW;
   const storageCost = sim.battKWhTotal * f.costPerKwh;
+  // Roof work (re-roofing a face, conduit runs, structural fixes) is the household's
+  // own bill: it is not part of the system's sticker price, so no vendor pass-through,
+  // tax credit or rebate reaches it, and under a lease it is still paid up front.
+  const roofCost = watts > 0 ? f.roofCostAdder : 0;
   const gross = solarCost + storageCost + (watts > 0 || sim.battKWhTotal > 0 ? f.adder : 0);
   const disc = effectiveDiscount(f);
   const discounted = gross * (1 - disc);
@@ -224,7 +285,7 @@ export function evaluate(sim, f) {
   const itc = isLease ? 0 : discounted * f.taxCreditPct;
   const sgip = isLease ? 0 : sim.battKWhTotal * f.sgipPerKwh;
   const rebates = isLease ? 0 : f.rebates;
-  const netCost = isLease ? gross : Math.max(0, discounted - itc - sgip - rebates);
+  const netCost = (isLease ? gross : Math.max(0, discounted - itc - sgip - rebates)) + roofCost;
 
   const H = Math.max(1, Math.round(f.horizon));
   const times = flowTimes(H, f.midYear !== false);
@@ -232,6 +293,10 @@ export function evaluate(sim, f) {
   // ----------------------------------------------------------------- financing
   const pay = new Array(H + 1).fill(0);
   let upfront = 0, schedule = [], amort = null, principal = 0, dealerFee = 0;
+  // Which years the household has the system, and which years it owns (pays O&M,
+  // replacements, gets the resale credit).  Cash and loan: all of them.  Lease: has
+  // it for the term, then owns it after a buyout or hands it back (see the header).
+  let hasUntil = H, ownsFrom = 1, ownsAtH = false, leaseEnd = null;
   if (mode === "loan") {
     const L = f.financing.loan;
     dealerFee = netCost * L.sharePct * L.dealerFeePct;
@@ -257,6 +322,22 @@ export function evaluate(sim, f) {
       const row = schedule[L.termYears - 1];
       if (row) row.payment = pay[L.termYears];
     }
+    if (L.termYears === H && L.buyout > 0) {
+      // Bought in the final year: the household owns it at the horizon, so the resale
+      // credit is theirs even though no ownership year is left to run.
+      ownsFrom = H + 1; ownsAtH = true;
+      leaseEnd = { year: L.termYears, outcome: "buyout" };
+    } else if (L.termYears >= H) {
+      ownsFrom = H + 1;                                   // leased to the end of the analysis
+      leaseEnd = { year: L.termYears, outcome: "runs to horizon" };
+    } else if (L.buyout > 0) {
+      ownsFrom = L.termYears + 1;
+      leaseEnd = { year: L.termYears, outcome: "buyout" };
+    } else {
+      ownsFrom = H + 1; hasUntil = L.termYears;
+      leaseEnd = { year: L.termYears, outcome: "returned" };
+    }
+    upfront = roofCost;                                   // the lessor does not fix the roof
   } else {
     upfront = netCost;
   }
@@ -278,27 +359,37 @@ export function evaluate(sim, f) {
   // "pays for itself" and project-IRR figures below are about the asset, while
   // NPV and wealth are about the household's actual money.
   const cf = [-upfront], netSav = [0], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
+  // Replacement years recur (see replacementYears and the header).  The pack's
+  // fade clock restarts at each one whoever pays for it - a lessor swapping a pack
+  // in year 20 hands back a fresh one just the same.
+  const battRepl = replacementYears(f.battReplYear, H), invRepl = replacementYears(f.inverterYear, H);
+  let lastBattRepl = 0;
   for (let y = 1; y <= H; y++) {
+    const has = y <= hasUntil, owns = y >= ownsFrom;
+    const battSwap = battRepl.indexOf(y) >= 0;
     const sFac = Math.pow(1 - f.panelDeg, y - 1);
-    // capacity resets when the pack is replaced
-    const bAge = (f.battReplYear > 0 && y > f.battReplYear) ? y - f.battReplYear : y;
+    const bAge = y - lastBattRepl;                 // capacity resets after each replacement
+    if (battSwap) lastBattRepl = y;                // the new pack arrives at the end of year y
     const bFac = Math.pow(1 - f.battDeg, bAge - 1);
     const esc = Math.pow(1 + f.escalation, y - 1);
     const escX = Math.pow(1 + f.exportEscalation, y - 1);
     const deg = wS * sFac + wB * bFac;
-    const sav = importSav * esc * deg + exportRev * escX * deg;
-    // Under a lease the third party owns and maintains the hardware.
-    const o = isLease ? 0 : f.omPerYear * Math.pow(1 + f.discountRate, y - 1);
+    // The ACC Plus adder rides inside exportRevenue for its nine-year lock, then ends.
+    const exportY = exportRev - (y > f.accPlusYears ? accPlusRev : 0);
+    const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
+    // O&M, replacements and resale are the owner's: the household under cash or a
+    // loan, the lessor under a lease until a buyout hands the system over.
+    const o = owns ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
     let ex = 0;
-    if (!isLease) {
-      if (sim.battKWhTotal > 0 && y === Math.round(f.battReplYear)) ex += sim.battKWhTotal * f.costPerKwh * f.battReplFraction;
-      if (watts > 0 && y === Math.round(f.inverterYear)) ex += watts * f.inverterPerW;
+    if (owns) {
+      if (sim.battKWhTotal > 0 && battSwap) ex += sim.battKWhTotal * f.costPerKwh * f.battReplFraction;
+      if (watts > 0 && invRepl.indexOf(y) >= 0) ex += watts * f.inverterPerW;
     }
-    const resale = isLease ? 0 : f.resaleValue;
+    const resale = (owns || (ownsAtH && y === H)) ? f.resaleValue : 0;
     const earned = sav - o - ex + (y === H ? resale : 0);
     const net = earned - pay[y];
     cf.push(net); netSav.push(earned); savings.push(sav); om.push(o); extras.push(ex); payments.push(pay[y]);
-    prod.push(sim.pvKwh * sFac);
+    prod.push(has ? sim.pvKwh * sFac : 0);
   }
 
   const cum = [], dcum = [];
@@ -314,8 +405,26 @@ export function evaluate(sim, f) {
   // below the savings from year one) and only dips negative at a battery
   // replacement decades later still has a sign change, and bisection would
   // dutifully return a deeply negative "rate" that describes nothing.
+  // When there is no rate, say why, so the UI can print a reason and not "0.0%":
+  //   "no money down"  nothing goes out before money comes in - a fully financed
+  //                    loan whose payment sits below the saving, a good lease;
+  //   "never repays"   the running total never turns positive (an underwater
+  //                    lease, zero savings);
+  //   "no unique rate" an outlay first and a positive running total, but the signs
+  //                    flip back - typically a loan whose term outlasts the horizon,
+  //                    its balance settled in the final year - and no single rate
+  //                    in -90%..300% zeroes the NPV.
+  // projectIrr below (the unlevered return on the cash price) is unaffected.
   const firstMove = cf.find((v) => Math.abs(v) > 1e-9);
-  const irr = firstMove !== undefined && firstMove < 0 ? irrOf(cf, times) : null;
+  // (An outlay that is never earned back can still have a real, negative IRR; only
+  // when bisection finds no root does "never repays" stand in for it.)
+  let irr = null, irrReason = null;
+  if (firstMove === undefined) irrReason = "never repays";
+  else if (firstMove > 0) irrReason = "no money down";
+  else {
+    irr = irrOf(cf, times);
+    if (irr === null) irrReason = crossing(cum) === null ? "never repays" : "no unique rate";
+  }
 
   // The asset on its own, before financing.  "Pays for itself" is the year the
   // system's cumulative earnings (netSav) have covered everything it will ever
@@ -394,17 +503,22 @@ export function evaluate(sim, f) {
 
   return {
     inputs: f, gross, itc, sgip, rebates, netCost,
-    solarCost, storageCost,
+    solarCost, storageCost, roofCost,
     effectiveDiscount: disc, discountValue: gross - discounted,
     effectiveCostPerW: f.costPerW * (1 - disc), effectiveCostPerKwh: f.costPerKwh * (1 - disc),
     cashflows: cf, savingsByYear: savings, omByYear: om, extrasByYear: extras,
     paymentsByYear: payments,
     cumulative: cum, discountedCumulative: dcum, flowTimes: times,
-    npv, irr, projectIrr,
+    npv, irr, irrReason, projectIrr,
     payback, discountedPayback, totalCost,
     // When the household's own running cash turns positive (0 = from day one).
     cashFlowPayback: crossing(cum),
     loanPaidOffYear: amort ? Math.min(amort.termYears, H) : null,
+    // Lease only: { year, outcome } - "buyout" (owned after `year`), "returned"
+    // (savings stop after `year`) or "runs to horizon" (leased throughout).
+    leaseEnd,
+    // Years in which a replacement was booked (whoever paid for it).
+    replacementYears: { battery: sim.battKWhTotal > 0 ? battRepl : [], inverter: watts > 0 ? invRepl : [] },
     netSavingsByYear: netSav,
     lcoe, lifetimeCost: lifetime, lifetimeCostNoSystem: lifetimeNoSystem,
     wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest, cashRef,
@@ -433,6 +547,9 @@ export function evaluate(sim, f) {
  * break-even, and under a lease the sticker price is not what the customer pays.
  */
 export function breakEven(sim, f, key) {
+  // Said in so many words: the sticker price only nudges a lease's NPV through the
+  // cost-share degradation blend, and a root found that way would be noise.
+  if (withDefaults(f).financing.mode === "lease") return null;
   const npvAt = (price) => evaluate(sim, Object.assign({}, f, { [key]: price })).npv;
   const at0 = npvAt(0), at1 = npvAt(1);
   const slope = at1 - at0;
@@ -451,6 +568,7 @@ export function breakEven(sim, f, key) {
   return Math.abs(y1) <= Math.abs(slope) * 1e-6 ? x1 : null;
 }
 
-const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount,
+const SolarFinance = { evaluate, breakEven, withDefaults, effectiveDiscount, replacementYears,
+                       REPLACE_MIN_REMAINING,
                        npvOf, irrOf, flowTimes, crossing, loanPayment, amortize, DEFAULTS };
 export default SolarFinance;

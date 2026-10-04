@@ -27,6 +27,7 @@ import * as State from "./state.js";
 import { $, el, clear, readTokens, toast } from "./ui/dom.js";
 import { ControlRail, defaultReason } from "./ui/controls.js";
 import { renderLanding, landingError, landingNotice, userMessageOf } from "./ui/landing.js";
+import { futureTitle } from "./ui/knobs.js";
 import { summaryText, copyToClipboard } from "./ui/summary.js";
 import { destroyAll } from "./charts/base.js";
 import { fmtKwh } from "./ui/format.js";
@@ -84,6 +85,7 @@ async function loadCore() {
 
 /** Everything the tabs read. Rebuilt on every render; never mutated by them. */
 const ctx = {
+  linkKeys: new Set(),            // hash keys a shared link set (and that parsed): onDemo must not overwrite them
   loadSet: null, tariffLib: null, tariff: null,
   grid: null, priced: null, selected: null, detail: null, replay: null,
   weatherRows: null, tornado: null, week: null,
@@ -97,6 +99,10 @@ const ctx = {
   weatherOptions: [{ v: "tmy", t: "TMY (typical year)" }],
   planOptions: [], providerOptions: [], utilityOptions: [], baselineRegionOptions: [],
   dataWarnings: [],
+  // From the engine's "ready" message (see onWorkerMessage): the record's length in
+  // years (usableDays / 365) and the household's annual kWh over it.  null until
+  // the engine has seen this LoadSet; householdAnnualKwh() falls back until then.
+  engineYears: null, engineAnnualKwh: null, householdAnnualKwh: null,
   escalationNote: "",
   climateCredit: null,
   // Gates that stop the optimiser from running at all (P0 #3, #6, short files):
@@ -169,13 +175,31 @@ async function bootWorker() {
   if (gen !== bootGen) return;      // superseded while the bundle was loading
   if (worker) { worker.terminate(); worker = null; }
 
+  // Prefer a same-origin file worker: it is what the page's CSP (`worker-src 'self'
+  // blob:`) is written for and the browser already has the bundle cached from the
+  // fetch above.  A Blob worker is the fallback for hosts that serve the bundle with
+  // an odd MIME type; the main-thread shim is last and needs `unsafe-eval`, so under
+  // the shipped CSP only `?noworker` on a relaxed host ever reaches it.
   const forceInline = /[?&]noworker\b/.test(location.search);
   try {
     if (forceInline) throw new Error("inline worker forced with ?noworker");
-    worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    try {
+      worker = new Worker(new URL("./worker-bundle.js", import.meta.url));
+    } catch (err) {
+      console.warn("File worker unavailable, trying a Blob worker:", err && err.message);
+      worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    }
   } catch (err) {
-    console.warn("Blob worker unavailable, simulating on the main thread:", err && err.message);
-    worker = makeInlineWorker(src);
+    console.warn("Worker unavailable, simulating on the main thread:", err && err.message);
+    try {
+      worker = makeInlineWorker(src);
+    } catch (evalErr) {
+      // Under the shipped CSP (no 'unsafe-eval') the main-thread fallback is refused too.
+      console.error("The main-thread engine could not start:", evalErr && evalErr.message);
+      worker = null;
+      status("This browser blocked the simulation engine (no worker and no eval). Try another browser.", 1);
+      return;
+    }
   }
 
   worker.onmessage = (e) => onWorkerMessage(e.data || {});
@@ -197,6 +221,11 @@ function onWorkerMessage(m) {
     ctx.planOptions = (m.plans || []).map((p) => ({ v: p.id, t: p.name || p.id }));
     ctx.providerOptions = (m.providers || []).map((p) => ({ v: p.id, t: p.name || p.id }));
     ctx.weeks = Math.max(1, Math.round((m.days || 365) / 7));
+    // The engine's own annualisation: fractional usable days / 365.  Every "per
+    // year" figure the page prints about the household divides by this, so the
+    // top-bar chip and the Assumptions tab agree with the simulated bills.
+    ctx.engineYears = Number.isFinite(m.years) && m.years > 0 ? m.years : null;
+    ctx.engineAnnualKwh = m.quality && Number.isFinite(m.quality.annualKwh) ? m.quality.annualKwh : null;
     status("", 1);
     runGrid();
     return;
@@ -354,10 +383,85 @@ function runReplay() {
 
 // ------------------------------------------------------------------ pricing
 
-function finEff() {
+/**
+ * Finance inputs as priced.  `roofCostAdder` is the one-time "Extra cost $" of
+ * every roof face the system being priced actually puts panels on (a re-roof
+ * under that face, a long conduit run); core/finance adds it to the gross cost
+ * when the system has panels.  It differs from cell to cell, so callers pass the
+ * cell's own figure from roofAdderFor(); priceGridWithRoof does it per cell.
+ */
+function finEff(roofCostAdder = 0) {
   const s = State.get();
   const ngomCost = (ctx.tariff && ctx.tariff.meta && ctx.tariff.meta.ngom_cost) || NGOM_COST_DEFAULT;
-  return Object.assign({}, s.fin, { adder: s.fin.adder + (s.system.ngom ? ngomCost : 0) });
+  return Object.assign({}, s.fin, {
+    adder: s.fin.adder + (s.system.ngom ? ngomCost : 0),
+    roofCostAdder: Number.isFinite(roofCostAdder) && roofCostAdder > 0 ? roofCostAdder : 0,
+  });
+}
+
+/**
+ * Sum of `costAdder` over the faces this cell puts at least one panel on.  The
+ * optimiser fills faces greedily, so the allocation per cell is known exactly
+ * (cell.panelsByPlane, aligned with cell.planeIds); a face the optimiser leaves
+ * empty costs nothing.  An override cell from the map carries the same arrays.
+ */
+export function roofAdderFor(cell, planes = State.get().roof.planes) {
+  if (!cell || !cell.panels) return 0;
+  const byId = new Map(planes.map((p) => [p.id, Number(p.costAdder) || 0]));
+  const alloc = cell.panelsByPlane;
+  let sum = 0;
+  if (Array.isArray(alloc)) {
+    const ids = cell.planeIds || planes.map((p) => p.id);
+    ids.forEach((id, k) => { if ((alloc[k] || 0) > 0) sum += Math.max(0, byId.get(id) || 0); });
+  } else if (alloc && typeof alloc === "object") {
+    for (const [id, n] of Object.entries(alloc)) if (n > 0 && byId.has(id)) sum += Math.max(0, byId.get(id));
+  } else {
+    // No allocation on the cell: every face with room is assumed used (an overestimate).
+    for (const p of planes) if (p.maxPanels > 0) sum += Math.max(0, Number(p.costAdder) || 0);
+  }
+  return sum;
+}
+
+/**
+ * core/optimizer.priceGrid prices every cell with one finance object, but the
+ * roof adder depends on which faces a cell uses.  The greedy allocation means
+ * there are at most (faces + 1) distinct adders, usually one or two, so the grid
+ * is priced once per distinct adder and each cell taken from its own pricing;
+ * the winner is then picked exactly as priceGrid picks it.  With no adders set
+ * (the common case) this is a single priceGrid call.
+ */
+function priceGridWithRoof(grid, obj, basis) {
+  const O = Core.optimizer;
+  const planes = State.get().roof.planes;
+  const groups = new Map();                       // adder -> cell indices
+  grid.cells.forEach((c, i) => {
+    const a = roofAdderFor(c, planes);
+    if (!groups.has(a)) groups.set(a, []);
+    groups.get(a).push(i);
+  });
+  if (groups.size <= 1) {
+    const a = groups.size ? groups.keys().next().value : 0;
+    const priced = O.priceGrid(grid, finEff(a), obj, basis);
+    for (const c of priced.cells) c.roofCostAdder = c.panels ? a : 0;
+    return priced;
+  }
+  let first = null;
+  const cells = new Array(grid.cells.length);
+  for (const [a, idx] of groups) {
+    const sub = O.priceGrid(Object.assign({}, grid, { cells: idx.map((i) => grid.cells[i]) }), finEff(a), obj, basis);
+    idx.forEach((i, k) => { cells[i] = sub.cells[k]; cells[i].roofCostAdder = a; });
+    if (!first) first = sub;
+  }
+  const better = (O.OBJECTIVES[first.objective] || O.OBJECTIVES.npv).better;
+  let best = null;
+  for (const c of cells) {
+    if (c.panels === 0 && c.batteries === 0) continue;   // "do nothing" is the baseline, not a candidate
+    if (!best || better(c, best)) best = c;
+  }
+  if (best && best.npv <= 0 && first.objective === "npv") best.beatenByDoingNothing = true;
+  return Object.assign({}, first, {
+    cells, best, doNothing: cells.find((c) => c.panels === 0 && c.batteries === 0),
+  });
 }
 
 /** null (not −1, and certainly not `null >= 0`) means "let the optimiser choose". */
@@ -391,13 +495,12 @@ function selectedCell(priced) {
  * and the page says so beside the objective control (ctx.objective).
  */
 function priceWithFallback(s) {
-  const fin = finEff();
   let obj = s.ui.objective;
-  let priced = Core.optimizer.priceGrid(ctx.grid, fin, obj, s.ui.basis);
+  let priced = priceGridWithRoof(ctx.grid, obj, s.ui.basis);
   const cells = priced.cells || [];
   const useless = (obj === "irr" && cells.every((c) => c.projectIrr === null || c.projectIrr === undefined))
     || (obj === "payback" && cells.every((c) => !c.payback));
-  if (useless) { obj = "npv"; priced = Core.optimizer.priceGrid(ctx.grid, fin, obj, s.ui.basis); }
+  if (useless) { obj = "npv"; priced = priceGridWithRoof(ctx.grid, obj, s.ui.basis); }
   ctx.objective = obj;
   return priced;
 }
@@ -410,20 +513,21 @@ function repriceAndRender() {
   ctx.baselineBill = ctx.priced.baseline ? ctx.priced.baseline.bill : 0;
 
   if (Core.finance && ctx.selected) {
-    const f = Core.finance.withDefaults(finEff());
+    const finSel = finEff(roofAdderFor(ctx.selected));
+    const f = Core.finance.withDefaults(finSel);
     ctx.effectiveDiscount = Core.finance.effectiveDiscount(f);
     const sim = {
       savings: ctx.selected.savings, importSavings: ctx.selected.importSavings,
-      exportRevenue: ctx.selected.exportRevenue, bill: ctx.selected.bill,
+      exportRevenue: ctx.selected.exportRevenue, accPlusRevenue: ctx.selected.accPlusRevenue, bill: ctx.selected.bill,
       baselineBill: ctx.baselineBill, pvKwh: ctx.selected.pvKwh,
       kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal,
     };
-    ctx.breakEvenPerW = Core.finance.breakEven(sim, finEff(), "costPerW");
-    ctx.breakEvenPerKwh = Core.finance.breakEven(sim, finEff(), "costPerKwh");
+    ctx.breakEvenPerW = Core.finance.breakEven(sim, finSel, "costPerW");
+    ctx.breakEvenPerKwh = Core.finance.breakEven(sim, finSel, "costPerKwh");
     // The same system bought outright, so a loan or lease tile can state the
     // financing decision as a dollar gap rather than leave it to the IRR/APR hint.
     ctx.cashNpv = f.financing.mode === "cash" ? null
-      : Core.finance.evaluate(sim, Object.assign({}, finEff(), { financing: Object.assign({}, f.financing, { mode: "cash" }) })).npv;
+      : Core.finance.evaluate(sim, Object.assign({}, finSel, { financing: Object.assign({}, f.financing, { mode: "cash" }) })).npv;
   }
 
   clearStale();
@@ -447,18 +551,19 @@ function afterDetail() {
 
   if (Core.optimizer && ctx.priced) {
     ctx.tornado = Core.optimizer.tornado(
-      ctx.selected, finEff(), ctx.baselineBill,
+      ctx.selected, finEff(roofAdderFor(ctx.selected)), ctx.baselineBill,
       ctx.detail ? ctx.detail.flexVariants : null,
     );
   }
 
   if (ctx.detail && ctx.detail.weather && Core.finance) {
+    const finSel = finEff(roofAdderFor(ctx.selected));
     ctx.weatherRows = ctx.detail.weather.map((w) => {
       const f = Core.finance.evaluate({
         savings: w.savings, importSavings: w.importSavings, exportRevenue: w.exportRevenue,
-        bill: w.bill, baselineBill: w.baselineBill,
+        accPlusRevenue: w.accPlusRevenue, bill: w.bill, baselineBill: w.baselineBill,
         pvKwh: w.pvKwh, kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal,
-      }, finEff());
+      }, finSel);
       return { key: w.key, label: w.label, npv: f.npv, savings: f.firstYearSavings,
                pv: w.pvKwh, perKw: ctx.selected.kwdc ? w.pvKwh / ctx.selected.kwdc : null };
     });
@@ -567,20 +672,47 @@ const clearStale = () => document.querySelectorAll(".stale").forEach((n) => n.cl
 let rail = null;
 let mountedTab = null;
 
+/**
+ * The tab strip follows the ARIA tabs pattern: one tab in the Tab order (the
+ * selected one, roving tabindex), Left/Right/Home/End move between tabs and
+ * select them as they go, and a click (or Enter/Space on the focused tab) moves
+ * focus into the pane so a keyboard or screen-reader user lands on the content.
+ */
 function buildTabStrip() {
   const strip = clear($("tabs"));
   for (const id of State.TABS) {
     const mod = TAB_MODULES[id];
+    const selected = State.get().ui.tab === id;
     strip.appendChild(el("button", {
       type: "button", role: "tab", id: "tab-" + id,
-      "aria-selected": String(State.get().ui.tab === id),
+      "aria-selected": String(selected), tabindex: selected ? "0" : "-1",
       "aria-controls": "pane", text: mod.label,
       on: { click: () => goTab(id) },
     }));
   }
+  if (!strip.dataset.keys) {
+    strip.dataset.keys = "1";
+    strip.addEventListener("keydown", onTabKey);
+  }
 }
 
-function goTab(id) {
+function onTabKey(e) {
+  const ids = State.TABS;
+  const at = ids.indexOf(normalizeTab(State.get().ui.tab));
+  const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: ids.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  const next = ids[(to + ids.length) % ids.length];
+  goTab(next, { focusPane: false });
+  const btn = $("tab-" + next);
+  if (btn) btn.focus();
+}
+
+/** Set by goTab, read once by the next mountTab: whether focus follows into the pane. */
+let focusPaneOnMount = false;
+
+function goTab(id, opts = {}) {
+  focusPaneOnMount = opts.focusPane !== false;
   State.setAt("ui.tab", normalizeTab(id), "tab");
 }
 
@@ -595,17 +727,73 @@ function mountTab() {
 
   for (const id of State.TABS) {
     const btn = $("tab-" + id);
-    if (btn) btn.setAttribute("aria-selected", String(id === s.ui.tab));
+    if (btn) {
+      btn.setAttribute("aria-selected", String(id === s.ui.tab));
+      btn.tabIndex = id === s.ui.tab ? 0 : -1;
+      // A phone's strip scrolls sideways: keep the selected tab on screen.
+      if (id === s.ui.tab && btn.scrollIntoView) btn.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }
   const pane = $("pane");
   pane.scrollTop = 0;
+  pane.setAttribute("aria-labelledby", "tab-" + s.ui.tab);
   mod.mount(pane, s, ctx);
   rail.build(mod.rail(s, ctx), s);
+  if (focusPaneOnMount) {
+    focusPaneOnMount = false;
+    pane.focus({ preventScroll: true });
+    // On a phone the page itself scrolls: bring the new tab's top into view
+    // (the sticky tab strip stays above it; see .pane scroll-margin-top).
+    if (pane.getBoundingClientRect().top < 0) pane.scrollIntoView({ block: "start" });
+  }
+}
+
+/**
+ * Phones and narrow windows stack the results first and the controls after them
+ * (styles.css, max-width 1000px), so one floating button jumps between the two:
+ * "Settings" while the results are on screen, "Results" once the rail is.  Wide
+ * screens hide it; the rail is always beside the pane there.
+ */
+function buildRailJump() {
+  if ($("rail-jump")) return;
+  const railNode = document.querySelector(".rail");
+  const pane = $("pane");
+  if (!railNode || !pane) return;
+  let railInView = false;
+  const btn = el("button.rail-jump", { id: "rail-jump", type: "button", text: "Settings",
+    "aria-label": "Jump to the settings" });
+  const paint = () => {
+    btn.textContent = railInView ? "Results ↑" : "Settings ↓";
+    btn.setAttribute("aria-label", railInView ? "Jump back to the results" : "Jump to the settings");
+  };
+  btn.addEventListener("click", () => {
+    const target = railInView ? pane : railNode;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (railInView) pane.focus({ preventScroll: true });
+    else {
+      const first = railNode.querySelector("summary, input, select, button");
+      if (first) first.focus({ preventScroll: true });
+    }
+  });
+  // "In view" once the rail's top has scrolled into the upper 60% of the screen.
+  let queued = false;
+  const check = () => {
+    queued = false;
+    const now = railNode.getBoundingClientRect().top < window.innerHeight * 0.6;
+    if (now !== railInView) { railInView = now; paint(); }
+  };
+  const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(check); } };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll, { passive: true });
+  paint();
+  onScroll();
+  $("shell").appendChild(btn);
 }
 
 function render() {
   const s = State.get();
   if (!mountedTab) return;
+  ctx.householdAnnualKwh = householdAnnualKwh();
   refreshOptions(s);
   rail.refresh(s);
   try { mountedTab.render(s, ctx); }
@@ -642,14 +830,36 @@ function baselineRegionOptions() {
     .concat(list.map((r) => ({ v: r.id, t: r.label })));
 }
 
+/**
+ * The household's annual kWh as the engine counts it (sum of readings over
+ * usableDays / 365).  Before the engine has reported, the same total over the
+ * engine's years if known, else over usable hours / 8760 - which can differ by
+ * a day's worth on a record with partial days, so it is only a placeholder.
+ */
+function householdAnnualKwh() {
+  if (!ctx.loadSet) return null;
+  if (ctx.engineAnnualKwh !== null) return ctx.engineAnnualKwh;
+  const meta = ctx.loadSet.meta || {};
+  const years = ctx.engineYears || usableHours(ctx.loadSet) / 8760;
+  return meta.totalKwh && years ? meta.totalKwh / years : null;
+}
+
+/** The rail's "The next N years" group follows the horizon slider (the rail is only rebuilt on a tab change). */
+function syncHorizonTitle(s) {
+  const years = s.fin && s.fin.horizon;
+  if (!Number.isFinite(years)) return;
+  for (const sum of document.querySelectorAll(".rail details.group > summary")) {
+    if (/^The next \d+ years$/.test(sum.textContent)) sum.textContent = futureTitle(years);
+  }
+}
+
 function renderTopBar(s) {
   const chip = $("household-chip");
   if (!chip) return;
-  const meta = (ctx.loadSet && ctx.loadSet.meta) || {};
-  const years = usableHours(ctx.loadSet) / 8760;
+  const annual = ctx.householdAnnualKwh;
   const bits = [];
-  if (meta.totalKwh && years) bits.push(fmtKwh(meta.totalKwh / years, 0) + "/yr");
-  if (s.site.utilityId) bits.push(s.site.utilityId.toUpperCase());
+  if (annual) bits.push(fmtKwh(annual, 0) + "/yr");
+  if (s.site.utilityId) bits.push(UTILITY_SHORT[s.site.utilityId] || utilityName(s.site.utilityId));
   if (s.flex.length) bits.push(s.flex.length === 1 ? s.flex[0].name : `${s.flex.length} flexible loads`);
   if (s.roof.planes.length) bits.push(`${s.roof.planes.length} roof ${s.roof.planes.length === 1 ? "face" : "faces"}`);
   clear(chip);
@@ -671,7 +881,6 @@ function onControlSet(path, value, spec) {
   if (path === "ui.goLoads") { goTab("loads"); return; }
   if (path === "ui.addPreset") { if (value) addPreset(value); return; }
   if (path === "ui.assumptionsJump") { const n = $(value); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
-  if (path === "ui.customEnabled") { toast("Custom rates from a bill are not wired up yet — pick the closest published plan."); return; }
   // The person picked it in the rail: an explicit choice, which may lift a coverage block.
   if (path === "site.utilityId") { switchUtility(value, { explicit: true }); return; }
   // "" in these two selects means "let the tariff file decide".
@@ -858,6 +1067,7 @@ State.subscribe((s, reason, info) => {
   if (!rail || reason === "silent") return;
 
   if (reason === "tab" || info.tabChanged) { mountTab(); render(); return; }
+  syncHorizonTitle(s);
 
   if (reason === "roof" || reason === "site") {
     rail.refresh(s);
@@ -1025,7 +1235,14 @@ async function onFiles(files) {
   }
 }
 
-async function onDemo() {
+/**
+ * The demo household.  A plain click loads it as it is.  Opened from a shared
+ * link (`fromLink`), the link is authoritative: only what the link did not set
+ * (site, roof, utility/plan/provider, flexible loads) is filled from the demo.
+ */
+async function onDemo(opts = {}) {
+  const fromLink = !!opts.fromLink;
+  const has = (k) => fromLink && ctx.linkKeys.has(k);
   supersedeQuestion();
   landingError("");
   landingNotice(null);
@@ -1038,22 +1255,39 @@ async function onDemo() {
     }));
     const sets = texts.map((t, i) => Core.greenbutton.parse(t, { filename: names[i] }));
     const loadSet = Core.greenbutton.mergeLoadSets(sets);
+    // A link naming a utility the tariff library has keeps it; the demo's ZIP must not flip it.
+    const linkUtil = has("util") && utilityOf(State.get().site.utilityId) ? State.get().site.utilityId : null;
     State.update((s) => {
       // Flagged in the hash so a shared link built on the demo loads the demo.
       s.ui.demo = true;
       s.ui.existingSolarAck = false;
-      s.site.lat = 34.15; s.site.lon = -118.75; s.site.elevationM = 280;
-      s.site.tz = "America/Los_Angeles"; s.site.utilityId = "sce";
+      if (!has("lat")) s.site.lat = 34.15;
+      if (!has("lon")) s.site.lon = -118.75;
+      if (!has("elev")) s.site.elevationM = 280;
+      if (!has("tz")) s.site.tz = "America/Los_Angeles";
       s.site.addressLabel = "Demo household, Agoura Hills CA 91301";
       // The demo is a real house: SCE delivery with Clean Power Alliance 100% Green
       // generation on TOU-D-PRIME, a south-facing roof at 169 degrees with room for far
       // more panels than the optimiser will ever want.
-      s.tariff.utilityId = "sce"; s.tariff.planId = "TOU-D-PRIME"; s.tariff.providerId = "cpa_green";
-      if (!s.roof.planes.length || (s.roof.planes.length === 1 && !s.roof.planes[0].polygon)) {
+      if (!linkUtil) {
+        s.site.utilityId = "sce";
+        s.tariff.utilityId = "sce"; s.tariff.planId = "TOU-D-PRIME"; s.tariff.providerId = "cpa_green";
+      } else {
+        s.tariff.utilityId = linkUtil;
+        if (linkUtil === "sce") {
+          if (!has("plan")) s.tariff.planId = "TOU-D-PRIME";
+          if (!has("prov")) s.tariff.providerId = "cpa_green";
+          if (!has("breg") && Core.tariff && Core.tariff.baselineRegionForZip) {
+            const r = Core.tariff.baselineRegionForZip(utilityOf("sce"), "91301");
+            if (r && r.region && !r.ambiguous) s.site.baselineRegion = String(r.region);
+          }
+        }
+      }
+      if (!has("roof") && (!s.roof.planes.length || (s.roof.planes.length === 1 && !s.roof.planes[0].polygon))) {
         s.roof.planes = [Object.assign(defaultPlane("p1", "South face"), { azimuth: 169, maxPanels: 40 })];
       }
     }, "silent");
-    await adoptLoadSet(loadSet, "91301");
+    await adoptLoadSet(loadSet, linkUtil ? null : "91301", { skipZip: !!linkUtil, keepFlex: has("flex") });
   } catch (err) {
     console.error(err);
     landingError(userMessageOf(err, "The demo data could not be loaded."));
@@ -1068,8 +1302,9 @@ function fileZipOf(loadSet) {
 }
 
 /** Everything that happens once there is a LoadSet, however it arrived. */
-async function adoptLoadSet(loadSet, zipHint) {
+async function adoptLoadSet(loadSet, zipHint, opts = {}) {
   ctx.loadSet = loadSet;
+  ctx.engineYears = null; ctx.engineAnnualKwh = null;   // until the engine has seen this file
   // What SCE will size against: the metered kWh of the most recent 12 months.
   ctx.recentAnnualKwh = Core.sizing ? Core.sizing.recentAnnualKwh(loadSet) : null;
   const meta = loadSet.meta || {};
@@ -1087,6 +1322,15 @@ async function adoptLoadSet(loadSet, zipHint) {
       const pool = Core.flexload.detectPool(loadSet, { evKwhByHour: ev ? ev.kwhByHour : null });
       const found = [ev, pool].filter(Boolean);
       State.update((s) => {
+        if (opts.keepFlex) {
+          // A link listed the flexible loads: keep exactly that list and only
+          // re-attach the detector's hourly slice to the detected entries.
+          for (const f of s.flex) {
+            const d = f.source === "detected" && found.find((x) => x.kind === f.kind);
+            if (d) { f.kwhByHour = d.kwhByHour; f.detection = d.detection; }
+          }
+          return;
+        }
         // A share link (or a saved session) may already describe this household's
         // detected loads with the schedule the person chose.  The detector owns the
         // hourly slice and its provenance; the schedule, scale and name stay theirs.
@@ -1102,7 +1346,7 @@ async function adoptLoadSet(loadSet, zipHint) {
   }
 
   // Which rate book. A ZIP out of the file header beats anything we guessed.
-  const zip = zipHint || fileZipOf(loadSet);
+  const zip = opts.skipZip ? null : (zipHint || fileZipOf(loadSet));
   State.saveLoadSet(loadSet);
   // A new file after a coverage block: its utility is asked, never inherited.
   await chooseTariff(zip, { ask: true, forceAsk: !zip && ctx.coverageBlocked });
@@ -1244,6 +1488,9 @@ async function chooseTariff(zip, opts = {}) {
   }, "silent");
   return true;
 }
+
+/** What a bill calls each utility; the chip has no room for the full legal name. */
+const UTILITY_SHORT = { pge: "PG&E", sce: "SCE", sdge: "SDG&E" };
 
 const utilityName = (id) => ((utilityOf(id) || {}).utility || {}).name
   || String(id).toUpperCase();
@@ -1521,6 +1768,7 @@ async function enterApp() {
   renderBanner();
 
   buildTabStrip();
+  buildRailJump();
   rail = new ControlRail($("rail-controls"), onControlSet);
   mountedTab = null;
   mountTab();
@@ -1617,14 +1865,13 @@ function bindShell() {
         mountedTab = null;
         mountTab();
         if (next.site.utilityId !== prevUtil) {
-          // A different rate book: the worker was initialised with the old one.
-          // A programmatic switch, so a standing coverage block is not lifted.
-          chooseTariff(null).then(async () => {
-            markStale();
-            await bootWorker();
-            await refreshSolarAndGrid();
-            render();
-          });
+          // A different rate book: the worker was initialised with the old one, so
+          // this is a fresh load of that utility - new tariff, new worker, nothing
+          // carried over from the old rate book (its grid, detail run, plan list,
+          // replay).  A programmatic switch, so a standing coverage block is not
+          // lifted; a utility the library does not know keeps the old one running
+          // and says so instead of pricing the new name on the old tariffs.
+          onLinkUtility(prevUtil);
         } else {
           refreshSolarAndGrid();
         }
@@ -1642,6 +1889,32 @@ function bindShell() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") State.flushPersist();
   });
+}
+
+/** A pasted link named a different utility: reboot exactly as a fresh load of it would. */
+async function onLinkUtility(prevUtil) {
+  const wanted = State.get().site.utilityId;
+  if (!utilityOf(wanted) && !ctx.coverageBlocked) {
+    State.update((s) => { s.site.utilityId = prevUtil; s.tariff.utilityId = prevUtil; }, "silent");
+    toast(DAMAGED_LINK);
+    render();
+    return;
+  }
+  ctx.grid = null; ctx.priced = null; ctx.selected = null; ctx.detail = null; ctx.replay = null;
+  ctx.planOptions = []; ctx.providerOptions = [];
+  ctx.weatherRows = null; ctx.tornado = null;
+  markStale();
+  const ok = await chooseTariff(null);
+  // A baseline region carried over from the old utility means nothing in the new rate book.
+  const regions = ok && Core.tariff.baselineRegionList ? Core.tariff.baselineRegionList(ctx.tariff) : [];
+  const breg = State.get().site.baselineRegion;
+  if (ok && breg && !regions.some((r) => String(r.id) === String(breg))) {
+    State.update((s) => { s.site.baselineRegion = null; }, "silent");
+  }
+  renderBanner();
+  await bootWorker();              // with a block standing this only shows the reason
+  if (ok) await refreshSolarAndGrid();
+  render();
 }
 
 const DAMAGED_LINK = "Part of the link could not be read; those settings were left as they were.";
@@ -1676,6 +1949,11 @@ async function boot() {
     if (location.hash) {
       const report = {};
       start = State.fromHash(location.hash, start, report);
+      const bad = new Set(report.keys || []);
+      for (const pair of location.hash.replace(/^#/, "").split("&")) {
+        const k = pair.split("=")[0];
+        if (k && !bad.has(k)) ctx.linkKeys.add(k);
+      }
       if (report.damaged) { console.warn("Damaged link keys:", report.keys); toast(DAMAGED_LINK); }
     }
   } catch (err) {
@@ -1727,8 +2005,13 @@ async function boot() {
     // The file's own ZIP is stored with it, so its coverage decision is re-run
     // exactly as on the first drop (a LADWP file stays blocked; a split ZIP the
     // person already answered is not asked again).
+    // A utility the link or the saved session already names (and the library has)
+    // stands: the file's ZIP only re-applies a coverage block, never swaps utilities.
     const fileZip = fileZipOf(saved);
-    if (fileZip) {
+    const named = utilityOf(State.get().site.utilityId) ? State.get().site.utilityId : null;
+    const cov = fileZip && named && Core.coverage ? Core.coverage.coverageForZip(fileZip, ctx.tariffLib) : null;
+    const zipBlocks = !!cov && (cov.kind === "outside" || (cov.kind === "muni" && !cov.shared));
+    if (fileZip && (!named || zipBlocks)) {
       const prior = utilityOf(State.get().site.utilityId) ? State.get().site.utilityId : null;
       await chooseTariff(fileZip, { ask: true, prior });
     } else if (!ctx.coverageOk) {
@@ -1738,7 +2021,7 @@ async function boot() {
   } else if (State.get().ui.demo && location.hash) {
     // A shared link built on the demo household: load the demo so the
     // recipient sees exactly what the sender saw.
-    await onDemo();
+    await onDemo({ fromLink: true });
   }
 }
 

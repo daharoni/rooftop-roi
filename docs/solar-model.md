@@ -10,7 +10,9 @@ script was validated against **PVGIS v5.2 PVcalc driven by PVGIS-NSRDB** — the
 satellite radiation family NREL PVWatts uses — for the reference site (Agoura Hills, CA;
 34.15 N, 118.75 W, 280 m). NREL's own PVWatts API was unreachable from the prototype's
 network, so PVGIS-NSRDB stood in. The port reproduces the prototype exactly on identical
-inputs (see [Validation](#validation)).
+inputs, with one deliberate fix since 2026-10: wind is converted from km/h to m/s before
+the cell-temperature term, which lowers output ~3.3% (see [wind speed units](#wind-speed-units)
+and [Validation](#6-validation)).
 
 ---
 
@@ -25,10 +27,14 @@ inputs (see [Validation](#validation)).
 | `dhi` | Open-Meteo `diffuse_radiation` | W/m² | |
 | `bhi` | Open-Meteo `direct_radiation` | W/m² | direct on the horizontal; fetched, not used by the model |
 | `temp` | Open-Meteo `temperature_2m` | °C | |
-| `wind` | Open-Meteo `wind_speed_10m` | **km/h** | see the [wind caveat](#wind-speed-units) |
+| `wind` | Open-Meteo `wind_speed_10m` | **km/h** | `core/pv.js` converts to m/s — see [wind speed units](#wind-speed-units) |
 
 Everything comes from the free, keyless **Open-Meteo historical archive** (ERA5 reanalysis,
-~30 km native grid, downscaled). One request per year:
+~30 km native grid, downscaled). Consecutive uncached years are fetched **up to four per
+request** (`MAX_YEARS_PER_REQUEST`; `start_date`/`end_date` may span years), so the default
+eleven years take three requests, not eleven. Each response is cut back into one-year
+windows (`sliceYear`) that are byte-for-byte what a one-year request returns, and cached per
+year under the same keys as before. A one-year request looks like:
 
 ```
 https://archive-api.open-meteo.com/v1/archive
@@ -150,9 +156,13 @@ POA = IAM(θ)·(beam + circumsolar) + 0.96·(isotropic + ground)
 PVWatts `array_type = 1` coefficients:
 
 ```
-T_module = POA · exp(a + b · wind) + T_ambient,     a = −2.98, b = −0.0471
+T_module = POA · exp(a + b · wind) + T_ambient,     a = −2.98, b = −0.0471, wind in m/s
 T_cell   = T_module + (POA/1000) · ΔT,              ΔT = 1 °C
 ```
+
+`wind` is Open-Meteo's km/h ÷ 3.6. (A weather year whose `units.wind` is `"m/s"` is used
+as is.) Until 2026-10 the km/h number went in unconverted — see
+[wind speed units](#wind-speed-units).
 
 ### 3.5 DC power and losses
 
@@ -179,9 +189,10 @@ A 1.2 DC/AC ratio clips the top of clear summer days. That is deliberate and nor
 is also why an oversized array's marginal panel is worth less than its first one, which the
 optimizer relies on.
 
-### 3.7 Monthly bias correction (optional)
+### 3.7 Monthly bias correction (optional, off by default)
 
-`P_ac ← P_ac · bias[month]`. See [§5](#5-the-bias-correction).
+`P_ac ← P_ac · bias[month]`. No regional table ships, so `bias` is all ones unless the
+caller passes its own twelve factors. See [§5](#5-the-bias-correction).
 
 ---
 
@@ -197,8 +208,8 @@ chosen months together. This is the classic TMY construction collapsed to a sing
 (production instead of Sandia's weighted Finkelstein–Schafer statistic over nine variables).
 It is a synthetic year: no real year looks like it, and its month boundaries have small
 discontinuities. The chosen source year per month is reported in `tmySources`. Because a
-month's bias factor scales every year identically, the selection is unaffected by the bias
-correction.
+month's bias factor scales every year identically, the selection is unaffected by a
+(caller-supplied) bias correction.
 
 **Exceedance percentiles.** The solar-industry convention, which is the opposite of the
 statistical one: **P90 is the annual yield exceeded in 90% of years, i.e. the LOW,
@@ -231,106 +242,140 @@ can drag a shading slider without re-running the PV model.
 
 ## 5. The bias correction
 
-`BIAS_CORRECTIONS["pvgis-nsrdb-socal"]` is twelve multiplicative factors that map this
-model's 11-year monthly means onto PVGIS-NSRDB's monthly means at the reference site:
+**No regional correction is applied anywhere.** `BIAS_CORRECTIONS` is an empty (frozen)
+object, so `biasCorrection: "auto"` (the default) resolves to `"none"` at every site. The
+option still accepts `"none"` / `false` and a 12-number array of your own monthly factors;
+`"pvgis-nsrdb-socal"` is no longer a valid id and throws.
 
-```
-Jan 1.0220  Feb 0.9670  Mar 1.0378  Apr 1.0002  May 1.0379  Jun 1.0311
-Jul 1.0140  Aug 1.0531  Sep 1.0134  Oct 0.9926  Nov 1.0034  Dec 0.9840
-```
+**What was removed, and why (2026-10-03).** Until then a `"pvgis-nsrdb-socal"` table applied
+inside a box around the LA basin, San Fernando / Conejo valleys and Ventura coast
+(33.6–34.5 N, 119.3–117.6 W). Its last refit divided PVGIS-NSRDB's monthly `H(i)_m` by this
+model's POA, but took the model POA **after** the incidence-angle loss (b₀ = 0.05 on beam,
+0.96 on diffuse) while PVGIS `H(i)` is **before** its own angle loss (PVGIS reports that
+separately, as `l_aoi`). The model's angle loss at the reference site is 2.45%, so every
+factor carried a spurious +2.45%: the table claimed ERA5 was 1.5% dim there when it is in
+fact about 1% bright.
 
-**It is region specific.** It is dominated by ERA5's known negative irradiance bias against
-satellite retrievals in coastal southern California — ERA5 over-predicts the May/June marine
-layer and misses some thin-cirrus days, and the residual shows up worst in August (+5.3%).
-Those factors have no physical meaning in a different climate, so:
+Like for like (model POA with `{ b0: 0, iamDiffuse: 1 }`, 11-year mean 2015–2025, tilt 20°,
+azimuth 180°) at the reference site:
 
-`biasCorrection: "auto"` (the default) applies the table **only** inside the box it was
-fitted in — latitude 32.5 to 35.6 N, longitude 120.6 to 116.0 W — and applies nothing
-anywhere else. `"none"` turns it off; `"pvgis-nsrdb-socal"` forces it on; a 12-number array
-supplies your own.
+| | kWh/m²·yr |
+|---|---|
+| model POA, after IAM | 2187.6 |
+| model POA, before IAM (like for like) | 2242.4 |
+| PVGIS-NSRDB `H(i)_y` (v5.2 PVcalc, fetched 2026-10-03) | 2220.8 |
 
-**Is it needed?** No — not to meet the accuracy bar. Without it the model is 1.45–2.21%
-below the reference annual and at worst 6.1% off on a month, both inside the 3% / 10%
-budget. With it the model is within 0.7% and 1.2%. It is kept on inside SoCal because it is
-a real, measured correction toward a better radiation database, and it is kept off elsewhere
-because extrapolating it would be guesswork. Adding a new region means fitting a new table
-against PVGIS (or PVWatts) for that region and adding an entry with its own box.
+ERA5 reads **+0.97%** above NSRDB there; a consistent correction would be 0.990 annually
+(Jan 0.997, Feb 0.939, Mar 1.013, Apr 0.968, May 1.019, Jun 1.006, Jul 0.985, Aug 1.024,
+Sep 0.989, Oct 0.963, Nov 0.985, Dec 0.973). A 1% annual adjustment is smaller than the
+model's other uncertainties (ERA5's ~30 km grid, the flat 14% loss stack, shading entered
+as a derate), and any box creates a step at its edge that no user can see, so the table and
+the box were removed rather than refitted. Removing it moves the reference site's 11-year
+mean from 1572.1 to **1548.8 kWh/kW** (inside the reviewers' PVWatts-style band of
+1,514–1,668). Sites outside the old box (San Jose, Sacramento, Fresno, San Diego) do not
+move.
+
+**Known regional ERA5 biases are a stated uncertainty, not a correction.** Like for like
+against PVGIS-NSRDB (see the table in [§6](#6-validation)), ERA5 POA ranges from about
+**−1.4%** (Sacramento; the Central Valley reads slightly dim) to about **+12%** (the San
+Diego coast, where ERA5 burns the marine layer off too early and sends too much sun). Treat
+a coastal-southern-California estimate as optimistic by up to ~10% and a Central Valley one
+as a little conservative. The P90 year is the right number to finance on in either case.
+
+**If a table is ever reinstated**, fit it on irradiance and like for like — PVGIS `H(i)_m`
+divided by this model's POA computed with `{ b0: 0, iamDiffuse: 1 }` — never on yield (the
+two loss conventions differ by ~3.5%: PVGIS's 14% includes the inverter, PVWatts' does not)
+and never against post-IAM POA. An entry `{ id, factors[12], box }` in `BIAS_CORRECTIONS` is
+picked up by `"auto"` inside its box.
 
 ---
 
 ## 6. Validation
 
-Driven by the **same** Open-Meteo/ERA5 inputs, against
-`tests/fixtures/solar-agoura-hills.json` (tilt 20°, azimuth 180°, kWh/kW).
-Budget: **annual within 3%, every month within 10%.**
+### Against PVGIS-NSRDB at five California sites
 
-### With the bias correction (the default at this site)
+11-year means (Open-Meteo 2015–2025), tilt 20°, azimuth 180°, kWh/kW, no bias table (none
+ships). PVGIS is v5.2 PVcalc, `PVGIS-NSRDB` (2005–2015), building mount, 14% loss —
+**including** the inverter, so a PVWatts-style chain should sit 3–4% under it on identical
+irradiance.
 
-| year | model | fixture | annual Δ | worst month Δ |
-|---|---|---|---|---|
-| 2015 | 1667.5 | 1677.8 | −0.61% | Jun −1.08% |
-| 2016 | 1669.0 | 1680.6 | −0.69% | Jun −1.14% |
-| 2017 | 1626.8 | 1626.9 | −0.00% | Feb +0.00% |
-| 2018 | 1625.5 | 1625.5 | −0.00% | Feb +0.00% |
-| 2019 | 1581.5 | 1581.5 | +0.00% | Jul −0.00% |
-| 2020 | 1653.0 | 1653.0 | +0.00% | Feb +0.00% |
-| 2021 | 1653.8 | 1653.8 | −0.00% | Feb +0.01% |
-| 2022 | 1659.7 | 1659.8 | −0.00% | Feb +0.00% |
-| 2023 | 1536.1 | 1536.1 | −0.00% | Jul −0.00% |
-| 2024 | 1603.9 | 1603.9 | +0.00% | Feb +0.00% |
-| 2025 | 1607.6 | 1607.6 | +0.00% | Feb +0.01% |
-| **worst** | | | **−0.69%** | **−1.14%** |
+"ERA5 POA vs NSRDB" is like for like: the model's plane-of-array irradiation **before** its
+incidence-angle loss against PVGIS `H(i)_y`, which is also before PVGIS's angle loss. (An
+earlier version of this table compared post-IAM POA and so read ~2.5 points low at every
+site: San Jose showed +0.0%, Sacramento −3.9%, San Diego +9.1%.) Agoura Hills, San Jose and
+Sacramento are computed from the cached weather; Fresno and San Diego are the old post-IAM
+figures shifted by the ~2.5% angle loss, hence "≈".
 
-Nine of the eleven years reproduce the prototype to **four significant figures**, which is
-what a faithful port should do. 2015 and 2016 differ by 0.6–0.7% because Open-Meteo has
-since revised those ERA5 years upstream — the fixture was built from the older
-vintage. That is drift in the *data*, not in the model, and it is well inside budget.
+| site | ERA5 POA vs NSRDB | prototype (km/h bug) | **fixed** | PVGIS-NSRDB | fixed vs PVGIS |
+|---|---|---|---|---|---|
+| Agoura Hills (reference) | +1.0% | 1625.8 (with its table) | **1548.8** | 1633.1 | −5.2% |
+| San Jose 37.34, −121.89 | +2.6% | 1582.8 | **1525.3** | 1555.4 | −1.9% |
+| Sacramento 38.58, −121.49 | −1.4% | 1487.5 | **1443.4** | 1541.0 | −6.3% |
+| Fresno 36.74, −119.79 | ≈ +0.5% | 1532.3 | **1490.8** | 1548.0 | −3.7% |
+| San Diego 32.72, −117.16 | **≈ +11.8%** | 1625.1 (old box) | **1537.3** | 1466.5 | +4.8% |
 
-Other checks:
+The "fixed vs PVGIS" column mixes three things — ERA5's irradiance error, the ~3.5%
+loss-convention difference, and model-chain differences (transposition, IAM, cell
+temperature) — so it is not a clean read of any one of them; the like-for-like POA column
+is the irradiance part. The spread across sites (−1.4% to ≈ +12%) is the regional
+uncertainty described in [§5](#5-the-bias-correction): the San Diego coast reads high, the
+Central Valley slightly low. The reviewers' PVWatts-style band for the reference site is
+1,514–1,668 kWh/kW; the fixed model's 11-year mean is 1548.8, TMY 1563.0.
 
-* **TMY**: 1638.4 vs the fixture's 1640.5 kWh/kW (−0.13%). Two of the twelve TMY month
-  sources differ (June, October) because the 2015/2016 revision moved them across a
-  near-tie for the median.
-* **Percentiles**: identical year assignment — P10 2015, P50 2017, P90 2019.
-* **Orientation grid** (42 tilt × azimuth combinations × 12 months): worst deviation
-  **1.56%** when driven by the same TMY splice the fixture used, **3.66%** when driven by a
-  single median year. The prototype's own orientation check against PVGIS was within 0.54%.
+### Against the prototype fixture
 
-### Without the bias correction
+`tests/fixtures/solar-agoura-hills.json` is the prototype's own output. Two checks:
 
-| year | annual Δ | worst month Δ |
-|---|---|---|
-| 2015 | −2.12% | Aug −5.99% |
-| 2016 | −2.21% | Aug −6.07% |
-| 2017 | −1.60% | Aug −5.04% |
-| 2018 | −1.45% | Aug −5.04% |
-| 2019 | −1.58% | Aug −5.04% |
-| 2020 | −1.49% | Aug −5.04% |
-| 2021 | −1.54% | Aug −5.04% |
-| 2022 | −1.55% | Aug −5.04% |
-| 2023 | −1.47% | Aug −5.04% |
-| 2024 | −1.61% | Aug −5.04% |
-| 2025 | −1.57% | Aug −5.04% |
-| **worst** | **−2.21%** | **−6.07%** |
+* **Prototype replay** — the same weather flagged `units.wind = "m/s"` (so the km/h number
+  goes in unconverted) with the prototype's bias table still reproduces it to four
+  significant figures (worst −0.69% annual, −1.14% month; 2015/2016 differ only because
+  Open-Meteo revised those ERA5 years upstream). That pins every other link of the chain.
+  Percentile years are identical (P10 2015, P50 2017, P90 2019).
+* **Fixed model** — 4.5–5.0% below the prototype each year (2015/16: −5.2/−5.4% with the
+  ERA5 revision): the wind fix (−3.1 to −3.6%) plus the removal of the prototype's bias
+  table (about −1.5%). The test band is −6.0% to −4.0%.
 
-Still inside budget — this is the accuracy to expect **outside** southern California, where
-`"auto"` applies nothing.
+| year | prototype | fixed | Δ |
+|---|---|---|---|
+| 2015 | 1677.8 | 1591.4 | −5.15% |
+| 2016 | 1680.6 | 1590.1 | −5.38% |
+| 2017 | 1626.9 | 1545.8 | −4.99% |
+| 2018 | 1625.5 | 1547.6 | −4.80% |
+| 2019 | 1581.5 | 1504.6 | −4.86% |
+| 2020 | 1653.0 | 1573.5 | −4.81% |
+| 2021 | 1653.8 | 1572.4 | −4.92% |
+| 2022 | 1659.8 | 1577.1 | −4.98% |
+| 2023 | 1536.1 | 1467.5 | −4.46% |
+| 2024 | 1603.9 | 1532.0 | −4.48% |
+| 2025 | 1607.6 | 1534.8 | −4.53% |
 
-### Underlying reference accuracy (from the prototype, for context)
+In the fixed model 2015 and 2016 are a 0.1% near-tie for P10 (now 2016), and 2017 and 2018
+a 0.1% near-tie for P50 (now 2018); P90 2019 is unchanged.
+
+* **Orientation grid** (42 tilt × azimuth combinations × 12 months, single median year):
+  worst deviation from the prototype grid **4.02%** — cell temperature now depends a
+  little more on orientation, since modules run warmer.
+
+### Underlying reference accuracy (prototype, km/h wind, for context)
 
 | quantity | model | PVGIS-NSRDB |
 |---|---|---|
 | annual kWh/kW (11-yr mean, uncorrected) | 1602.8 | 1627.9 (−1.54%) |
-| POA irradiation kWh/m²·yr | 2187.6 | 2213.6 |
+| POA irradiation kWh/m²·yr, after the model's IAM | 2187.6 | 2213.6 |
+| POA irradiation kWh/m²·yr, before IAM (like for like with PVGIS `H(i)`) | 2242.4 | 2213.6 (2220.8 refetched 2026-10-03) |
 | POA per Open-Meteo's own `global_tilted_irradiance` | 2207.2 | — |
 
-So the transposition itself is within 1.2% of both an independent implementation and PVGIS.
+PVGIS `H(i)` and Open-Meteo's tilted irradiance are both before any angle-of-incidence
+loss, so the like-for-like row is the one to compare: the model's transposition of ERA5 is
+within 1.3% of PVGIS-NSRDB and 1.6% of Open-Meteo's own transposition.
 
 ### Tests
 
-`tests/pv.test.mjs`, `tests/weather.test.mjs` and `tests/geocode.test.mjs` — 66 tests, all
-offline except four clearly-marked live ones that **skip with an explanation** rather than
-fail when the network is down.
+`tests/pv.test.mjs` and `tests/weather.test.mjs` — 68 tests (plus `tests/geocode.test.mjs`),
+all offline except a few clearly-marked live ones that **skip with an explanation** rather
+than fail when the network is down, and skip outright under `SKIP_LIVE=1`. The live
+San Jose / Sacramento test pins those sites to ±2% of the numbers above, and the
+eleven-year fixture test pins the reference site's mean to ±2% of 1548.8.
 
 ```bash
 node --test tests/pv.test.mjs tests/weather.test.mjs tests/geocode.test.mjs
@@ -358,7 +403,9 @@ when neither a cache nor the network is available. If you keep a repo-local cach
 **Grid resolution.** ERA5 is a ~30 km reanalysis. It knows the regional climate, not your
 street. A coastal marine layer that burns off two miles inland, an urban heat island, a
 canyon's own fog — none of that is resolved. Expect a few percent of site-to-site error
-that no amount of model care removes.
+that no amount of model care removes, and more on the coast: against NSRDB, ERA5 POA runs
+from about −1.4% (Central Valley) to about +12% (San Diego coast). No regional correction
+is applied — see [§5](#5-the-bias-correction).
 
 **No terrain horizon.** The model assumes a clear horizon. A ridge to the south-west, a
 neighbour's oak, a chimney: all of it has to arrive as `plane.shading`, a flat derate the
@@ -371,13 +418,14 @@ not the same as losing all of 08:00–10:00 in December; per-month shading
 do it. Under a TOU tariff the *timing* of a shading loss can matter more than its size.
 
 <a id="wind-speed-units"></a>
-**Wind speed units.** Open-Meteo returns `wind_speed_10m` in **km/h** and the model feeds
-it to the Sandia `exp(a + b·wind)` term, whose coefficients are defined for **m/s**. The
-reference model did the same, so a faithful port must too. The practical effect is modules
-modelled ~10 °C cooler than Sandia intends (roughly +4% output), which is partly offset by
-the model's other conservative choices — the uncorrected result still lands 1.5% *below*
-PVGIS-NSRDB. Changing it would need the whole loss stack recalibrated and would break the
-fixture. Recorded here as a known, deliberate deviation, not an accident.
+**Wind speed units.** Open-Meteo returns `wind_speed_10m` in **km/h**; the Sandia
+`exp(a + b·wind)` coefficients are defined for **m/s**. The prototype (and this port, until
+2026-10) fed the km/h number in unconverted, which modelled modules ~10 °C cooler than
+Sandia intends and output **3.0–3.6% high** at every site checked. `hourlyProfile` now
+divides by 3.6; `acFromPoa` takes m/s. The weather cache and the `weatherYear` keep km/h
+(`units.wind`), so no cached data had to change. The bug had been hidden by two things:
+the prototype's SoCal table was fitted with it in place, and it happened to cancel PVGIS's
+more generous loss convention — see [§5](#5-the-bias-correction).
 
 **No spectral, no soiling season, no degradation.** The flat 14% covers all of it. Panel
 degradation over the analysis horizon belongs in `core/finance.js`, not here.
@@ -398,9 +446,31 @@ annual production, which is inside the noise and keeps every index arithmetic tr
 `fetchYears` is the only function in these three modules that can fail from the outside,
 and it **only ever rejects with `WeatherUnavailableError`**, which carries:
 
-* `code` — `"offline" | "http" | "api" | "timeout" | "aborted" | "data"`
+* `code` — `"offline" | "http" | "api" | "rate-limited" | "timeout" | "aborted" | "data"`
 * `userMessage` — a complete, non-technical sentence the UI can render verbatim
 * `year`, and the original failure as `cause`
+
+**Network etiquette.** Requests are strictly sequential. Each has a timeout
+(`REQUEST_TIMEOUT_MS`, 20 s for one year, +50% per extra year: 50 s for four) covering the
+headers *and* the body, surfaced as `"timeout"` (a user abort stays `"aborted"`). A 429 or
+5xx is retried up to `MAX_RETRIES = 3` times with exponential backoff (1.5 s, 3 s, 6 s, or
+the server's `Retry-After` up to 30 s); after that a 429 is `"rate-limited"` and a 5xx is
+`"http"`. Other 4xx are not retried. Each retry's timeout is capped at 20 s
+(`RETRY_TIMEOUT_CAP_MS`), so one four-year request waits at most 50 + 3 × 20 s plus backoff
+(≈ 2 minutes; 200 s if the server asks for the 30 s maximum every time). A final error
+response's body is read for the server's `reason` inside the same timeout and abort scope,
+and for at most 5 s (`ERROR_BODY_TIMEOUT_MS`), so a stalled error body can't hang the page.
+Timeout and abort messages name the whole year span (`2019-2022`). Open-Meteo's free tier *weights* calls by size (about
+one call per two weeks of six variables), so batching years saves round-trips, not quota:
+an eleven-year site costs the same budget either way, and a few site changes inside one
+minute can still hit the per-minute limit — which is what the backoff is for. A cold
+four-year request measured 8–14 s.
+
+**Empty responses.** A year in which any modelled variable is more than 20% null
+(`MAX_NULL_FRACTION`) is a `"data"` error, not a dark year: stray nulls are still filled
+(0, or 15 °C) and counted in `weatherYear.nullHours`, but an all-null outage used to model
+as 0 kWh/kW and be cached for good. Every year is validated *before* it is cached, and a
+cached entry that no longer validates is treated as a miss and refetched.
 
 `tryFetchYears(opts)` wraps it and never rejects at all: `{ ok: true, years }` or
 `{ ok: false, error, message }`. Everything else in the tool must keep working when solar
@@ -489,11 +559,13 @@ user override it:
 
 ```js
 // core/weather.js
-fetchYears({ lat, lon, years, elevationM, signal, cache, cacheOnly, onProgress }) -> Promise<weatherYear[]>
+fetchYears({ lat, lon, years, elevationM, signal, cache, cacheOnly, onProgress,
+             timeoutMs, retries, retryDelayMs, yearsPerRequest }) -> Promise<weatherYear[]>
 tryFetchYears(opts)            -> Promise<{ ok, years } | { ok, error, message }>
 defaultYears(today?, count?)   -> number[]      // 11 most recent complete years
 latestCompleteYear(today?)     -> number
 toWeatherYear(rawResponse, { year, lat, lon }) -> weatherYear
+sliceYear(rawResponse, year)   -> rawResponse   // one year's window of a multi-year response
 weatherYearFromArrays({ ... }) -> weatherYear   // synthetic skies, imported TMY files
 cacheKey(lat, lon, year)       -> string
 memoryCache() | fileCache({ dir }) | indexedDbCache() | defaultCache()
@@ -509,7 +581,7 @@ orientationFactor(site, tilt, az, refTilt, refAz, weatherYear) -> number[12]
 shadeFactor(plane)                               -> { annual, monthly, kind }
 solarPosition(utcMs, lat, lon)                   -> { elevation, azimuth, e0n, ... }
 poaHdkr(ghi, dni, dhi, elev, solarAz, e0n, tilt, az, opts) -> { beam, diffuse, poa, aoi }
-acFromPoa(poa, tamb, wind, opts)                 -> number
+acFromPoa(poa, tamb, windMs, opts)               -> number      // wind in m/s
 monthlyTotals(profile) | annualTotal(profile) | resolveBias(spec, site)
 DEFAULTS, BIAS_CORRECTIONS
 

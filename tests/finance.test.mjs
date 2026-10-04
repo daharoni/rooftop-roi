@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import Finance from "../core/finance.js";
+import { DEFAULTS as STATE_DEFAULTS } from "../app/state.js";
 
 const near = (a, b, tol, msg) =>
   assert.ok(Math.abs(a - b) <= tol, `${msg}: expected ${b} +-${tol}, got ${a}`);
@@ -104,12 +105,13 @@ test("incentive modes", () => {
        22500, 1e-6, "direct discount: 25% off = $22,500");
   const vend = Finance.evaluate(sim, { ...base, incentiveMode: "vendor" });
   near(vend.effectiveDiscount, 0.34, 1e-12, "vendor pass-through defaults to 34 points off");
+  near(Finance.evaluate(sim, base).netCost, 30000, 1e-6, "and with no mode given, no incentive (the app's default)");
   near(vend.netCost, 30000 * 0.66, 1e-6, "...so a $30,000 system nets $19,800");
   near(vend.effectiveCostPerW, 1.98, 1e-12, "$3.00/W sticker shows $1.98/W net");
   const vendKwh = Finance.evaluate({ ...sim, battKWhTotal: 10 },
                                    { ...base, costPerKwh: 1000, incentiveMode: "vendor" });
   near(vendKwh.effectiveCostPerKwh, 660, 1e-9, "$1,000/kWh sticker shows $660/kWh net");
-  assert.equal(Finance.DEFAULTS.incentiveMode, "vendor", "vendor pass-through is the default mode");
+  assert.equal(Finance.DEFAULTS.incentiveMode, "none", "no incentive is the default mode, as in the app");
   near(Finance.DEFAULTS.vendorCreditPct, 0.40, 1e-12, "the vendor's 40% credit is context only");
   near(Finance.DEFAULTS.battReplYear, 20, 0, "battery replacement defaults to year 20");
 });
@@ -362,4 +364,190 @@ test("financing defaults and lifetime cost", () => {
   near(cash.lifetimeCost, 16000 + 600 * 10, 1e-6, "cash: the system plus ten years of bills");
   near(loan.lifetimeCost, loan.paymentsByYear.reduce((a, b) => a + b, 0) + 600 * 10, 1e-6,
        "loan: every payment plus ten years of bills");
+});
+
+// ================================================================== P1 money-math fixes
+// A battery-and-panels system with numbers in the range the app produces.
+const SYS = { savings: 3500, importSavings: 2800, exportRevenue: 700, bill: 700,
+              baselineBill: 4200, pvKwh: 14000, kwdc: 9.2, battKWhTotal: 10 };
+
+test("lease ending before the horizon: returned without a buyout, owned after one", () => {
+  const lease = (termYears, buyout) => ({ mode: "lease",
+    lease: { monthly: 150, escalatorPct: 0.029, termYears, buyout } });
+  const f = { horizon: 25, resaleValue: 4000 };
+
+  // No buyout: the panels go back to the lessor and the savings stop with the payments.
+  const back = Finance.evaluate(SYS, { ...f, financing: lease(15, 0) });
+  assert.deepEqual(back.leaseEnd, { year: 15, outcome: "returned" }, "the lease ends in year 15, system returned");
+  assert.ok(back.savingsByYear[15] > 0, "the household saves through the last lease year");
+  for (let y = 16; y <= 25; y++) {
+    assert.equal(back.savingsByYear[y], 0, `no savings in year ${y} from a system that has gone`);
+    assert.equal(back.cashflows[y], 0, `and no cash flow at all in year ${y}`);
+  }
+  assert.equal(back.omByYear.concat(back.extrasByYear).every((v) => v === 0), true,
+               "the lessor's O&M and replacements never reach the household");
+  near(back.wealthDelta, back.npv * Math.pow(1.07, 25), 1e-6, "the wealth identity holds");
+  const full = Finance.evaluate(SYS, { ...f, financing: lease(25, 0) });
+  assert.ok(back.npv < full.npv,
+            "a short lease no longer beats the full-term one by handing out ten free years of savings");
+
+  // A buyout: paid in the last term year, then the household owns it like a cash buyer.
+  const own = Finance.evaluate(SYS, { ...f, financing: lease(15, 8000) });
+  assert.deepEqual(own.leaseEnd, { year: 15, outcome: "buyout" }, "owned after the year-15 buyout");
+  near(own.paymentsByYear[15], 150 * 12 * 1.029 ** 14 + 8000, 1e-6, "the buyout lands in year 15");
+  near(own.paymentsByYear[16], 0, 1e-12, "and nothing is owed after it");
+  assert.ok(own.savingsByYear[16] > 0 && own.savingsByYear[25] > 0, "the savings carry on");
+  assert.equal(own.omByYear[15], 0, "O&M is the lessor's in the lease years");
+  near(own.omByYear[16], 150 * 1.025 ** 15, 1e-9, "and the owner's from year 16, inflation-escalated");
+  assert.equal(own.extrasByYear[12], 0, "the year-12 inverter swap is still the lessor's");
+  near(own.extrasByYear[20], 10 * 1000 * 0.5, 1e-9, "the year-20 battery replacement is the owner's");
+  near(own.netSavingsByYear[25], own.savingsByYear[25] - own.omByYear[25] + 4000, 1e-9,
+       "and so is the resale credit at the horizon");
+  near(own.wealthDelta, own.npv * Math.pow(1.07, 25), 1e-6, "the wealth identity holds after a buyout");
+  near(own.wealthDelta, own.wealthSystem - own.wealthInvest, 1e-9, "wealthDelta is still the difference");
+  assert.equal(Finance.breakEven(SYS, { ...f, financing: lease(15, 8000) }, "costPerKwh"), null,
+               "a lease has no sticker break-even, even when the owner later pays for a pack");
+
+  const toEnd = Finance.evaluate(SYS, { ...f, financing: lease(25, 0) });
+  assert.deepEqual(toEnd.leaseEnd, { year: 25, outcome: "runs to horizon" }, "a full-term lease runs to the horizon");
+  assert.equal(Finance.evaluate(SYS, f).leaseEnd, null, "cash has no lease end");
+});
+
+test("ACC Plus revenue drops out after its nine-year lock", () => {
+  const sim = { ...SYS, accPlusRevenue: 200 };                   // inside the $700 export revenue
+  const f = { horizon: 25, escalation: 0.05, exportEscalation: 0, panelDeg: 0.005, battDeg: 0,
+              battReplYear: 0, inverterYear: 0, omPerYear: 0 };
+  near(Finance.DEFAULTS.accPlusYears, 9, 0, "the adder is locked for nine years by default");
+  const r = Finance.evaluate(sim, f), plain = Finance.evaluate(SYS, f);
+  for (let y = 1; y <= 9; y++) near(r.savingsByYear[y], plain.savingsByYear[y], 1e-9, `year ${y} keeps the adder`);
+  for (const y of [10, 17, 25]) {
+    const deg = plain.savingsByYear[y] / (2800 * 1.05 ** (y - 1) + 700);   // that year's blend
+    near(r.savingsByYear[y], (2800 * 1.05 ** (y - 1) + 500) * deg, 1e-6,
+         `year ${y}: the export half has lost the $200 adder, degraded like the rest`);
+  }
+  assert.ok(r.npv < plain.npv, "so NPV falls");
+  near(Finance.evaluate({ ...SYS, accPlusRevenue: 0 }, f).npv, plain.npv, 1e-12, "zero adder: unchanged");
+  near(Finance.evaluate(sim, { ...f, accPlusYears: 25 }).npv, plain.npv, 1e-9,
+       "and a lock as long as the horizon changes nothing");
+});
+
+test("roof cost adder: in the price whenever there are panels, never in the degradation blend", () => {
+  const f = { horizon: 25, roofCostAdder: 2500 };
+  const r = Finance.evaluate(SYS, f), plain = Finance.evaluate(SYS, { horizon: 25 });
+  near(r.gross - plain.gross, 0, 1e-9, "the adder is not part of the system's sticker price");
+  near(r.roofCost, 2500, 1e-12, "and is reported on its own");
+  near(r.netCost - plain.netCost, 2500, 1e-9, "it lands in the net cost in full");
+  near(Finance.evaluate(SYS, { ...f, incentiveMode: "vendor" }).netCost
+       - Finance.evaluate(SYS, { horizon: 25, incentiveMode: "vendor" }).netCost, 2500, 1e-9,
+       "no vendor pass-through or tax credit reaches roof work");
+  near(Finance.evaluate(SYS, { ...f, taxCreditPct: 0.3 }).netCost
+       - Finance.evaluate(SYS, { horizon: 25, taxCreditPct: 0.3 }).netCost, 2500, 1e-9,
+       "nor does the ITC");
+  const leaseF = { ...f, financing: { mode: "lease", lease: { monthly: 150, escalatorPct: 0.02, termYears: 25, buyout: 0 } } };
+  near(Finance.evaluate(SYS, leaseF).upfront, 2500, 1e-9, "under a lease the household still pays for the roof up front");
+  assert.deepEqual(r.savingsByYear, plain.savingsByYear, "the panel/pack degradation blend does not move");
+  near(Finance.evaluate({ ...SYS, kwdc: 0 }, f).gross, 10 * 1000, 1e-9, "a pack alone pays no roof adder");
+  near(Finance.withDefaults({ roofCostAdder: -500 }).roofCostAdder, 0, 0, "a negative adder clamps to zero");
+  near(Finance.DEFAULTS.roofCostAdder, 0, 0, "and it defaults to zero");
+});
+
+test("replacements recur on long horizons, but not in the last few years", () => {
+  assert.equal(Finance.REPLACE_MIN_REMAINING, 3, "a replacement needs three years of horizon after it");
+  assert.deepEqual(Finance.replacementYears(12, 25), [12], "inverter at 12, not 24, on 25 years");
+  assert.deepEqual(Finance.replacementYears(20, 25), [20], "battery at 20 on 25 years");
+  assert.deepEqual(Finance.replacementYears(12, 40), [12, 24, 36], "every 12 years on a 40-year horizon");
+  assert.deepEqual(Finance.replacementYears(12, 27), [12, 24], "year 24 of 27 still counts");
+  assert.deepEqual(Finance.replacementYears(0, 25), [], "an interval of zero means never");
+
+  // The demo default is pinned: exactly the one inverter and one battery it always had.
+  const d = Finance.evaluate(SYS, {});
+  for (let y = 1; y <= 25; y++) {
+    const want = y === 12 ? 9200 * 0.15 : y === 20 ? 10 * 1000 * 0.5 : 0;
+    near(d.extrasByYear[y], want, 1e-9, `25-year default: replacement spend in year ${y}`);
+  }
+  assert.deepEqual(d.replacementYears, { battery: [20], inverter: [12] }, "and reports them");
+
+  // Forty years: the pack is replaced at 15 and 30 and its fade clock restarts each time.
+  const pack = { ...SYS, kwdc: 0, savings: 1000, importSavings: 1000, exportRevenue: 0 };
+  const g = { horizon: 40, escalation: 0, battDeg: 0.02, battReplYear: 15, omPerYear: 0 };
+  const b = Finance.evaluate(pack, g);
+  near(b.extrasByYear[15], 5000, 1e-9, "first pack replacement");
+  near(b.extrasByYear[30], 5000, 1e-9, "second pack replacement");
+  near(b.savingsByYear[16], 1000, 1e-9, "fresh pack in year 16");
+  near(b.savingsByYear[31], 1000, 1e-9, "and again in year 31");
+  near(b.savingsByYear[30], 1000 * 0.98 ** 14, 1e-9, "year 30 is the old pack's 15th year");
+  // Too close to the end to book: no cost and no reset.
+  const late = Finance.evaluate(pack, { ...g, horizon: 22, battReplYear: 20 });
+  near(late.extrasByYear[20], 0, 0, "no pack bought in year 20 of 22");
+  near(late.savingsByYear[21], 1000 * 0.98 ** 20, 1e-9, "so the old pack keeps fading");
+});
+
+test("levered IRR: null with a reason, never a fake number", () => {
+  const loan = (sharePct, termYears) => ({ mode: "loan",
+    loan: { sharePct, apr: 0.0699, termYears, dealerFeePct: 0 } });
+  const cash = Finance.evaluate(SYS, {});
+  assert.ok(cash.irr > 0 && cash.irrReason === null, "cash: a real IRR and no reason needed");
+
+  // 100% financed with the payment below the saving: no money of the household's goes in first.
+  const free = Finance.evaluate(SYS, { financing: loan(1, 25) });
+  assert.equal(free.irr, null, "100% financed over 25 years has no levered IRR");
+  assert.equal(free.irrReason, "no money down", "because nothing was put down");
+  assert.ok(free.projectIrr > 0, "the project IRR is still there");
+
+  // A 30-year note on a 25-year horizon is settled at the horizon: -, +, +, ..., - .
+  const long = Finance.evaluate(SYS, { financing: loan(0.8, 30) });
+  assert.ok(long.cashflows[0] < 0 && long.cashflows[1] > 0 && long.cashflows[25] < 0,
+            "down payment, positive years, then the balloon payoff");
+  assert.equal(long.irr, null, "no single rate fits that stream");
+  assert.equal(long.irrReason, "no unique rate", "and the reason says so");
+  near(long.projectIrr, cash.projectIrr, 1e-12, "the project IRR does not care how it was paid for");
+
+  const under = Finance.evaluate(SYS, { financing: { mode: "lease",
+    lease: { monthly: 400, escalatorPct: 0.029, termYears: 25, buyout: 0 } } });
+  assert.equal(under.irr, null, "an underwater lease has no IRR");
+  assert.equal(under.irrReason, "never repays", "because it never comes back above water");
+
+  const short = Finance.evaluate(SYS, { financing: loan(0.8, 15) });
+  assert.ok(short.irr > 0 && short.irrReason === null, "an ordinary loan with money down keeps its IRR");
+});
+
+test("finance defaults match the app's State.DEFAULTS.fin", () => {
+  assert.equal(Finance.DEFAULTS.incentiveMode, "none", "incentive mode");
+  near(Finance.DEFAULTS.escalation, 0.05, 1e-12, "retail escalation");
+  const app = STATE_DEFAULTS.fin;
+  for (const k of Object.keys(Finance.DEFAULTS)) {
+    if (!(k in app)) continue;
+    assert.deepEqual(Finance.DEFAULTS[k], app[k], `finance DEFAULTS.${k} matches app/state.js`);
+  }
+});
+
+test("a lease bought out in the final year still earns the resale credit", () => {
+  const sim = { savings: 2500, importSavings: 2000, exportRevenue: 500, bill: 1500, baselineBill: 4000,
+                pvKwh: 9000, kwdc: 6, battKWhTotal: 0 };
+  const lease = (termYears, buyout) => Finance.evaluate(sim, {
+    horizon: 25, resaleValue: 10000,
+    financing: { mode: "lease", lease: { monthly: 150, escalatorPct: 0.02, termYears, buyout } },
+  });
+  const at25 = lease(25, 1), at24 = lease(24, 1), none = lease(25, 0);
+  assert.equal(at25.leaseEnd.outcome, "buyout");
+  // Buying for $1 in year 25 is worth the resale credit, not a pure cost: the NPV sits
+  // just under the 24-year buyout (one fewer year of ownership) and well above no buyout.
+  const resalePv = 10000 / Math.pow(1.07, 24.5) - 1 / Math.pow(1.07, 24.5);   // mid-year flows
+  near(at25.npv - none.npv, resalePv, 1, `buyout at the horizon earns the discounted resale credit (${at25.npv} vs ${none.npv})`);
+  assert.ok(Math.abs(at25.npv - at24.npv) < 1500, `continuous across the term boundary (${at25.npv} vs ${at24.npv})`);
+  // The wealth identity still holds in that corner.
+  const H = 25, r = 0.07;
+  assert.ok(Math.abs(at25.wealthDelta - at25.npv * Math.pow(1 + r, H)) < 1e-6 * Math.abs(at25.wealthDelta) + 1e-6);
+});
+
+test("a stray accPlusRevenue is clamped to the export revenue", () => {
+  const base = { savings: 2500, importSavings: 1700, exportRevenue: 800, bill: 1500, baselineBill: 4000,
+                 pvKwh: 9000, kwdc: 6, battKWhTotal: 0 };
+  const ok = Finance.evaluate(Object.assign({}, base, { accPlusRevenue: 800 }), { horizon: 25 });
+  const big = Finance.evaluate(Object.assign({}, base, { accPlusRevenue: 5000 }), { horizon: 25 });
+  const neg = Finance.evaluate(Object.assign({}, base, { accPlusRevenue: -500 }), { horizon: 25 });
+  const none = Finance.evaluate(base, { horizon: 25 });
+  assert.equal(big.npv, ok.npv, "more than the export revenue is treated as all of it");
+  assert.equal(neg.npv, none.npv, "a negative value is treated as none");
+  assert.ok(ok.savingsByYear[10] >= 0, "savings never go negative when the adder expires");
 });
