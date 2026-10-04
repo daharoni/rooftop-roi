@@ -11,7 +11,7 @@
 import { el, clear, $ } from "./dom.js";
 import { DISCLAIMER } from "./blocks.js";
 import { renderBillForm } from "./billform.js";
-import { CLAIM, EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote } from "../privacy.js";
+import { EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote } from "../privacy.js";
 
 /* Averaged summer weekday from data/demo/*.csv, and the TMY profile for 15 July
    at 20° tilt / 180° azimuth scaled to 6 kW DC. Real numbers, not a sketch. */
@@ -35,19 +35,28 @@ export function renderLanding(root, handlers) {
   clear(root);
 
   root.appendChild(el("header.landing-head", {}, [
-    el("div.wordmark", {}, [el("b", { text: "Rooftop ROI" }), el("span", { text: "solar + battery, priced against your own meter" })]),
-    el("h1.lede", { text: "Panels, a battery, or the index fund?" }),
-    el("p.landing-sub", {
-      text: "Rooftop ROI replays your own utility interval data hour by hour with panels and a battery bolted "
-        + "on, bills the result under California's Net Billing rules, and sets it against leaving the same cash "
-        + "in the market. It is for a homeowner holding an installer's quote who wants to know whether the "
-        + "number on it is any good. The best way to start is a Green Button file from SCE, PG&E or SDG&E — "
-        + "the instructions are below, and it takes about two minutes — but twelve monthly bills will do.",
-    }),
+    el("div.wordmark", {}, [el("span.roof-mark", { "aria-hidden": "true" }), el("b", { text: "Rooftop ROI" })]),
+    el("span.edition", { text: "A field guide to home energy · California" }),
   ]));
-
-  root.appendChild(heroFigure());
-
+  root.appendChild(el("section.landing-hero", {}, [
+    el("div.hero-intro", {}, [
+      el("p.eyebrow", { text: "Your roof. Your money. Your call." }),
+      el("h1.lede", {}, ["A sunny roof. ", el("em", { text: "A sound investment?" })]),
+      el("p.landing-sub", { text: "Find out whether solar and a battery earn their keep. Run your home's electricity use hour by hour, check an installer's quote, and compare the cost with investing the same money." }),
+      el("div.hero-actions", {}, [
+        el("a.btn.btn-primary.btn-lg", { href: "#start", text: "Use my home’s numbers", on: { click: (e) => {
+          e.preventDefault();
+          const start = $("start");
+          start.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+          start.focus({ preventScroll: true });
+        } } }),
+        el("button.btn.btn-lg", { type: "button", text: "Explore a demo →", on: { click: () => handlers.onDemo() } }),
+      ]),
+      el("p.hero-trust", { text: "Free to use · No account · Your meter file stays on this device" }),
+      el("p.hero-coverage", { text: "Built for SCE, PG&E and SDG&E households." }),
+    ]),
+    heroFigure(),
+  ]));
   root.appendChild(el("div.landing-grid", {}, [startPanel(handlers), privacyPanel()]));
 
   root.appendChild(pipeline());
@@ -91,7 +100,7 @@ function heroFigure() {
   // would sit on top of that tick's own label.
   for (let v = 0; v <= yMax; v += 1.5) {
     node.appendChild(svg("line", { x1: ML, x2: W - MR, y1: y(v), y2: y(v), stroke: "var(--grid)", "stroke-width": 1 }));
-    const label = svg("text", { x: ML - 8, y: y(v) + 3.5, "text-anchor": "end", fill: "var(--ink-3)", "font-size": 10 });
+    const label = svg("text", { x: ML - 8, y: y(v) + 3.5, "text-anchor": "end", fill: "var(--ink-3)", "font-size": 14 });
     label.textContent = v >= yMax - 0.01 ? v.toFixed(1) + " kWh" : v.toFixed(1);
     node.appendChild(label);
   }
@@ -115,13 +124,13 @@ function heroFigure() {
   }));
 
   for (const h of [0, 6, 12, 18, 23]) {
-    const t = svg("text", { x: x(h), y: H - 8, "text-anchor": h === 0 ? "start" : h === 23 ? "end" : "middle", fill: "var(--ink-3)", "font-size": 10 });
+    const t = svg("text", { x: x(h), y: H - 8, "text-anchor": h === 0 ? "start" : h === 23 ? "end" : "middle", fill: "var(--ink-3)", "font-size": 14 });
     t.textContent = String(h).padStart(2, "0") + ":00";
     node.appendChild(t);
   }
 
   const tag = (text, hx, vy, color, anchor) => {
-    const t = svg("text", { x: x(hx), y: y(vy), fill: color, "font-size": 11, "font-weight": 600, "text-anchor": anchor || "middle" });
+    const t = svg("text", { x: x(hx), y: y(vy), fill: color, "font-size": 14, "font-weight": 600, "text-anchor": anchor || "middle" });
     t.textContent = text;
     node.appendChild(t);
   };
@@ -129,13 +138,11 @@ function heroFigure() {
   tag("What the house uses", 4.6, 3.62, "var(--ink)");
   tag("evening peak, no sun", 18.5, 4.42, "var(--ink-2)");
 
-  return el("figure.hero-figure-wrap", { style: "margin-block:30px 0" }, [
+  return el("figure.hero-figure-wrap", {}, [
+    el("div.figure-heading", {}, [el("span.eyebrow", { text: "Field note / 01" }), el("h2", { text: "The sun keeps different hours." })]),
     node,
     el("figcaption.figcap", {
-      text: "One real summer weekday from the demo household's meter, against what 6 kW of panels would have "
-        + "made that day. Midday surplus sells back at roughly a fifth of what it costs to buy — and the "
-        + "house's own peak lands after the sun has gone. Whether a battery closes that gap profitably is the "
-        + "question this tool answers with your numbers instead of these.",
+      text: "A summer weekday at the demo home. A modeled 6 kW roof makes most of its power at midday; the home needs more in the evening. A battery can bridge the gap. The question is what that gap is worth.",
     }),
   ]);
 }
@@ -158,7 +165,7 @@ function startPanel(handlers) {
         + "years of readings gives a much steadier answer than one.",
     }),
     el("button.btn.btn-primary.btn-lg", { type: "button", text: "Choose a file", on: { click: () => fileInput.click() } }),
-    el("button.btn.btn-lg", { type: "button", text: "I only have my bills", on: { click: () => showBills() } }),
+    el("button.btn.btn-lg", { type: "button", text: "Enter monthly usage", on: { click: () => showBills() } }),
     el("button.btn.btn-lg", { type: "button", text: "Try the demo household", on: { click: () => handlers.onDemo() } }),
     fileInput,
   ]);
@@ -176,7 +183,7 @@ function startPanel(handlers) {
     const form = renderBillForm(door, {
       initial: lastBill || (/^\d{5}$/.test(z) ? { zip: z } : null),
       onSubmit: (spec) => { lastBill = spec; if (handlers.onMonthlyBills) handlers.onMonthlyBills(spec); },
-      onBack: (partial) => { if (partial) lastBill = partial; showDrop(); },
+      onBack: (partial) => { if (partial) lastBill = partial; showDrop(); zone.querySelector("button").focus(); },
       seasonalSplit: handlers.seasonalSplit,
     });
     const loc = locationBlock(); if (loc) loc.hidden = true;
@@ -192,19 +199,20 @@ function startPanel(handlers) {
     handlers.onFiles(Array.from(e.dataTransfer.files || []));
   });
 
-  const address = el("input", { type: "text", id: "addr-input", placeholder: "1 Main St, Agoura Hills CA" });
+  const address = el("input", { type: "text", id: "addr-input", placeholder: "Street address, city, CA", on: { keydown: (e) => { if (e.key === "Enter") { e.preventDefault(); handlers.onAddress(address.value); } } } });
   const zip = el("input", { type: "text", id: "zip-input", inputMode: "numeric", pattern: "[0-9]{5}", placeholder: "91301", maxLength: 5,
     on: { keydown: (e) => { if (e.key === "Enter") { e.preventDefault(); handlers.onZip(zip.value); } } } });
 
-  return el("section.panel", {}, [
-    el("h2", { text: "Start here" }),
+  return el("section.panel.start-panel", { id: "start", tabindex: "-1", "aria-labelledby": "start-title" }, [
+    el("p.eyebrow", { text: "Start with what you have" }),
+    el("h2", { id: "start-title", text: "Give your roof some real numbers." }),
     el("p.panel-sub", { text: "Two things: your meter readings (or twelve monthly bills), and where the roof is." }),
     door,
-    el("p.note", { id: "landing-error", hidden: true }),
+    el("p.field-error", { id: "landing-error", role: "alert", hidden: true }),
     el("div", { id: "landing-notice", hidden: true }),
 
     el("div.landing-location", {}, [
-    el("div.or-rule", { text: "and the location" }),
+    el("div.or-rule", { text: "Your location · optional until you run your home" }),
 
     el("div", { style: "display:flex;flex-direction:column;gap:12px" }, [
       el("div", {}, [
@@ -213,7 +221,7 @@ function startPanel(handlers) {
           address,
           el("button.btn", { type: "button", text: "Find", on: { click: () => handlers.onAddress(address.value) } }),
         ]),
-        el("p.ctl-note", { id: "geocode-disclosure", style: "margin-top:5px", text: GEOCODE_NOTE }),
+        el("details.utility-guide", {}, [el("summary", { text: "What is sent when I look up a location?" }), el("p.ctl-note", { id: "geocode-disclosure", text: GEOCODE_NOTE })]),
       ]),
       el("div", {}, [
         el("label.field-lab", { htmlFor: "zip-input", text: "…or just a ZIP code" }),
@@ -226,14 +234,14 @@ function startPanel(handlers) {
             + "place search to find its centre; the street address is not needed." }),
       ]),
       el("div", {}, [
-        el("button.btn", { type: "button", text: "Pick it on the map instead", on: { click: () => handlers.onMap() } }),
+        el("button.btn", { type: "button", text: "Use the roof map after loading data", on: { click: () => handlers.onMap() } }),
         el("p.ctl-note", { style: "margin-top:5px",
           text: "Available once your meter file is loaded: the map lives on the Roof tab. It shows satellite "
             + "imagery from Esri, and the tile requests show Esri roughly which block you are looking at "
             + "(about 75 m), along with your IP address. No address or ZIP is sent from the map." }),
       ]),
     ]),
-    el("p.note", { id: "landing-location-status", hidden: true }),
+    el("p.note", { id: "landing-location-status", role: "status", hidden: true }),
     ]),
 
     utilityGuide(),
@@ -286,7 +294,10 @@ function utilityGuide() {
 function privacyPanel() {
   return el("section.panel", {}, [
     el("div.privacy", {}, [
-      el("p.privacy-claim", { text: CLAIM }),
+      el("p.eyebrow", { text: "A calculator, not a sales pitch" }),
+      el("h2.privacy-claim", { text: "Your meter readings stay yours." }),
+      el("p.panel-sub", { text: "Your readings are processed on this device. No account, no upload, no request for your phone number. You can inspect the assumptions and the source code behind the answer." }),
+      el("details.privacy-details", {}, [el("summary", { text: "See network requests & local storage" }),
       el("p.panel-sub", { text: EXPLANATION }),
       el("ul.calls", {}, CALLS.map((c) => el("li" + (c.none ? ".none" : ""), {}, [
         el("span.who", { text: c.who }),
@@ -298,6 +309,8 @@ function privacyPanel() {
         ]),
       ]))),
       el("p.panel-sub", { style: "margin-top:14px", text: STORAGE_NOTE }),
+      ]),
+      el("div.field-note", {}, [el("h3", { text: "Start curious. Leave better prepared." }), el("p", { text: "Try the demo to get your bearings. Then bring your own readings, check your roof and rate plan, and see how the answer changes with the price you were quoted." })]),
     ]),
   ]);
 }
@@ -315,7 +328,7 @@ const STEPS = [
 function pipeline() {
   return el("section.pipeline", {}, [
     el("h2", { text: "What happens after you drop the file" }),
-    el("p.panel-sub", { text: "Five steps, all of them here on this device, in about a second." }),
+    el("p.panel-sub", { text: "The calculations run here. Weather loads for your location first; after that, explore at your own pace." }),
     el("ol.pipe", {}, STEPS.map((s, i) => el("li.pipe-step", {}, [
       el("span.pipe-glyph", {}, [glyph(s.glyph)]),
       el("strong", { text: s.title }),
@@ -362,7 +375,7 @@ export function landingNotice(spec) {
 }
 
 /** Prefer an error's own user-facing wording (GeocodeError, parser errors) over its technical message. */
-export const GENERIC_ERROR = "Something went wrong reading that; details in the console.";
+export const GENERIC_ERROR = "We couldn’t finish that step. Please try again. For a meter file, use an unzipped CSV or XML; you can also start with monthly usage or the demo.";
 
 /**
  * The sentence to show for an error.  Only errors written for people carry a
