@@ -11,6 +11,8 @@
  * ~15 ms, "ui." redraws, anything else re-simulates.
  * ========================================================================== */
 
+import { presetOptions } from "./presets.js";
+
 const mode = (s) => s.fin.financing.mode;
 /** Whole dollars with a thousands separator ("$1,400 /kWh"), for the slider label and aria-valuetext. */
 const dollars = (unit = "") => (v) => "$" + Math.round(Number(v)).toLocaleString("en-US") + unit;
@@ -75,6 +77,8 @@ export function price(ctx, open = true) {
       footnote: (s) => effective(s, "w") },
     { path: "fin.costPerKwh", kind: "range", label: "Storage, installed", min: 200, max: 2000, step: 25, money: 0, fmt: dollars(" /kWh"), unit: " /kWh",
       footnote: (s) => effective(s, "kwh") },
+    { path: "fin.costPerBattery", kind: "range", label: "Battery, per unit", min: 0, max: 15000, step: 250, money: 0, fmt: dollars(), unit: " /unit",
+      note: "Installers price a pack as a fixed sum per unit plus a per-kWh part. Leave at 0 to keep the per-kWh price doing all the work." },
     { path: "fin.adder", kind: "range", label: "Fixed install adder", min: 0, max: 20000, step: 250, money: 0, fmt: dollars(),
       note: "Panel upgrade, trenching, re-roof — anything quoted as a lump sum." },
   ] };
@@ -92,7 +96,9 @@ export function financing(open = true) {
       show: (s) => mode(s) === "loan" },
     { path: "fin.financing.loan.dealerFeePct", kind: "range", label: "Dealer fee", min: 0, max: 0.35, step: 0.01, pct: 0,
       show: (s) => mode(s) === "loan",
-      note: "A low advertised APR is usually paid for with a dealer fee rolled into the principal. Ask what it is." },
+      note: "A low advertised APR is usually paid for with a dealer fee rolled into the principal. Ask what it is.",
+      footnote: (s) => (mode(s) === "loan" && s.fin.financing.loan.dealerFeePct === 0
+        ? "0% is rare. A loan at 3-5% APR usually carries a 15-30% dealer fee rolled into the price." : "") },
     { path: "fin.financing.lease.monthly", kind: "range", label: "Lease payment", min: 0, max: 500, step: 5, money: 0, fmt: dollars(" /mo"), unit: " /mo",
       show: (s) => mode(s) === "lease" },
     { path: "fin.financing.lease.escalatorPct", kind: "range", label: "Annual escalator", min: 0, max: 0.06, step: 0.001, pct: 1, unit: " /yr",
@@ -120,20 +126,27 @@ export function incentives(open = false) {
       note: "Section 25D is terminated for a 2026 homeowner-owned install. Leave at 0 unless you know otherwise." },
     { path: "fin.sgipPerKwh", kind: "range", label: "Storage rebate", min: 0, max: 1100, step: 25, money: 0, fmt: dollars(" /kWh"), unit: " /kWh" },
     { path: "fin.rebates", kind: "range", label: "Other rebates", min: 0, max: 10000, step: 100, money: 0, fmt: dollars() },
+    { path: "fin.vppPerBattery", kind: "range", label: "VPP / grid-services payment", min: 0, max: 1000, step: 25, money: 0, fmt: dollars(" /battery/yr"), unit: " /battery/yr",
+      note: "California's DSGS programme pays roughly $350 a Powerwall a year through Tesla in 2026. Programmes change "
+        + "every year, so check the current one. Shown as its own line, never in the bill saving." },
   ] };
 }
 
 export function hardware(open = false) {
   return { group: "Hardware", open, items: [
+    { path: "system.battPreset", kind: "select", label: "Battery product", reason: "sim", opts: presetOptions(),
+      note: "Spec-sheet figures, approximate. Picking one fills the three sliders below; moving a slider turns this back to Custom." },
     item.panelW(),
     { path: "system.acFactor", kind: "range", label: "Panel AC rating vs nameplate", min: 0.8, max: 0.95, step: 0.01, pct: 0,
       reason: "ui", show: (s) => s.site.utilityId === "sce",
       footnote: () => "PTC rating × inverter efficiency. Only used for the SCE sizing line: SCE counts CEC-AC kW × 1,728 kWh/yr "
         + "against your last 12 months and refuses an application above 150%." },
-    { path: "system.battKWh", kind: "range", label: "Battery size, usable", min: 5, max: 20, step: 0.5, unit: " kWh each" },
+    { path: "system.battKWh", kind: "range", label: "Battery size, usable", min: 5, max: 30, step: 0.5, unit: " kWh each" },
     { path: "system.battKW", kind: "range", label: "Battery power", min: 2.5, max: 11.5, step: 0.5, unit: " kW each" },
     { path: "system.minReserve", kind: "range", label: "Reserved for backup", min: 0, max: 0.5, step: 0.05, pct: 0 },
     { path: "system.rte", kind: "range", label: "Round-trip efficiency", min: 0.8, max: 0.98, step: 0.01, pct: 0 },
+    { path: "fin.resilienceValue", kind: "range", label: "Value of backup power", min: 0, max: 3000, step: 50, money: 0, fmt: dollars(" /yr"), unit: " /yr",
+      note: "What a year of not losing power in an outage is worth to you. Counted only while there is a battery, as a separate line, never in the bill saving." },
   ] };
 }
 
@@ -234,8 +247,11 @@ export function wear(open = false) {
     { path: "fin.battDeg", kind: "range", label: "Battery degradation", min: 0, max: 0.05, step: 0.002, pct: 1, unit: " /yr" },
     { path: "fin.battReplYear", kind: "range", label: "Replace the battery in year", min: 10, max: 30, step: 1, fmt: yearN },
     { path: "fin.battReplFraction", kind: "range", label: "Replacement costs", min: 0, max: 1, step: 0.05, pct: 0, unit: " of today's price" },
-    { path: "fin.inverterYear", kind: "range", label: "Replace the inverter in year", min: 5, max: 30, step: 1, fmt: yearN },
-    { path: "fin.inverterPerW", kind: "range", label: "Inverter replacement", min: 0, max: 0.5, step: 0.01, money: 2, unit: " /W" },
+    { path: "fin.microinverters", kind: "check", label: "Microinverters (no central inverter to replace)" },
+    { path: "fin.inverterYear", kind: "range", label: "Replace the inverter in year", min: 5, max: 30, step: 1, fmt: yearN,
+      show: (s) => !s.fin.microinverters },
+    { path: "fin.inverterPerW", kind: "range", label: "Inverter replacement", min: 0, max: 0.5, step: 0.01, money: 2, unit: " /W",
+      show: (s) => !s.fin.microinverters },
     { path: "fin.omPerYear", kind: "range", label: "O&M + insurance", min: 0, max: 1000, step: 25, money: 0, fmt: dollars(" /yr"), unit: " /yr" },
     { path: "fin.resaleValue", kind: "range", label: "Value left in the house", min: 0, max: 40000, step: 500, money: 0, fmt: dollars() },
   ] };

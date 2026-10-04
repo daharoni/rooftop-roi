@@ -12,6 +12,7 @@ import { card, kv } from "../ui/blocks.js";
 import { fmtKwh, fmtNum, fmtPct, fmtHour } from "../ui/format.js";
 import { renderWeek } from "../charts/day.js";
 import * as K from "../ui/knobs.js";
+import { describe } from "../../core/heatpump.js";
 
 export const id = "loads";
 export const label = "Loads";
@@ -26,7 +27,10 @@ export function rail(state) {
     { group: "Add a load", open: true, items: [
       { path: "ui.addPreset", kind: "select", label: "Preset", opts: [
         { v: "", t: "Choose…" },
-        { v: "ev2", t: "Second EV — 3,000 kWh/yr" },
+        state.flex?.some((f) => f.kind === "ev")
+          ? { v: "ev2", t: "Second EV — 3,000 kWh/yr" }
+          : { v: "evp", t: "An EV (planned) — 3,000 kWh/yr" },
+        { v: "hp", t: "Heat pump (replacing gas) — 2,500 kWh/yr" },
         { v: "pool", t: "Pool pump — 2,400 kWh/yr" },
         { v: "hpwh", t: "Heat-pump water heater — 1,400 kWh/yr" },
         { v: "laundry", t: "Laundry — 600 kWh/yr" },
@@ -82,7 +86,7 @@ export function render(state, ctx) {
   }
 
   for (const load of flex) host.appendChild(loadCard(load, state, ctx));
-  host.appendChild(addCard(ctx));
+  host.appendChild(addCard(ctx, flex));
 
   if (ctx.week) {
     renderWeek({ before: ctx.week.before, after: ctx.week.after, hourLabels: ctx.week.labels });
@@ -98,9 +102,12 @@ export function render(state, ctx) {
 }
 
 /** The empty slot at the end of the row: what else this house could be told to do. */
-function addCard(ctx) {
+function addCard(ctx, flex) {
+  const hasEv = (flex || []).some((f) => f.kind === "ev");
   const options = [
-    ["ev2", "Second EV", "3,600 kWh/yr, same schedule as the first"],
+    hasEv ? ["ev2", "Second EV", "3,600 kWh/yr, same schedule as the first"]
+          : ["evp", "An EV (planned)", "3,000 kWh/yr, charged mostly in daylight"],
+    ["hp", "Heat pump (replacing gas)", "Shaped by the outdoor temperature, not shiftable"],
     ["pool", "Pool pump", "0.5 kW for 8 hours a day"],
     ["hpwh", "Heat-pump water heater", "4 kWh/day, heated at midday"],
     ["laundry", "Laundry and dishwasher", "3 kWh/day, moved off the evening peak"],
@@ -116,7 +123,34 @@ function addCard(ctx) {
   ]);
 }
 
+function heatPumpCard(load, ctx) {
+  const hp = load.heatpump || {};
+  const set = (path, v) => ctx.actions.updateFlex(load.id, path, v);
+  const c = hp.balanceC ?? 16;
+  return el("div.loadcard", {}, [
+    el("div.loadcard-head", {}, [
+      el("strong", { text: load.name }),
+      el("span.tag", { text: "added" }),
+    ]),
+    el("p.ctl-note", { text: describe(load) }),
+    el("div.loadcard-ctls", {}, [
+      slider("Heating electricity", hp.annualKwh ?? load.annualKwh ?? 2500, 500, 8000, 100, (v) => {
+        set("heatpump.annualKwh", v);
+        set("annualKwh", v);
+      }, (v) => fmtKwh(v, 0) + "/yr"),
+      slider("Efficiency (COP)", hp.cop ?? 3, 2, 4.5, 0.1, (v) => set("heatpump.cop", v), (v) => fmtNum(v, 1)),
+      slider("Heating starts below", c, 10, 20, 0.5, (v) => set("heatpump.balanceC", v),
+        (v) => `${fmtNum(v, 1)} \u00b0C (${fmtNum(v * 9 / 5 + 32, 0)} \u00b0F)`),
+      el("p.ctl-note", { text: load.kwhByHour
+        ? "Shape follows the outdoor temperature at your site. The modelled total follows the actual winters in your record, so it can differ from the slider."
+        : "Waiting for weather." }),
+      el("button.btn.btn-danger", { type: "button", text: "Remove this load", on: { click: () => ctx.actions.removeFlex(load.id) } }),
+    ]),
+  ]);
+}
+
 function loadCard(load, state, ctx) {
+  if (load.kind === "heatpump") return heatPumpCard(load, ctx);
   const s = load.schedule || {};
   const set = (path, v) => ctx.actions.updateFlex(load.id, path, v);
   const det = load.detection;

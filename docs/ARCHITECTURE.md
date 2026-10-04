@@ -14,6 +14,8 @@ index.html              landing + app shell (tabs)
 app/                    UI: main.js, state.js, tabs/*.js, roof/*.js, charts/*.js, styles.css
 core/                   pure logic, no DOM: engine.js finance.js optimizer.js tariff.js
                         greenbutton.js flexload.js pv.js weather.js geocode.js
+                        synthload.js (a year of hours from twelve bills) heatpump.js (planned
+                        heat-pump load from site temperature) quote.js (installer-quote checks)
 data/tariffs/*.json     tariff library, one file per utility (schema below)
 data/export/*.json      NBT export-rate matrices per utility and vintage (may be inside the tariff file)
 data/demo/*.csv         scrubbed demo Green Button files (a real SCE household, 2 years)
@@ -46,13 +48,19 @@ state = {
   flex:   [ FlexLoad ],              // flexible loads detected or user-defined
   solar:  { byPlane: { [planeId]: SolarProfiles } , weatherYears: [..], status },
   tariff: { utilityId, planId, providerId, custom: Tariff | null },
-  system: { panelW: 460, battKWh: 10, battKW: 5, rte: 0.9, minReserve: 0.2,
+  system: { panelW: 460, battPreset: "custom", battKWh: 10, battKW: 5, rte: 0.88, minReserve: 0.2,
             strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5, ngom: false,
             maxBatteries: 6, override: { panelsByPlane: null, batteries: null } },
   fin:    FinanceInputs,             // see finance.js DEFAULTS + financing block below
+                                     // v2: costPerBattery, resilienceValue, vppPerBattery, microinverters
+  quote:  { kwDc, batteries, battKWh, price, annualKwh, monthly },   // the Quote tab's inputs; null = not entered
+  existing: { kwDc: 0, planeId: null, nem: "none"|"nem2"|"nem1" },  // solar already on the roof (battery add-on mode)
   ui:     { tab, basis, season, weatherKey, objective }
 }
 ```
+The codec is versioned (`CODEC_VERSION`, `v=` in the hash): version 2 changed the price default
+($3.00 → $2.75 per W) and the battery round-trip efficiency (0.90 → 0.88), so a version-1 link or
+session that did not carry those keys is migrated to the values it was built with.
 
 State is serialized to `location.hash` (only non-default values) and to `localStorage`
 (`rooftop-roi:v1`) so a reload keeps the session. The load data itself is kept in
@@ -186,18 +194,29 @@ the metered kWh of the most recent 12 months. The dashboard fades grid columns p
 ## UI (app/)
 
 Landing (before data): what the tool does in three sentences, a privacy statement that is
-literally true (list the exact network calls), a drop zone for Green Button XML/CSV, a
-"Try the demo household" button, and a location field (address → geocode, ZIP, or click the map).
+literally true (list the exact network calls), and three doors in this order: a drop zone for
+Green Button XML/CSV, "I only have my bills" (twelve monthly kWh + ZIP → `core/synthload.js`
+builds a typical hourly year; EV and pool are added as planned loads), and "Try the demo
+household"; plus a location field (address → geocode, ZIP, or click the map).  A meter that
+already exports (NEM 1/2) is offered battery add-on mode (`state.existing`, engine
+`params.billing`/`params.existing`, see docs/nem2.md) or "ignore the existing panels".
 
 App (after data): one **Dashboard** carrying every control in collapsible rail groups, so a
 person can move any knob and watch everything they care about move at once: the NPV verdict
 and its tiles, the panel × battery grid with slices, a typical weekday hour by hour, the money
 over time, flexible-load summary, per-face allocation, and "what to try next" chips.  Secondary
-tabs: **Roof** (roof builder), **Loads** (detected flexible loads, schedules, add EV/pool/custom),
+tabs: **Quote** (an installer's size, price, battery count and production estimate against the
+optimum and the market $/W band, with the dealer fee implied by a quoted payment; `core/quote.js`),
+**Roof** (roof builder), **Loads** (detected flexible loads, schedules, add EV/pool/heat pump/custom;
+a planned heat pump's hourly shape is built from the site's temperatures by `core/heatpump.js`),
 **Bills & money** (before/after by month, first-year monthly outlay, plan and provider tables,
 weather spread, tornado, break-evens, bill replay check), **Assumptions** (method, sources, data
-quality, rate effective dates).  Control declarations live in `app/ui/knobs.js` and are shared
-between tabs.  Results re-render live (finance-only changes instant; simulation changes
+quality, rate effective dates, incentives in force this year).  Control declarations live in
+`app/ui/knobs.js` and are shared between tabs; new controls join an existing rail group rather
+than opening a new one (battery product presets from `app/ui/presets.js` under Hardware, the
+fixed per-unit battery cost under Price, the VPP payment under Incentives, the microinverter
+switch under Wear).  Under the NPV the dashboard states a range across 3–8% rate escalation and a
+one-sentence reason for the chosen size.  Results re-render live (finance-only changes instant; simulation changes
 debounced, run in a Blob worker with a main-thread fallback).  "Share link" copies the URL: the
 fragment already carries every non-default setting, the roof faces and the load schedules, plus
 a `demo=1` flag when the scenario was built on the demo household so the link reproduces it.

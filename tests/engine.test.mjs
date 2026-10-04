@@ -1228,3 +1228,255 @@ test("the credit bank: NSC rides on kWh alone, ACC Plus escapes the ARECR, the d
   }
   assert.ok(surplusSeen > 4, "the sweep includes systems with net surplus");
 });
+
+// ================================================================== existing solar / NEM 2
+/**
+ * A summer of hand-checkable hours with a meter that already exports.  The flat tariff
+ * prices every hour at $0.30 (NBCs $0.02 inside it), and the true-up falls in August,
+ * the record's last month.  `loadByMonth` is the household's own draw per hour; a 1 kW
+ * array making 3 kWh/kW in four midday hours stands for the existing panels, and the
+ * meter channels are what that house would record: import = max(0, load - PV), export
+ * = max(0, PV - load).  `spurious(i)` adds export the PV cannot explain.
+ */
+function nemData(opts = {}) {
+  const loadByMonth = opts.loadByMonth || { 6: 0.1, 7: 0.3, 8: 0.3 };
+  // `fullYear` runs September 2024 - August 2025 (enough for prepare()'s default bar);
+  // the months before June draw 0.3 kWh/h.
+  const months = opts.fullYear
+    ? [[2024, 9], [2024, 10], [2024, 11], [2024, 12], [2025, 1], [2025, 2], [2025, 3], [2025, 4], [2025, 5], [2025, 6], [2025, 7], [2025, 8]]
+    : [[2025, 6], [2025, 7], [2025, 8]];
+  const profile = new Float64Array(8760);
+  for (let doy = 152; doy <= 243; doy++) for (const h of [10, 11, 12, 13]) profile[(doy - 1) * 24 + h] = 3.0;
+  const ts = [], imp = [], exp = [], gross = [];
+  for (const [yr, mo] of months) {
+    const nd = new Date(Date.UTC(yr, mo, 0)).getUTCDate();
+    for (let d = 1; d <= nd; d++) {
+      // Summer-only fixture months are all PDT; the full year keeps it simple by giving
+      // the existing array no output outside them (the meter channels follow the model).
+      for (let h = 0; h < 24; h++) {
+        ts.push(`${yr}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}T${String(h).padStart(2, "0")}:00`);
+        const L = loadByMonth[mo] ?? 0.3, pv = mo >= 6 && mo <= 8 && h >= 11 && h <= 14 ? 3.0 : 0;   // PDT: standard 10-13
+        const extra = opts.spurious ? opts.spurious(ts.length - 1) : 0;
+        gross.push(L);
+        imp.push(Math.max(0, L - pv)); exp.push(Math.max(0, pv - L) + extra);
+      }
+    }
+  }
+  const rate = (v) => ({ sce: v, delivery: v * 0.6, sce_generation: v * 0.4 });
+  const sched = (p) => new Array(24).fill(p);
+  const flat = (v) => Array.from({ length: 12 }, () => new Array(24).fill(v));
+  const tariffs = {
+    utility: { id: "sce" },
+    meta: { baseline_kwh_per_day: { summer: 0, winter: 0 } },
+    providers: { sce: { name: "SCE" } },
+    plans: [{
+      id: "FLAT", name: "Flat", summer_months: [6, 7, 8, 9],
+      fixed_charge_per_day: 0.50, minimum_charge_per_day: 0.40, baseline_credit_per_kwh: 0,
+      period_ids: ["on", "mid", "off", "super_off"],
+      schedule: { summer: { weekday: sched("off"), weekend: sched("off") },
+                  winter: { weekday: sched("off"), weekend: sched("off") } },
+      rates: { summer: { on: rate(0.30), mid: rate(0.30), off: rate(0.30) },
+               winter: { on: rate(0.30), mid: rate(0.30), off: rate(0.30), super_off: rate(0.30) } },
+    }],
+    nbt: { export_rates: { weekday: flat(0.05), weekend: flat(0.05) },
+           cca_export_adder_per_kwh: 0, net_surplus_compensation_per_kwh: 0.05,
+           nonbypassable_charges_per_kwh: 0.02, true_up_month: 8,
+           acc_plus_adder_per_kwh: 0.016, eec_adjustment_per_kwh: 0.05981 },
+  };
+  const ctxN = Engine.prepare({ load: { meta: {}, ts, kwh: Float64Array.from(imp), exportKwh: Float64Array.from(exp) },
+                               tariffs }, opts.fullYear ? undefined : { minUsableDays: 0 });
+  return { ctx: ctxN, profile, imp, exp, gross };
+}
+function nemParams(d, over = {}) {
+  return Engine.withDefaults({
+    planes: [{ id: "p1", profile: d.profile, panels: 0, shading: { annual: 0 } }],
+    panelW: 1000, batteries: 0, battKWh: 10, battKW: 5, planId: "FLAT", providerId: "sce",
+    flex: [], strategy: "self_consumption", climateCreditOff: true, ...over,
+  });
+}
+
+test("NEM 2 credits an export at that hour's retail price less the NBCs; NEM 1 at the full retail price", () => {
+  const d = nemData();
+  const opts = (billing) => ({ billing });
+  const r2 = Engine.buildRates(d.ctx, "FLAT", "sce", false, null, undefined, true, opts("nem2"));
+  const r1 = Engine.buildRates(d.ctx, "FLAT", "sce", false, null, undefined, true, opts("nem1"));
+  const rn = Engine.buildRates(d.ctx, "FLAT", "sce", false, null, undefined, true, opts(undefined));
+  const i = d.ctx.load.ts.indexOf("2025-07-15T12:00");
+  near(r2.imp[i], 0.30, 1e-12, "retail import price");
+  near(r2.exp[i], 0.30 - 0.02, 1e-12, "NEM 2: retail minus nonbypassable_charges_per_kwh");
+  near(r1.exp[i], 0.30, 1e-12, "NEM 1: no NBC deduction");
+  near(rn.exp[i], 0.05, 1e-12, "the default is still Net Billing, priced off the ACC matrix");
+  assert.equal(rn.billing, "nbt");
+  // With applyNbc the NBCs ride on top of the table; NEM 2 still credits the table price.
+  const ra = Engine.buildRates(d.ctx, "FLAT", "sce", true, null, undefined, true, opts("nem2"));
+  near(ra.imp[i], 0.32, 1e-12, "applyNbc adds the NBC to the import price");
+  near(ra.exp[i], 0.30, 1e-12, "...and NEM 2 credits it back out");
+  // None of the Net Billing machinery applies.
+  assert.equal(r2.accPlus, 0); assert.equal(r2.arecr, 0); assert.equal(r2.capExport, false);
+
+  // One hand-checked month: July, 0.3 kWh/h, the 1 kW array exports 10.8 kWh a day.
+  const X = { existing: { planeId: "p1", panels: 1 } };
+  const p = nemParams(d, { billing: "nem2", ...X });
+  const out = Engine.runHours(Engine.buildScenario(d.ctx, p), p, true);
+  const jul = out.monthly[1];
+  near(jul.exportKwh, 31 * 10.8, 1e-9, "July export");
+  near(jul.importKwh, 31 * 20 * 0.3, 1e-9, "July import");
+  near(jul.accPlus, 0, 0, "no ACC Plus under NEM");
+  const p1 = nemParams(d, { billing: "nem1", ...X });
+  const jul1 = Engine.runHours(Engine.buildScenario(d.ctx, p1), p1, true).monthly[1];
+  assert.ok(jul1.exportKwh === jul.exportKwh, "same physics either way");
+});
+
+test("NEM 2 credits roll month to month, NSC pays the surplus kWh at true-up, and the rest is zeroed", () => {
+  const d = nemData();
+  const X = { existing: { planeId: "p1", panels: 1 } };
+  const p = nemParams(d, { billing: "nem2", ...X });
+  const out = Engine.runHours(Engine.buildScenario(d.ctx, p), p, true);
+  const [jun, jul, aug] = out.monthly;
+  const credit = 0.28;
+  // June: 0.1 kWh/h.  Export 11.6 kWh/day, import 2 kWh/day.
+  const junExp = 30 * 11.6, junImp = 30 * 2, julExp = 31 * 10.8, julImp = 31 * 6;
+  const room = (days, imp) => (0.5 * days + 0.30 * imp) - (0.5 * days + 0.02 * imp);   // down to fixed + NBCs
+  near(jun.exportCreditUsed, -room(30, junImp), 1e-9, "June credit fills the room down to fixed + NBCs");
+  const bankJun = junExp * credit - room(30, junImp);
+  near(jun.creditBalance, bankJun, 1e-9, "June's unused credit is banked");
+  near(jul.exportCreditUsed, -room(31, julImp), 1e-9, "July is offset to the floor again");
+  near(jul.creditBalance, bankJun + julExp * credit - room(31, julImp), 1e-9, "and the bank rolls forward");
+  assert.equal(aug.settled, true, "August is the true-up month");
+  const surplus = (junExp + 2 * julExp) - (junImp + 2 * julImp);
+  near(aug.trueUp, -surplus * 0.05, 1e-9, "net surplus kWh are paid at NSC");
+  const leftover = bankJun + 2 * (julExp * credit - room(31, julImp));
+  near(aug.forfeitedCredit, leftover, 1e-9, "the dollar bank left at true-up is zeroed, not paid");
+  near(aug.creditBalance, 0, 1e-12, "nothing carries into the next year");
+  near(out.nscRevenue * d.ctx.years, surplus * 0.05, 1e-9, "nscRevenue is the true-up payout");
+  // Fixed charge and NBCs are always paid: every month bills at least that, less only NSC.
+  for (const m of out.monthly) {
+    assert.ok(m.bill + 1e-9 >= m.fixed + m.nonBypassable + m.trueUp, `${m.key} keeps fixed + NBCs`);
+  }
+  // Under NEM the export dollars travel with the retail saving: exportRevenue is 0.
+  assert.equal(out.exportRevenue, 0);
+  assert.equal(out.accPlusRevenue, 0);
+  near(out.nemExportValue * d.ctx.years,
+       out.monthly.reduce((s, m) => s - m.exportCreditUsed - m.trueUp, 0), 1e-9, "nemExportValue = credits used + NSC");
+
+  // NEM 1 credits the full $0.30 and, since that credit includes the non-bypassable
+  // charges, it can offset them too: the floor is the fixed charge alone.
+  const p1 = nemParams(d, { billing: "nem1", ...X });
+  const jun1 = Engine.runHours(Engine.buildScenario(d.ctx, p1), p1, true).monthly[0];
+  near(jun1.creditBalance, junExp * 0.30 - 0.30 * junImp, 1e-9, "NEM 1 banks retail with no NBC deduction and no NBC floor");
+});
+
+test("existing solar: gross load is import - export + existing PV, clipped at zero", () => {
+  // Two spurious kWh of 'export' at 3 a.m. every day: the reconstruction would go
+  // negative there, and must clip instead.
+  const d = nemData({ spurious: (i) => (i % 24 === 3 ? 2 : 0) });
+  const p = nemParams(d, { existing: { planeId: "p1", panels: 1 } });
+  const scn = Engine.buildScenario(d.ctx, p);
+  const pv = scn.existing.pv;
+  let clipped = 0;
+  for (let i = 0; i < d.ctx.N; i++) {
+    const raw = d.imp[i] - d.exp[i] + pv[i];
+    assert.ok(scn.baseLoad[i] >= 0, "never negative");
+    if (raw >= 0) near(scn.baseLoad[i], raw, 1e-12, `hour ${i} is import - export + PV`);
+    else { assert.equal(scn.baseLoad[i], 0); clipped++; }
+    if (i % 24 !== 3) near(scn.baseLoad[i], d.gross[i], 1e-12, "and recovers the house's own draw");
+  }
+  assert.equal(clipped, d.ctx.nDays, "one clipped hour a day");
+  assert.equal(scn.existing.grossClippedHours, clipped);
+  // A plane id the scenario does not carry falls back to the first plane, and says so.
+  const q = Engine.buildScenario(d.ctx, nemParams(d, { existing: { planeId: "gone", panels: 1 } }));
+  assert.equal(q.existing.planeFallback, true);
+  assert.equal(q.existing.planeId, "p1");
+  // No existing panels: the recorded import, as before.
+  const none = Engine.buildScenario(d.ctx, nemParams(d));
+  assert.equal(none.existing, null);
+  for (let i = 0; i < d.ctx.N; i++) assert.equal(none.baseLoad[i], d.imp[i]);
+});
+
+test("existing solar: both baselines carry the existing array; 0 batteries is the baseline bill exactly", () => {
+  const d = nemData();
+  for (const billing of ["nem2", "nem1", "nbt"]) {
+    const p = nemParams(d, { billing, existing: { planeId: "p1", panels: 1 }, panelsByPlane: [0], batteries: 0 });
+    const res = Engine.simulate(d.ctx, p);
+    const arrayKwh = sum(Engine.buildScenario(d.ctx, p).existing.pv) / d.ctx.years;
+    near(res.baselineSameFlex.pvKwh, arrayKwh, 1e-9, `${billing}: baseline PV is the existing array's output`);
+    near(res.baselineAsRecorded.pvKwh, arrayKwh, 1e-9, `${billing}: so is the as-recorded baseline's`);
+    near(res.baselineSameFlex.existingPvKwh, arrayKwh, 1e-9, "existingPvKwh reports it");
+    assert.equal(res.panels, 1); assert.equal(res.newPanels, 0); assert.equal(res.existingPanels, 1);
+    assert.equal(res.bill, res.baselineSameFlex.bill, `${billing}: adding nothing changes nothing`);
+    assert.equal(res.savingsVsSameFlex, 0);
+    // The model reproduces the metered house: same load, and the bill of the recorded channels.
+    near(res.loadKwh * d.ctx.years, sum(d.gross), 1e-6, "household load is the reconstructed gross");
+    // One battery on top keeps the array.  This fixture banks more credit than it can use
+    // and forfeits it at true-up, so a stored kWh can only help.
+    const withB = Engine.simulate(d.ctx, Object.assign({}, p, { batteries: 1 }));
+    assert.equal(withB.panels, 1);
+    near(withB.pvKwh, arrayKwh, 1e-9, "the battery adds no PV");
+    assert.ok(withB.bill <= res.bill + 1e-9, `${billing}: a battery never raises the bill here`);
+  }
+  // No grid charging and no battery export under NEM, whatever the controls say.  On this
+  // flat $0.30 plan a stored kWh is worth $0.30 against a $0.28 credit, so it only pays
+  // with no round-trip loss: rte 1 here, otherwise the dispatcher rightly leaves the pack empty.
+  const p = nemParams(d, { billing: "nem2", existing: { planeId: "p1", panels: 1 }, panelsByPlane: [0],
+                           batteries: 1, rte: 1, gridCharge: true, strategy: "export_arbitrage", exportThreshold: 0 });
+  const h = Engine.runHours(Engine.buildScenario(d.ctx, p), p, true);
+  assert.ok(h.chargeKwh > 0, "the battery does charge from the array");
+  assert.equal(sum(h.hourly.gridToBatt), 0, "never charges from the grid");
+  assert.equal(sum(h.hourly.battExport), 0, "never exports from the battery");
+});
+
+test("worker grid with an existing array sweeps batteries only, at the existing panel count", () => {
+  const src = readFileSync(new URL("../app/worker-bundle.js", import.meta.url), "utf8");
+  const out = [];
+  const shim = { postMessage: (m) => out.push(m), onmessage: null };
+  new Function("self", src)(shim);
+  const d = nemData({ fullYear: true });
+  shim.onmessage({ data: { type: "init", load: d.ctx.load, tariffs: d.ctx.tariffs, solar: null } });
+  assert.equal(out[0].type, "ready", out[0].message);
+  const params = { planes: [{ id: "a", profile: d.profile, panels: 30, maxPanels: 30, shading: { annual: 0 } },
+                            { id: "p1", profile: d.profile, panels: 30, maxPanels: 30, shading: { annual: 0 } }],
+                   panelW: 500, battKWh: 10, battKW: 5, planId: "FLAT", providerId: "sce",
+                   strategy: "self_consumption", climateCreditOff: true,
+                   billing: "nem2", existing: { planeId: "p1", panels: 2 } };
+  shim.onmessage({ data: { type: "grid", id: 7, params, maxPanelsTotal: 40, maxBatteries: 3, step: 1 } });
+  const g = out.find((m) => m.type === "grid");
+  assert.ok(g, JSON.stringify(out.filter((m) => m.type === "error")));
+  const grid = g.grid;
+  assert.deepEqual(grid.panelList, [2], "the panel axis is the existing array");
+  assert.deepEqual(grid.battList, [0, 1, 2, 3]);
+  assert.equal(grid.cells.length, 4);
+  for (const c of grid.cells) {
+    assert.deepEqual(c.panelsByPlane, [0, 2], "every panel sits on the existing plane");
+    assert.equal(c.kwdc, 1, "kwdc is the whole array");
+    assert.equal(c.newPanels, 0);
+    assert.equal(c.billing, "nem2");
+  }
+  assert.equal(grid.cells[0].bill, grid.baselineSameFlex.bill, "0 batteries is the baseline");
+  assert.equal(grid.baselineSameFlex.panels, 2, "the baseline carries the existing array");
+  // Without `existing` the same message runs the ordinary panel x battery sweep.
+  out.length = 0;
+  shim.onmessage({ data: { type: "grid", id: 8, params: Object.assign({}, params, { existing: null, billing: "nbt" }),
+                           maxPanelsTotal: 3, maxBatteries: 1, step: 1 } });
+  const g2 = out.find((m) => m.type === "grid").grid;
+  assert.deepEqual(g2.panelList, [0, 1, 2, 3]);
+});
+
+test("a manual flex load with its own hourly series adds exactly that series and is never subtracted", () => {
+  // A heat pump: a manual load whose kwhByHour was built from weather, never metered.
+  const N = ctx.N;
+  const series = new Float64Array(N);
+  for (let i = 0; i < N; i++) series[i] = (i % 24) < 6 ? 0.75 : 0;
+  const hp = { id: "hp", kind: "heatpump", source: "manual", name: "Heat pump",
+               kwhByHour: series, schedule: { mode: "asRecorded" } };
+  const p = Engine.withDefaults({ ...P({ panels: 0, batteries: 0 }), flex: [hp], baseLoadScale: 1 });
+  const scn = Engine.buildScenario(ctx, p);
+  const plain = Engine.buildScenario(ctx, Object.assign({}, p, { flex: [] }));
+  for (let i = 0; i < N; i++) {
+    if (!ctx.valid[i]) continue;
+    assert.equal(scn.baseLoad[i], ctx.recorded[i], "base load is the recorded load");
+    near(scn.load[i], plain.load[i] + series[i], 1e-12, "load gains exactly the series");
+  }
+  // ...in the as-recorded arm too.
+  const rec = Engine.buildScenario(ctx, p, { flexMode: "asRecorded" });
+  for (let i = 0; i < N; i += 97) if (ctx.valid[i]) near(rec.load[i], plain.load[i] + series[i], 1e-12, "as-recorded arm");
+});

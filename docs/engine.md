@@ -323,6 +323,34 @@ bill, the ACC Plus adder, and the true-up payout. It is kept separate from avoid
 cost because export prices are locked to the ACC vintage and do not follow retail
 escalation (see §8).
 
+### 6a. Existing solar on NEM 1 / NEM 2
+
+`params.billing` (`"nbt"` default, `"nem2"`, `"nem1"`) and `params.existing`
+(`{ planeId, panels }` or `null`) model a battery added to an array that is already on a legacy
+net-metering agreement. Full detail and the list of what is not modelled: `docs/nem2.md`.
+
+- **Load.** With `existing`, `buildScenario` rebuilds the household's draw as
+  `max(0, import − export + existing PV)` per hour, existing PV being the named plane's
+  per-panel series (shading and the clock→standard mapping included) times the existing panel
+  count. Clipped kWh and hours are on `scenario.existing`.
+- **Panels.** `normaliseAlloc` never puts fewer than the existing panels on their plane, so both
+  baselines are "existing array, no battery" and `savings*` is what the battery adds. Results
+  report `existingPanels`, `existingPvKwh` and `newPanels`. The worker's `grid` fixes the panel
+  axis at the existing count and sweeps batteries only.
+- **Prices.** `buildRates` sets the export price of every hour to that hour's import price less
+  `nbt.nonbypassable_charges_per_kwh` (NEM 2) or to the import price itself (NEM 1); ACC Plus,
+  the ARECR, the CCA export adder and the export cap are all off.
+- **Settlement.** The month works as in steps 2 to 5 above (credit stops at fixed charge +
+  NBCs). At true-up, net surplus kWh are paid at NSC and the remaining dollar bank is zeroed
+  (`forfeitedCredit`): nothing carries into the next year.
+- **Dispatch.** No grid charging and no battery export under NEM.
+- **Money.** The credit is the retail price, so it escalates with retail: `exportRevenue` and
+  `accPlusRevenue` are 0 and the saving is all retail-indexed. `nemExportValue` and
+  `nscRevenue` carry the export dollars for display.
+
+With `billing: "nbt"` and `existing: null` (the defaults) every number is what it was before
+this mode existed; the rest of `tests/engine.test.mjs` is the guard.
+
 ---
 
 ## 7. Choosing a system — `optimizer.searchGrid`
@@ -476,7 +504,8 @@ an unknown one.
    constant for the whole horizon (`exportEscalation` default 0). The real vintage is
    locked for nine years and then unknown; we do not guess at year 10.
 5. **One-day lookahead**, using the actual next day. A real forecast is worse.
-6. **No demand charges, no tier-based rates, no net metering legacy tariffs.** NBT only.
+6. **No demand charges, no tier-based rates.** NBT, plus NEM 1/2 for a battery added to an
+   existing array (§6a, `docs/nem2.md`).
 7. **The record is a cycle for the true-up** (§6): the bank left after the last true-up
    month in the record is carried into its first month rather than forfeited or cashed
    out early. Real customers settle on their PTO anniversary; we only know it if the user

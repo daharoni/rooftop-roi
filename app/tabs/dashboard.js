@@ -13,11 +13,12 @@
 import { el, clear, $, T } from "../ui/dom.js";
 import { card, tiles, tile, DISCLAIMER } from "../ui/blocks.js";
 import { fmtCompact, fmtMoney, fmtNum, fmtPct, fmtYears, fmtKwh, fmtHour, plural } from "../ui/format.js";
-import { OBJ_LABEL, plateau, renderHeatmap, sliceFmt } from "../charts/heatmap.js";
+import { OBJ_LABEL, goodness, plateau, renderHeatmap, sliceFmt } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
 import { renderCashflow } from "../charts/money.js";
 import * as K from "../ui/knobs.js";
 import { sizingCapFor } from "../../core/sizing.js";
+import { evaluate } from "../../core/finance.js";
 
 export const id = "dashboard";
 export const label = "Dashboard";
@@ -46,9 +47,11 @@ export function mount(pane, state, ctx) {
     el("div.hero-verdict", {}, [
       el("span.eyebrow", { id: "hl-title", text: "Net present value vs. investing the cash" }),
       el("div.hero-num.num", { id: "hero-npv", text: "—" }),
+      el("p.hero-band", { id: "hero-band", hidden: true }),
       el("span.verdict-pill.pill-mid", { id: "hero-pill" }, [
         el("span.dot"), el("span", { id: "hero-pill-text", text: "waiting for the simulation" }),
       ]),
+      el("p.hero-why", { id: "hero-why", hidden: true }),
       el("p.hero-note", { id: "hero-note" }),
     ]),
     el("div", {}, [
@@ -129,6 +132,11 @@ export function mount(pane, state, ctx) {
         + "than an extra battery, and it costs nothing.",
       body: [
         el("dl.kv", { id: "flex-kv" }),
+        el("div.retime", { id: "flex-retime", hidden: true }, [
+          el("span.retime-k", { id: "flex-retime-k", text: "Re-time the EV, no hardware" }),
+          el("span.retime-v.num", { id: "flex-retime-v" }),
+          el("span.retime-d", { id: "flex-retime-d" }),
+        ]),
         el("p.note", { id: "flex-note", style: "margin-top:8px" }),
         el("div.chips", {}, [
           el("button.chip-action", { type: "button", text: "Add or reschedule loads →",
@@ -177,6 +185,8 @@ export function render(state, ctx) {
   }
   renderCapLine(state, ctx, cap);
   renderMarginLine(state, ctx);
+  renderBand(state, ctx, cell);
+  renderWhy(state, ctx, cap);
 
   const seg = $("day-season");
   if (seg) Array.from(seg.children).forEach((b, i) => b.setAttribute("aria-pressed", String(i === state.ui.season)));
@@ -213,7 +223,16 @@ function renderHeadline(state, ctx, cell) {
   $("hero-pill").className = "verdict-pill " + verdict.pill;
   $("hero-pill-text").textContent = verdict.text;
 
+  const existing = ctx.existingMode || null;
+  const title = $("hl-title");
+  if (title) {
+    title.textContent = existing
+      ? `Adding a battery to your existing ${fmtNum(existing.kwDc, 1)} kW system (${nemLabel(existing.nem)})`
+      : "Net present value vs. investing the cash";
+  }
+
   const mode = fin.financing && fin.financing.mode;
+  const extra = f.extraRevenue > 0 ? f.extraRevenue : 0;
   $("hero-note").textContent =
     `Present value of ${fin.horizon} years of bill savings, minus what the system costs, discounted at the `
     + `${fmtPct(fin.investReturn, 1)} you could earn on the same money. `
@@ -221,6 +240,10 @@ function renderHeadline(state, ctx, cell) {
     + (cell.exportRevenue > 0
       ? ` Of the ${fmtMoney(cell.savings)} saved in year 1, ${fmtMoney(cell.importSavings)} is power you no longer `
         + `buy and rises with your rates; ${fmtMoney(cell.exportRevenue)} is export credit, locked at today's ACC prices.`
+      : "")
+    + (extra > 0
+      ? ` Backup and grid-services value (${fmtMoney(extra)}/yr) is your own valuation, not a bill saving, and `
+        + "does not rise with rates."
       : "");
 
   // First row: the figures that rank one system against another (the accented two
@@ -233,13 +256,16 @@ function renderHeadline(state, ctx, cell) {
     Object.assign(irrTile(cell, fin, f), { key: true }),
     Object.assign(paybackTile(cell, fin, f), { key: true }),
     { k: "Savings, year 1", v: fmtMoney(cell.firstYearSavings ?? cell.savings),
-      d: cell.exportRevenue > 0
+      d: (cell.exportRevenue > 0
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
-        : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}` },
+        : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}`)
+        + (extra > 0 ? ` + ${fmtMoney(extra)} backup value` : "") },
     outlayTile(mode, fin, f, cell, ctx),
-    { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
+    existing
+      ? { k: "System", v: `${fmtNum(existing.kwDc, 1)} kW existing + 0 new`, d: "panel count is fixed" }
+      : { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
     { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
-    backupTile(cell),
+    backupTile(cell, f),
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
   const host = clear($("tiles"));
@@ -251,8 +277,12 @@ function renderHeadline(state, ctx, cell) {
   clear(note);
   note.appendChild(el("strong", { text: manual ? "Manual selection." : `Optimiser's pick (${OBJ_LABEL[ctx.objective || state.ui.objective]}).` }));
   note.appendChild(document.createTextNode(
-    ` Produces ${fmtNum(cell.pvKwh, 0)} kWh/yr, keeps ${fmtPct(cell.solarFraction, 0)} of it on site, exports `
-    + `${fmtNum(cell.exportKwh, 0)} kWh, cycles the pack ${fmtNum(cell.cycles, 0)}×/yr. LCOE ${fmtMoney(cell.lcoe, 3)}/kWh.`
+    (existing ? " The panel count is fixed at your existing system; only the battery changes." : "")
+    + ` Produces ${fmtNum(cell.pvKwh, 0)} kWh/yr, keeps ${fmtPct(cell.solarFraction, 0)} of it on site, exports `
+    + `${fmtNum(cell.exportKwh, 0)} kWh, cycles the pack ${fmtNum(cell.cycles, 0)}×/yr.`
+    // LCOE divides new hardware by the whole array's output, so it means nothing when
+    // the array was already there.
+    + (ctx.existingMode ? "" : ` LCOE ${fmtMoney(cell.lcoe, 3)}/kWh.`)
     + (ctx.detail && ctx.detail.forfeitedCredit > 1
       ? ` Note: ${fmtMoney(ctx.detail.forfeitedCredit)}/yr of export credit never gets used and is written off at `
         + "true-up — the tariff will not pay for production beyond what this house can absorb."
@@ -272,17 +302,23 @@ function renderHeadline(state, ctx, cell) {
  * a pack against the averaged base load is the honest starting point, and
  * without a pack a grid-tied array gives nothing.
  */
-function backupTile(cell) {
+function backupTile(cell, f) {
+  f = f || {};
   const kwh = cell.battKWhTotal || 0;
   const annual = cell.baseLoadKwh || cell.loadKwh || 0;
   const perDay = annual / 365;
   if (kwh <= 0) return { k: "Backup power", v: "none", d: "no battery · a grid-tied array shuts off in an outage" };
-  if (!perDay) return { k: "Backup power", v: fmtNum(kwh, 0) + " kWh", d: "usable storage" };
+  // The household's own valuation of backup (and any grid-services payment), when set.
+  const valued = f.extraRevenue > 0
+    ? [f.resilienceValue > 0 ? `valued at ${fmtMoney(f.resilienceValue)}/yr` : "", f.vppRevenue > 0 ? `${fmtMoney(f.vppRevenue)}/yr grid services` : ""]
+      .filter(Boolean).map((t) => ` · ${t}`).join("")
+    : "";
+  if (!perDay) return { k: "Backup power", v: fmtNum(kwh, 0) + " kWh", d: "usable storage" + valued };
   const hours = kwh / perDay * 24;
   const v = hours < 48 ? fmtNum(hours, hours < 10 ? 1 : 0) + " h" : fmtNum(hours / 24, 1) + " days";
   const flexOff = cell.baseLoadKwh && cell.loadKwh > cell.baseLoadKwh + 1 ? ", cars and pool off" : "";
   return { k: "Backup power", v,
-    d: `${fmtNum(kwh, 0)} kWh pack · house draws ${fmtNum(perDay, 0)} kWh/day${flexOff} · longer with daytime sun` };
+    d: `${fmtNum(kwh, 0)} kWh pack · house draws ${fmtNum(perDay, 0)} kWh/day${flexOff} · longer with daytime sun` + valued };
 }
 
 /** Above zero the roof won, below it the market did; zero is a real midpoint. */
@@ -317,8 +353,113 @@ function outlayTile(mode, fin, f, cell, ctx) {
     d: `${fmtMoney(f.downPayment || 0)} down · ${fmtPct(fin.financing.loan.apr, 2)} APR · ${fin.financing.loan.termYears} yr${vsCash}${roof}` };
 }
 
+function nemLabel(nem) { return nem === "nem1" ? "NEM 1" : "NEM 2"; }
+
+/**
+ * The hero's band line: the selected system re-priced at a low and a high rate
+ * escalation, since the future of retail rates is the biggest thing nobody knows.
+ * Only the import savings escalate (finance.js), so this is the honest range.
+ */
+function renderBand(state, ctx, cell) {
+  const node = $("hero-band");
+  if (!node) return;
+  node.hidden = true;
+  if (!cell || !cell.finance) return;
+  const lo = ctx.escalationBand && ctx.escalationBand.lo !== undefined ? ctx.escalationBand.lo : 0.03;
+  const hi = ctx.escalationBand && ctx.escalationBand.hi !== undefined ? ctx.escalationBand.hi : 0.08;
+  let a, b;
+  try {
+    const sim = {
+      savings: cell.savings, importSavings: cell.importSavings, exportRevenue: cell.exportRevenue,
+      accPlusRevenue: cell.accPlusRevenue, bill: cell.bill, baselineBill: ctx.baselineBill,
+      pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
+    };
+    // main.js's finEff carries the NGOM adder, the roof adder rule and the existing-array
+    // watts; pricing from raw state.fin would buy an existing array all over again.
+    const base = typeof ctx.finEff === "function" ? ctx.finEff(cell.roofCostAdder || 0) : { ...state.fin, roofCostAdder: cell.roofCostAdder || 0 };
+    const at = (escalation) => evaluate(sim, { ...base, escalation }).npv;
+    a = at(lo); b = at(hi);
+  } catch (e) { return; }
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+  const pct = (v) => fmtPct(v, 0).replace(/\s/g, "");
+  let text = `Between ${fmtCompact(Math.min(a, b))} and ${fmtCompact(Math.max(a, b))} if rates rise ${pct(lo)} to ${pct(hi)} a year; `;
+  const rows = Array.isArray(ctx.weatherRows) ? ctx.weatherRows : [];
+  const p90 = rows.find((r) => r.key === "p90"), p10 = rows.find((r) => r.key === "p10");
+  if (p90 && p10 && Number.isFinite(p90.npv) && Number.isFinite(p10.npv)) {
+    text += `a dull to a sunny year moves it between ${fmtCompact(Math.min(p90.npv, p10.npv))} and ${fmtCompact(Math.max(p90.npv, p10.npv))}.`;
+  } else {
+    text += "weather years move it less.";
+  }
+  node.textContent = text;
+  node.hidden = false;
+}
+
+/**
+ * One sentence on why the optimum is this size: the first limit it runs into,
+ * else the flat-region verdict on the battery, else the marginal panel.
+ * With an existing array only the battery is in play, so only the battery is explained.
+ */
+function renderWhy(state, ctx, cap) {
+  const node = $("hero-why");
+  if (!node) return;
+  node.hidden = true;
+  const priced = ctx.priced;
+  if (!priced || !priced.cells || !priced.best) return;
+  const text = whySentence(state, ctx, cap);
+  if (!text) return;
+  node.textContent = text;
+  node.hidden = false;
+}
+
+function whySentence(state, ctx, cap) {
+  const priced = ctx.priced, best = priced.best;
+  const objective = ctx.objective || state.ui.objective;
+  const flat = plateau(priced, objective, state.fin);
+  const g = (c) => goodness(c, objective, state.fin);
+  const gBest = g(best);
+  const gap = (c) => sliceFmt(Math.max(0, gBest - g(c)), objective);
+  const horizon = objective === "irr" || objective === "payback" ? "" : ` over ${state.fin.horizon} years`;
+  const cells = priced.cells;
+  const find = (p, b) => cells.find((c) => c.panels === p && c.batteries === b);
+  const bestOf = (list) => list.reduce((a, c) => (!a || g(c) > g(a) ? c : a), null);
+
+  const batterySentence = () => {
+    if (best.batteries === 0) {
+      const alt = bestOf(cells.filter((c) => c.batteries === 1 && (ctx.existingMode || c.panels === best.panels)));
+      if (!alt) return null;
+      if (flat && gBest - g(alt) <= flat.tol) return "A battery is roughly a wash here: within " + gap(alt) + " either way, so choose on backup value.";
+      return `A battery loses ${gap(alt)}${horizon}.`;
+    }
+    const none = find(best.panels, 0);
+    if (ctx.existingMode && none) return `The ${plural(best.batteries, "battery", "batteries")} beat${best.batteries === 1 ? "s" : ""} no battery by ${gap(none)}${horizon}.`;
+    return null;
+  };
+
+  if (ctx.existingMode) return batterySentence() || "Your existing panels are fixed; the battery count is the only thing the search changes.";
+
+  const roofCap = (state.roof && state.roof.planes || []).reduce((n, p) => n + (p.maxPanels || 0), 0);
+  if (roofCap > 0 && best.panels >= roofCap) return "Limited by the roof: every face is full.";
+  if (state.system.maxPanels > 0 && best.panels >= state.system.maxPanels) return "Limited by the search: raise 'Most panels to consider'.";
+  if (cap && best.panels === cap.panelsAt150) return `Limited by SCE's sizing rule: ${cap.panelsAt150} panels is the 150% line for your usage.`;
+  if (cap && best.panels > cap.panelsAt150) {
+    return `Above SCE's 150% line of ${cap.panelsAt150} panels: SCE would refuse the application as sized. `
+      + "Cap the search below the heat map to see the largest system it would accept.";
+  }
+  const b = batterySentence();
+  if (b) return b;
+
+  const next = priced.panelList.find((p) => p > best.panels);
+  const nextCell = next !== undefined ? find(next, best.batteries) : null;
+  if (best.panels === 0) return "At these prices no solar size beats leaving the roof bare.";
+  if (!nextCell) return null;
+  const mostlyExports = best.pvKwh > 0 && best.exportKwh / best.pvKwh > 0.3;
+  return `${next === best.panels + 1 ? `Panel ${next}` : `Going to ${next} panels`} would lose ${gap(nextCell)}${horizon}: `
+    + (mostlyExports ? "it mostly exports at a few cents a kWh." : "what it adds is worth less than it costs.");
+}
+
 /** SCE's sizing lines for this household; null for other utilities or before any meter data is loaded. */
 function capFor(state, ctx) {
+  if (ctx.existingMode) return null;   // the array is already up; SCE's sizing line is for a new application
   return sizingCapFor(state.site.utilityId, ctx.recentAnnualKwh, { panelW: state.system.panelW, acFactor: state.system.acFactor });
 }
 
@@ -338,7 +479,9 @@ function renderMarginLine(state, ctx) {
   const unit = objective === "irr" ? "" : objective === "payback" ? "" : ` over ${state.fin.horizon} years`;
   const tol = sliceFmt(flat.tol, objective);
   const best = flat.best;
-  const sizeOf = (c) => `${c.panels} panels, ${plural(c.batteries, "battery", "batteries")}`;
+  const sizeOf = (c) => (ctx.existingMode
+    ? plural(c.batteries, "battery", "batteries")
+    : `${c.panels} panels, ${plural(c.batteries, "battery", "batteries")}`);
 
   if (flat.count === 0) {
     node.appendChild(el("span", { text: `A clear winner: no other size comes within ${tol} of ${sizeOf(best)}.` }));
@@ -448,7 +591,9 @@ function renderFlex(state, ctx) {
     const when = s.mode === "spread"
       ? `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · ${s.daysPerWeek ?? 5} of 7 days · `
         + `${fmtPct(s.daylightFraction ?? 0.9, 0)} inside ${fmtHour(s.window?.[0] ?? 8)}–${fmtHour(s.window?.[1] ?? 15)}`
-      : `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · as recorded`;
+      : f.kind === "heatpump"
+        ? `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · shaped by your site's outdoor temperature`
+        : `${fmtKwh(f.annualKwh * (f.scale ?? 1), 0)}/yr · as recorded`;
     host.appendChild(el("dt", { text: f.name }));
     host.appendChild(el("dd", { text: when }));
   }
@@ -457,13 +602,25 @@ function renderFlex(state, ctx) {
     host.appendChild(el("dd", { text: fmtPct(state.baseLoadScale, 0) + " of today" }));
   }
   const note = $("flex-note");
+  const retime = $("flex-retime");
+  const worth = ctx.flexShiftOnlySavings;
+  const showFigure = flex.length > 0 && typeof worth === "number" && worth > 5;
+  if (retime) {
+    retime.hidden = !showFigure;
+    if (showFigure) {
+      const evName = flex.some((f) => f.kind === "ev") ? "the EV" : "these loads";
+      $("flex-retime-k").textContent = `Re-time ${evName}, no hardware`;
+      $("flex-retime-v").textContent = "+" + fmtMoney(worth) + " /yr";
+      $("flex-retime-d").textContent = `free, on ${ctx.planLabel || "this plan"}`;
+    }
+  }
   if (note) {
+    note.hidden = false;
     note.textContent = !flex.length
       ? "Nothing flexible was detected in your meter history. Solar still pays against the load you have; "
         + "flexible loads just make it pay more."
-      : ctx.flexShiftOnlySavings > 5
-        ? `Re-timing these loads alone, with no hardware at all, is worth ${fmtMoney(ctx.flexShiftOnlySavings)}/yr `
-          + `on ${ctx.planLabel || "this plan"}.`
+      : showFigure
+        ? "Moving the load costs nothing; the figure is what the move alone saves, before any panel or battery."
         : "On this schedule the re-timing itself is roughly neutral; its value is in soaking up midday solar.";
   }
 }

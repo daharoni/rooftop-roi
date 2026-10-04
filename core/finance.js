@@ -43,6 +43,28 @@
  * 20 - exactly what the single-replacement rule used to give.  The battery's
  * capacity-fade clock restarts at every replacement that is booked, and only then.
  *
+ * Battery hardware has two prices: costPerKwh on the usable kWh and a fixed
+ * costPerBattery per unit (inverter/gateway/install labour that does not scale with
+ * capacity).  `sim.batteries` is the unit count; absent means 0 units, so no fixed
+ * cost.  The fixed part sits inside storageCost, so discounts, the degradation cost
+ * share and the pack replacement (battReplFraction of the whole storage price) see it.
+ *
+ * Existing solar: `existingKwDc` is array already on the roof.  `sim.kwdc` stays the
+ * TOTAL (production, LCOE denominators and the simulation are about the whole array)
+ * but only newKw = max(0, kwdc - existingKwDc) is bought, so the solar price and the
+ * inverter swap are charged on new watts alone.  The resale credit is a flat input
+ * and is not scaled.  `microinverters: true` means the inverters are in the panel
+ * price and fail with the panels, so the inverter swap outlay is 0
+ * (inverterYear/inverterPerW stay in the inputs untouched).
+ *
+ * extraRevenue: batteries bring non-bill value - a resilience value (what an outage
+ * is worth to the household, $/yr) and VPP/demand-response income ($/yr per unit).
+ * Each year the household has the system and batteries > 0 it adds
+ * resilienceValue + vppPerBattery x batteries, flat (not escalated, not degraded), to
+ * the household's earnings in every metric.  It is not a bill saving, so `savings`
+ * and savingsByYear exclude it; firstYearSavings includes it.  Under a lease that
+ * ends with no buyout it stops with the system.
+ *
  * Defaults mirror the app's State.DEFAULTS.fin (app/state.js ~line 101-111), which
  * is the source of truth for anything a person sees; these only fill keys a caller
  * leaves out (tests, the optimizer called without a full finance block).  Keep the
@@ -53,8 +75,13 @@
 export const REPLACE_MIN_REMAINING = 3;
 
 export const DEFAULTS = {
-  costPerW: 3.00,            // $/W DC, installed, before incentives
+  costPerW: 2.75,            // $/W DC, installed, before incentives (= app/state.js)
   costPerKwh: 1000,          // $/kWh usable storage, installed
+  costPerBattery: 0,         // fixed $ per battery unit, on top of $/kWh (needs sim.batteries)
+  resilienceValue: 0,        // $/yr outage-protection value while batteries > 0 (not a bill saving)
+  vppPerBattery: 0,          // $/yr per battery unit of VPP / demand-response income
+  microinverters: false,     // true: no string-inverter swap is booked
+  existingKwDc: 0,           // kW DC already installed; priced only above this
   adder: 0,                  // fixed install adder (panel upgrade, trenching, ...)
   // Per-roof-face extra install cost (long conduit runs, tile roof, steep pitch...).
   // Charged whenever there are panels; hardware-agnostic, so it never enters the
@@ -128,6 +155,12 @@ export function withDefaults(f) {
     },
   };
   o.roofCostAdder = Math.max(0, o.roofCostAdder);
+  o.costPerBattery = Math.max(0, o.costPerBattery);
+  o.resilienceValue = Math.max(0, o.resilienceValue);
+  o.vppPerBattery = Math.max(0, o.vppPerBattery);
+  o.existingKwDc = Math.max(0, o.existingKwDc);
+  o.microinverters = f && f.microinverters !== undefined && f.microinverters !== null
+    ? (f.microinverters === "false" ? false : !!f.microinverters) : DEFAULTS.microinverters;
   o.accPlusYears = Math.max(0, o.accPlusYears);
   return o;
 }
@@ -272,13 +305,18 @@ export function evaluate(sim, f) {
   // a hand-built sim with a stray value is clamped rather than inventing savings.
   const accPlusRev = Math.min(Math.max(0, +sim.accPlusRevenue || 0), Math.max(0, exportRev));
   const watts = sim.kwdc * 1000;
-  const solarCost = watts * f.costPerW;
-  const storageCost = sim.battKWhTotal * f.costPerKwh;
+  const newWatts = Math.max(0, sim.kwdc - f.existingKwDc) * 1000;
+  const units = Math.max(0, +sim.batteries || 0);
+  const solarCost = newWatts * f.costPerW;
+  const storageCost = sim.battKWhTotal * f.costPerKwh + units * f.costPerBattery;
   // Roof work (re-roofing a face, conduit runs, structural fixes) is the household's
   // own bill: it is not part of the system's sticker price, so no vendor pass-through,
   // tax credit or rebate reaches it, and under a lease it is still paid up front.
-  const roofCost = watts > 0 ? f.roofCostAdder : 0;
-  const gross = solarCost + storageCost + (watts > 0 || sim.battKWhTotal > 0 ? f.adder : 0);
+  // Nothing new on the roof (an existing array and no battery) is "do nothing": no
+  // adder, no roof work, no O&M and no resale, so its NPV is exactly zero.
+  const nothingNew = newWatts <= 0 && !(sim.battKWhTotal > 0);
+  const roofCost = newWatts > 0 ? f.roofCostAdder : 0;
+  const gross = solarCost + storageCost + (!nothingNew ? f.adder : 0);
   const disc = effectiveDiscount(f);
   const discounted = gross * (1 - disc);
   // A leased system is never bought, so no homeowner credit or rebate applies to it.
@@ -359,6 +397,8 @@ export function evaluate(sim, f) {
   // "pays for itself" and project-IRR figures below are about the asset, while
   // NPV and wealth are about the household's actual money.
   const cf = [-upfront], netSav = [0], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
+  const extraRev = [0];
+  const extraPerYear = units > 0 ? f.resilienceValue + f.vppPerBattery * units : 0;
   // Replacement years recur (see replacementYears and the header).  The pack's
   // fade clock restarts at each one whoever pays for it - a lessor swapping a pack
   // in year 20 hands back a fresh one just the same.
@@ -376,19 +416,20 @@ export function evaluate(sim, f) {
     const deg = wS * sFac + wB * bFac;
     // The ACC Plus adder rides inside exportRevenue for its nine-year lock, then ends.
     const exportY = exportRev - (y > f.accPlusYears ? accPlusRev : 0);
+    const xr = has ? extraPerYear : 0;
     const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
     // O&M, replacements and resale are the owner's: the household under cash or a
     // loan, the lessor under a lease until a buyout hands the system over.
-    const o = owns ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
+    const o = owns && !nothingNew ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
     let ex = 0;
     if (owns) {
-      if (sim.battKWhTotal > 0 && battSwap) ex += sim.battKWhTotal * f.costPerKwh * f.battReplFraction;
-      if (watts > 0 && invRepl.indexOf(y) >= 0) ex += watts * f.inverterPerW;
+      if (sim.battKWhTotal > 0 && battSwap) ex += storageCost * f.battReplFraction;
+      if (newWatts > 0 && !f.microinverters && invRepl.indexOf(y) >= 0) ex += newWatts * f.inverterPerW;
     }
-    const resale = (owns || (ownsAtH && y === H)) ? f.resaleValue : 0;
-    const earned = sav - o - ex + (y === H ? resale : 0);
+    const resale = (owns || (ownsAtH && y === H)) && !nothingNew ? f.resaleValue : 0;
+    const earned = sav + xr - o - ex + (y === H ? resale : 0);
     const net = earned - pay[y];
-    cf.push(net); netSav.push(earned); savings.push(sav); om.push(o); extras.push(ex); payments.push(pay[y]);
+    cf.push(net); netSav.push(earned); savings.push(sav); extraRev.push(xr); om.push(o); extras.push(ex); payments.push(pay[y]);
     prod.push(has ? sim.pvKwh * sFac : 0);
   }
 
@@ -485,7 +526,7 @@ export function evaluate(sim, f) {
     // saving - which already carries the escalation split (import at retail,
     // export locked) and the degradation blend, so lifetime cost and NPV agree
     // on how much a slowly fading array is worth.
-    const billY = sim.baselineBill * escY - savings[y];
+    const billY = sim.baselineBill * escY - savings[y] - extraRev[y];
     lifetime += (billY + om[y] + extras[y] + payments[y]) / dis;
     lifetimeNoSystem += (sim.baselineBill * escY) / dis;
   }
@@ -518,11 +559,16 @@ export function evaluate(sim, f) {
     // (savings stop after `year`) or "runs to horizon" (leased throughout).
     leaseEnd,
     // Years in which a replacement was booked (whoever paid for it).
-    replacementYears: { battery: sim.battKWhTotal > 0 ? battRepl : [], inverter: watts > 0 ? invRepl : [] },
+    replacementYears: { battery: sim.battKWhTotal > 0 ? battRepl : [], inverter: newWatts > 0 && !f.microinverters ? invRepl : [] },
     netSavingsByYear: netSav,
     lcoe, lifetimeCost: lifetime, lifetimeCostNoSystem: lifetimeNoSystem,
     wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest, cashRef,
-    firstYearSavings: savings[1] || 0,
+    firstYearSavings: (savings[1] || 0) + (extraRev[1] || 0),
+    // Non-bill battery value (year-1 figures; per-year stream in extraRevenueByYear).
+    resilienceValue: extraRev[1] ? f.resilienceValue : 0,
+    vppRevenue: extraRev[1] ? f.vppPerBattery * units : 0,
+    extraRevenue: extraRev[1] || 0, extraRevenueByYear: extraRev,
+    batteryFixedCost: units * f.costPerBattery, newKwDc: newWatts / 1000,
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,
     // financing

@@ -20,6 +20,7 @@ export function rail() {
         { v: "method", t: "What is simulated" },
         { v: "quality", t: "Your data" },
         { v: "rates", t: "Rates and effective dates" },
+        { v: "incentives", t: "Incentives in 2026" },
         { v: "sources", t: "Sources" },
         { v: "glossary", t: "Glossary" },
       ] },
@@ -49,6 +50,13 @@ export function mount(pane) {
   }));
 
   pane.appendChild(card({
+    id: "incentives",
+    title: "Incentives in 2026",
+    sub: "What actually reaches a California homeowner this year, and what only looks like it does.",
+    body: [el("div.method", { id: "incentives-body" })],
+  }));
+
+  pane.appendChild(card({
     id: "method",
     title: "Method",
     sub: "Everything below is what the model actually does.",
@@ -73,6 +81,7 @@ export function mount(pane) {
 export function render(state, ctx) {
   renderQuality(state, ctx);
   renderRates(state, ctx);
+  renderIncentives(state, ctx);
   renderMethod(state, ctx);
   renderSources(state, ctx);
 }
@@ -89,7 +98,7 @@ function renderQuality(state, ctx) {
 
   const pairs = [
     ["Meter history", meta.nHours ? `${fmtNum(meta.nHours, 0)} hours · ${meta.start || "?"} → ${meta.end || "?"}` : "—"],
-    ["Source", meta.source || "—"],
+    ["Source", meta.source === "synthetic" ? "twelve monthly bills, hourly shape estimated" : (meta.source || "—")],
     ["Original interval", meta.intervalMinutes ? `${meta.intervalMinutes} min, summed to hours` : "—"],
     ["Consumption", annualKwh ? `${fmtNum(annualKwh, 0)} kWh/yr` : "—"],
     ["Gaps filled", meta.gapsFilled && meta.gapsFilled.length ? `${meta.gapsFilled.length} short gaps interpolated` : "none"],
@@ -104,6 +113,9 @@ function renderQuality(state, ctx) {
     ["PV model", solarMeta ? `${fmtPct(solarMeta.losses, 0)} losses, DC:AC ${solarMeta.dcAcRatio}, inverter ${fmtPct(solarMeta.invEff, 0)}` : "—"],
     ["Weather scenario", state.ui.weatherKey],
   ];
+  if (ctx.existingMode) {
+    pairs.push(["Existing solar", `Existing solar: ${fmtNum(ctx.existingMode.kwDc, 1)} kW on ${ctx.existingMode.nem === "nem1" ? "NEM 1" : "NEM 2"}, battery add-on mode`]);
+  }
   for (const [k, v] of pairs) {
     node.appendChild(el("dt", { text: k }));
     node.appendChild(el("dd", { text: v }));
@@ -116,10 +128,20 @@ function renderQuality(state, ctx) {
   for (const w of ctx.dataWarnings || []) {
     warn.appendChild(el("div.banner" + (w.severity === "bad" ? ".banner-bad" : ""), { text: w.text }));
   }
+  if (meta.source === "synthetic") {
+    warn.appendChild(el("div.banner", { text: "This result is less certain than one built from meter data. Your bills "
+      + "give twelve monthly totals; the hour-by-hour shape inside each month is estimated from a typical "
+      + "household. Totals are exact, timing is not, and timing is what a battery and solar are paid for. "
+      + "EV charging and pool pumps are the loads most affected, because when they run matters more than how "
+      + "much they use. To tighten it, download a Green Button file from your utility (in your utility account, "
+      + "under usage or energy data) and drop it on the landing page." }));
+  }
   const notes = [].concat(meta.notes || []).filter(Boolean);
   if (notes.length) {
     warn.appendChild(el("details.data-view", { open: false }, [
-      el("summary", { text: `What the parser noticed reading your file (${notes.length})` }),
+      el("summary", { text: (ctx.loadSet && ctx.loadSet.meta && ctx.loadSet.meta.source === "synthetic"
+        ? `What the model assumed about your year (${notes.length})`
+        : `What the parser noticed reading your file (${notes.length})`) }),
       el("ul", { style: "margin:6px 0 0;padding-left:18px" },
         notes.map((n) => el("li", { style: "font-size:12px;color:var(--ink-2);margin-bottom:3px", text: n }))),
     ]));
@@ -194,6 +216,82 @@ function renderRates(state, ctx) {
     el("td.n", { text: String(value) }),
     el("td", {}, confidenceCell(confidence)),
   ]))));
+}
+
+// Shorten a note to its first two sentences; the full text sits behind "more".
+function twoSentences(text) {
+  // A sentence ends at . ! or ? followed by a space and a capital, and only when the
+  // character before the stop is a lower-case letter, a digit or a bracket, so decision
+  // numbers such as "D.23-12-005" and "A.4" do not count as sentence ends.
+  const parts = String(text || "").split(/(?<=[a-z0-9)][.!?])\s+(?=[A-Z"(])/);
+  return parts.length > 2 ? { short: parts.slice(0, 2).join(" ").trim(), full: String(text).trim() } : { short: String(text).trim(), full: null };
+}
+
+function expandable(text, cls = "") {
+  const { short, full } = twoSentences(text);
+  const p = el("p", { class: cls, style: "margin:4px 0", text: short });
+  if (!full) return p;
+  const btn = el("button.btn", { type: "button", text: "more", style: "margin-left:6px;padding:0 8px;font-size:12px" });
+  let open = false;
+  btn.addEventListener("click", () => {
+    open = !open;
+    p.firstChild.nodeValue = open ? full : short;
+    btn.textContent = open ? "less" : "more";
+  });
+  p.appendChild(btn);
+  return p;
+}
+
+function levelTag(level) {
+  const cls = level === "high" ? ".tag.tag-good" : level === "low" ? ".tag.tag-warn" : ".tag";
+  return el("span" + cls, { text: level, style: "margin-left:6px" });
+}
+
+function renderIncentives(state, ctx) {
+  const node = clear($("incentives-body"));
+  const inc = (ctx.tariff && ctx.tariff.incentives) || {};
+  const item = (head, level, text) => el("div", { style: "margin-bottom:10px" }, [
+    el("h3", { style: "margin:0 0 2px" }, [head, levelTag(level)]),
+    el("p", { style: "margin:0", text }),
+  ]);
+  node.append(
+    item("Homeowner tax credit (Section 25D): 0%", "high",
+      "The 30% credit for a system you own ended for 2026. The law counts the money as spent when the install is "
+      + "finished, not when you pay, so paying in 2025 for an install finished in 2026 does not keep it."),
+    item("Credit for a leased or PPA system (Section 48E): 30% or more", "high",
+      "Only the company that owns the system can claim it. You see it only as a lower lease or PPA payment, "
+      + "and that is the company's pricing choice, not something you are owed. That is why the Incentives "
+      + "controls have a \"vendor pass-through\" mode: use it when a quote shows a discount that comes from the owner's credit."),
+    item("California battery rebate (SGIP): closed", "high",
+      "General-market budgets stopped taking applications on 2025-12-30 and waitlists were cancelled. What remains "
+      + "is the income-qualified equity programme (RSSE), which is small and mostly waitlisted."),
+    item("Property tax: new solar is excluded from reassessment", "medium",
+      "California does not raise your property tax assessment for a new rooftop solar system (Revenue and Taxation "
+      + "Code section 73). Under the law as last checked the exclusion covers systems completed through 2026-12-31. "
+      + "The tariff files do not record this, and whether it was extended is unverified here. Ask your installer."),
+    item("HOA rules: limited by the Solar Rights Act", "medium",
+      "An HOA can ask for reasonable placement changes, but it cannot ban solar or add rules that raise the cost "
+      + "much or cut output much. It is a legal protection, not money, so the model does not price it."),
+  );
+
+  const others = [];
+  const add = (name, value, note, level) => others.push({ name, value, note, level });
+  if (inc.sgip_note && !/closed|CLOSED/.test(inc.sgip_note)) add("Storage rebate", "", inc.sgip_note, "medium");
+  for (const o of inc.other || []) {
+    // The 48E and base-charge rows are covered above or are costs, not incentives.
+    if (/Section 48E|Base Services Charge/i.test(o.name || "")) continue;
+    add(o.name, o.value, o.note, o.confidence || "medium");
+  }
+  if (others.length) {
+    node.appendChild(el("h3", { text: "Programmes from your utility or community choice aggregator" }));
+    for (const o of others) {
+      node.appendChild(el("div", { style: "margin-bottom:10px" }, [
+        el("div", {}, [el("strong", { text: o.name }), o.value ? el("span", { text: " · " + o.value }) : null, levelTag(typeof o.level === "string" ? o.level : "medium")].filter(Boolean)),
+        o.note ? expandable(o.note, "ctl-note") : null,
+      ].filter(Boolean)));
+    }
+  }
+  node.appendChild(el("p", { class: "ctl-note", text: "To model any of this, use the Incentives controls on the Dashboard rail." }));
 }
 
 /**

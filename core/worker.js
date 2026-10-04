@@ -35,6 +35,11 @@
  *
  * out { type:"error", id, message, stack }        on any thrown exception
  *
+ * `params.billing` ("nbt" | "nem2" | "nem1") and `params.existing` ({ planeId, panels } |
+ * null) pass straight through to the engine.  With `existing` set, "grid" fixes the
+ * panel axis at the existing array (every panel on the existing plane) and sweeps the
+ * battery count only: the cells keep searchGrid's shape, with a one-entry panelList.
+ *
  * `params.planes` may omit `profile`: the worker fills it from the cached SolarProfiles
  * for that plane at `params.weatherKey`, which is why init carries the solar bundle.
  * ========================================================================== */
@@ -51,6 +56,12 @@
   function hydrate(params) {
     var p = Object.assign({}, params || {});
     var key = p.weatherKey || "tmy";
+    // Existing-solar mode: the regime and the existing array, normalised so a stale or
+    // hand-edited message cannot smuggle a half-set object into the engine.
+    p.billing = p.billing === "nem2" || p.billing === "nem1" ? p.billing : "nbt";
+    var ex = p.existing;
+    var exPanels = ex ? Math.max(0, Math.round(+ex.panels || 0)) : 0;
+    p.existing = exPanels > 0 ? { planeId: ex.planeId == null ? null : String(ex.planeId), panels: exPanels } : null;
     p.planes = (p.planes || []).map(function (pl) {
       if (pl.profile) return pl;
       var sp = solar && solar.byPlane ? solar.byPlane[pl.id] : null;
@@ -88,6 +99,47 @@
     return { label: "Flexible load kWh/yr", low: mk(0.8), high: mk(1.2) };
   }
 
+  var MAX_EXISTING_BATTERIES = 20;   // optimizer.MAX_SEARCH_BATTERIES
+
+  /**
+   * The grid for a household that already has solar: the panel count is not a choice
+   * (adding panels would move the whole system to Net Billing), so the only axis is
+   * the battery count.  Same return shape as SolarOptimizer.searchGrid.
+   */
+  function existingGrid(params, m) {
+    var p = E.withDefaults(params);
+    var b = E.baselines(ctx, p, false);
+    var scn = b.scnSame, xs = scn.existing;
+    var nP = scn.planes.length;
+    var alloc = [];
+    for (var k = 0; k < nP; k++) alloc.push(k === xs.planeIndex ? xs.panels : 0);
+    var maxB = Math.floor(Number(m.maxBatteries));
+    if (!isFinite(maxB) || maxB < 0) maxB = 6;
+    if (maxB > MAX_EXISTING_BATTERIES) maxB = MAX_EXISTING_BATTERIES;
+    var battList = [], cells = [];
+    for (var nb = 0; nb <= maxB; nb++) battList.push(nb);
+    for (var i = 0; i < battList.length; i++) {
+      var res = E.runHours(scn, Object.assign({}, p, { panelsByPlane: alloc.slice(), batteries: battList[i] }), false);
+      E.attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
+      cells.push(res);
+      post({ type: "progress", id: m.id, done: i + 1, total: battList.length });
+    }
+    var order = [];
+    for (var n = 0; n < xs.panels; n++) order.push(xs.planeIndex);
+    return {
+      cells: cells, panelList: [xs.panels], battList: battList,
+      planes: scn.planes.map(function (pl, k) { return { id: pl.id, name: pl.name, cap: k === xs.planeIndex ? xs.panels : 0 }; }),
+      allocationOrder: order, greedyBatteries: 0,
+      baselineSameFlex: b.sameFlex, baselineAsRecorded: b.asRecorded,
+      flexShiftOnlySavings: b.asRecorded.bill - b.sameFlex.bill,
+      weatherKey: scn.weatherKey,
+      years: ctx.years !== undefined ? ctx.years : ctx.nDays / 365, hours: ctx.N,
+      existing: { planeId: xs.planeId, planeFallback: xs.planeFallback, panels: xs.panels,
+                  pvKwh: b.sameFlex.existingPvKwh, grossClippedKwh: xs.grossClippedKwh / ctx.years,
+                  billing: p.billing },
+    };
+  }
+
   var HANDLERS = {
     init: function (m) {
       ctx = E.prepare({ load: m.load, tariffs: m.tariffs });
@@ -101,7 +153,12 @@
     },
 
     grid: function (m) {
-      var grid = O.searchGrid(ctx, hydrate(m.params), {
+      var hp = hydrate(m.params);
+      if (hp.existing && (hp.planes || []).length) {
+        post({ type: "grid", id: m.id, grid: existingGrid(hp, m) });
+        return;
+      }
+      var grid = O.searchGrid(ctx, hp, {
         maxPanelsTotal: m.maxPanelsTotal, maxBatteries: m.maxBatteries,
         planeCaps: m.planeCaps, step: m.step, greedyBatteries: m.greedyBatteries,
         onProgress: function (done, total) { post({ type: "progress", id: m.id, done: done, total: total }); },
