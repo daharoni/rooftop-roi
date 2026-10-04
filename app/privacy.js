@@ -108,7 +108,7 @@ export const NOT_REQUESTS = {
   "www.w3.org": "the SVG namespace identifier, not a request",
   "open-meteo.com": "the CC BY 4.0 attribution link in the landing footer; never fetched by the page",
   "creativecommons.org": "the CC BY 4.0 licence link in the landing footer; never fetched by the page",
-  "github.com": "the 'Source on GitHub' link and the geocoder's User-Agent string; never fetched",
+  "github.com": "the 'Source on GitHub' and 'Send feedback' links and the geocoder's User-Agent string; never fetched",
   "www.usgs.gov": "a clickable attribution link on the map; never fetched by the page",
   "www.maptiler.com": "a clickable attribution link on the map; never fetched by the page",
   "www.openstreetmap.org": "a clickable attribution link on the map; never fetched by the page",

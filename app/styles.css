@@ -239,6 +239,9 @@ a  { color: var(--accent); }
 }
 .chip .mono { color: var(--ink); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+/* A quiet text link among the buttons: feedback should be easy to find and hard to mistake for an action on the data. */
+.feedback-link { font-size: 12px; color: var(--ink-2); text-decoration: none; padding: 4px 6px; margin-right: 2px; white-space: nowrap; }
+.feedback-link:hover { color: var(--accent); text-decoration: underline; }
 
 .status { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-3); min-height: 18px; }
 .bar { flex: none; width: 90px; height: 3px; background: var(--grid); border-radius: 2px; overflow: hidden; }
@@ -560,6 +563,8 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
     margin-left: 0; width: 100%; flex-wrap: wrap; justify-content: flex-start; gap: 6px;
   }
   .topbar-right .btn { flex: 0 1 auto; padding: 5px 9px; white-space: nowrap; }
+  /* Last in the wrapped row on a phone, so the buttons stay together. */
+  .feedback-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; order: 1; }
   .tabs { padding: 0 6px; }
   .tabs button { padding: 9px 10px 8px; }
 }

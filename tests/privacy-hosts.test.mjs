@@ -188,7 +188,11 @@ test("the landing page no longer promises that a ZIP or the map sends nothing", 
   assert.doesNotMatch(landing, /Sent nowhere/);
   assert.doesNotMatch(landing, /nothing you typed is sent anywhere/);
   assert.doesNotMatch(landing, /sends nothing but tile coordinates/);
-  assert.match(landing, /github\.com\/daharoni\/rooftop-roi/);
+  // The repo URL lives in app/ui/feedback.js; the landing footer links it from there.
+  const feedback = readFileSync(join(ROOT, "app/ui/feedback.js"), "utf8");
+  assert.match(feedback, /github\.com\/daharoni\/rooftop-roi/);
+  assert.match(landing, /REPO_URL/);
+  assert.match(landing, /feedbackLink\(/);
 });
 
 /** The hosts of one CSP directive in index.html (scheme-less host sources only). */
