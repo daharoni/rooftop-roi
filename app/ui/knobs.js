@@ -20,8 +20,8 @@ const dollars = (unit = "") => (v) => "$" + Math.round(Number(v)).toLocaleString
 const yearN = (v) => "year " + Math.round(Number(v));
 
 export const OBJECTIVE_OPTS = [
-  { v: "npv", t: "Most NPV vs. investing" }, { v: "lifetime", t: "Lowest lifetime cost" },
-  { v: "irr", t: "Highest IRR" }, { v: "payback", t: "Fastest payback" },
+  { v: "npv", t: "Best value vs. investing" }, { v: "lifetime", t: "Lowest lifetime cost" },
+  { v: "irr", t: "Highest annual return" }, { v: "payback", t: "Fastest payback" },
 ];
 
 export const BASIS_OPTS = [

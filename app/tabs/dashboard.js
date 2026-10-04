@@ -46,18 +46,35 @@ export function mount(pane, state, ctx) {
   // The verdict.
   pane.appendChild(el("section.headline", { id: "headline" }, [
     el("div.hero-verdict", {}, [
-      el("span.eyebrow", { id: "hl-title", text: "Net present value vs. investing the cash" }),
+      el("span.eyebrow", { id: "hl-title", text: "Value of this system vs. leaving the money invested" }),
       el("div.hero-num.num", { id: "hero-npv", text: "—" }),
+      el("p.hero-note", { text: "Estimated advantage, in today’s dollars" }),
       el("p.hero-band", { id: "hero-band", hidden: true }),
       el("span.verdict-pill.pill-mid", { id: "hero-pill" }, [
         el("span.dot"), el("span", { id: "hero-pill-text", text: "waiting for the simulation" }),
       ]),
       el("p.hero-why", { id: "hero-why", hidden: true }),
-      el("p.hero-note", { id: "hero-note" }),
     ]),
     el("div", {}, [
       tiles("tiles"),
       el("p.note", { id: "config-line", style: "margin:10px 0 0" }),
+      el("details.data-view", {}, [
+        el("summary", { text: "What do these numbers mean?" }),
+        el("div", { style: "margin-top:8px;display:grid;gap:6px" }, [
+          el("p.note", { id: "hero-note" }),
+          el("p.note", { style: "margin:0", text: "NPV (the large number) is the estimated value in today’s dollars of the system after its cost, compared with leaving the same cash invested. Above $0 means the roof wins under these assumptions." }),
+          el("p.note", { style: "margin:0", text: "IRR is the system's estimated annualized return. Pays for itself is the first year the modeled savings cover the full cost, including financing." }),
+          el("p.note", { style: "margin:0", text: "These are estimates, so use the Bills & money tab to see the monthly receipts and the assumptions that move the answer." }),
+        ]),
+      ]),
+    ]),
+  ]));
+
+  pane.appendChild(el("div.dashboard-next", {}, [
+    el("span.note", { text: "Make this answer yours: check the roof, then the price." }),
+    el("div.chips", {}, [
+      ...[["roof", "Check my roof"], ["bills", "See my bills"], ["quote", "Compare a quote"]].map(([id, text]) =>
+        el("button.chip-action", { type: "button", text: text + " →", on: { click: () => ctx.actions.goTab(id) } })),
     ]),
   ]));
 
@@ -229,15 +246,15 @@ function renderHeadline(state, ctx, cell) {
   if (title) {
     title.textContent = existing
       ? `Adding a battery to your existing ${fmtNum(existing.kwDc, 1)} kW system (${nemLabel(existing.nem)})`
-      : "Net present value vs. investing the cash";
+      : "Value of this system vs. leaving the money invested";
   }
 
   const mode = fin.financing && fin.financing.mode;
   const extra = f.extraRevenue > 0 ? f.extraRevenue : 0;
   $("hero-note").textContent =
-    `Present value of ${fin.horizon} years of bill savings, minus what the system costs, discounted at the `
-    + `${fmtPct(fin.investReturn, 1)} you could earn on the same money. `
-    + (cell.npv > 0 ? "Positive means the roof wins." : "Negative means the market wins.")
+    `Estimated value in today’s dollars from ${fin.horizon} years of bill savings, after system costs, compared with `
+    + `the ${fmtPct(fin.investReturn, 1)} return you could earn by leaving the same money invested. `
+    + (cell.npv > 0 ? "A positive number favors the roof." : "A negative number favors the market.")
     + (cell.exportRevenue > 0
       ? ` Of the ${fmtMoney(cell.savings)} saved in year 1, ${fmtMoney(cell.importSavings)} is power you no longer `
         + `buy and rises with your rates; ${fmtMoney(cell.exportRevenue)} is export credit, locked at today's ACC prices.`

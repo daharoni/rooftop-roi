@@ -42,15 +42,22 @@ export function renderBillForm(host, options = {}) {
   const zip = el("input", { type: "text", id: "bill-zip", inputMode: "numeric", pattern: "[0-9]{5}", placeholder: "91301", maxLength: 5, autocomplete: "postal-code" });
   const ev = el("input", { type: "checkbox", id: "bill-ev" });
   const pool = el("input", { type: "checkbox", id: "bill-pool" });
-  const error = el("p.field-error", { role: "alert", hidden: true });
+  const error = el("p.field-error", { id: "bill-error", role: "alert", hidden: true });
+  let invalidField = null;
 
   const fail = (msg, focus) => {
     error.textContent = msg;
     error.hidden = false;
+    if (invalidField) { invalidField.removeAttribute("aria-invalid"); invalidField.removeAttribute("aria-describedby"); }
+    invalidField = focus || null;
+    if (invalidField) { invalidField.setAttribute("aria-invalid", "true"); invalidField.setAttribute("aria-describedby", "bill-error"); }
     if (focus && focus.focus) focus.focus();
     return null;
   };
-  const ok = () => { error.hidden = true; error.textContent = ""; };
+  const ok = () => {
+    error.hidden = true; error.textContent = "";
+    if (invalidField) { invalidField.removeAttribute("aria-invalid"); invalidField.removeAttribute("aria-describedby"); invalidField = null; }
+  };
 
   function fillAll(values) { values.forEach((v, i) => { cells[i].value = String(roundKwh(v)); }); ok(); }
 
