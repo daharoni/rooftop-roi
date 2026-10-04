@@ -143,8 +143,12 @@ export class ControlRail {
             if (spec.kind !== "number") { emit(e.target.value); return; }
             const v = clampNumber(spec, e.target.value);
             const prev = getPath(this.state || state, spec.path);
-            // Blank or unparseable: put the previous value back rather than writing 0.
-            if (v === null) { e.target.value = prev ?? ""; return; }
+            // Blank or unparseable: put the previous value back rather than writing 0,
+            // unless the control is nullable, where a cleared field means "not entered".
+            if (v === null) {
+              if (spec.nullable && String(e.target.value).trim() === "") { emit(null); return; }
+              e.target.value = prev ?? ""; return;
+            }
             if (String(v) !== e.target.value) e.target.value = String(v);
             emit(v);
           },

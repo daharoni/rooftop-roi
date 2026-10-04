@@ -169,7 +169,7 @@ var __ns_FlexLoad = (function () {
  *   3,582 kWh/yr, 8.02 kW charger, 254 sessions, 2.41 sessions/week.
  *
  * FlexLoad shape - docs/ARCHITECTURE.md:
- *   { id, kind: "ev"|"pool"|"custom", name, source: "detected"|"manual",
+ *   { id, kind: "ev"|"pool"|"heatpump"|"custom", name, source: "detected"|"manual",
  *     kwhByHour: Float64Array|null, annualKwh, detection: {...}|null,
  *     schedule: { mode, daysPerWeek, window, daylightFraction, overnightWindow,
  *                 maxKW, followSolar, hoursPerDay }, scale }
@@ -1028,6 +1028,13 @@ function reshape(flex, calIn, solarShape) {
   const cap = sch.maxKW > 0 ? sch.maxKW : Infinity;
   const bounds = dayBounds(cal);
 
+  // A heat pump follows the weather, so it is never moved and never invented from
+  // annualKwh alone: its series is either built (kwhByHour, added back where it is) or the
+  // weather is not ready yet, in which case it contributes nothing.
+  if (flex.kind === "heatpump") {
+    if (rec) for (let i = 0; i < N; i++) out[i] = rec[i] * scale;
+    return out;
+  }
   if (sch.mode === "asRecorded" && rec) {
     for (let i = 0; i < N; i++) out[i] = rec[i] * scale;
     return out;
@@ -1205,6 +1212,22 @@ function presets() {
       note: "Same schedule as the detected EV; set annualKwh and maxKW from EV 1 if you have one.",
     },
     {
+      id: "evp", kind: "ev", name: "An EV (planned)", source: "manual",
+      kwhByHour: null, annualKwh: 3000, detection: null,
+      schedule: { ...DEFAULT_SCHEDULE, mode: "spread", daysPerWeek: 5, window: [8, 15],
+                  daylightFraction: 0.9, overnightWindow: [1, 5], maxKW: 8, followSolar: true },
+      scale: 1.0,
+      note: "For a household without an EV today: about 3,000 kWh a year, charged mostly in daylight.",
+    },
+    {
+      id: "hp", kind: "heatpump", name: "Heat pump, replacing a gas furnace", source: "manual",
+      kwhByHour: null, annualKwh: 2500, detection: null,
+      schedule: { ...DEFAULT_SCHEDULE, mode: "asRecorded" },
+      heatpump: { annualKwh: 2500, cop: 3.0, balanceC: 16, mode: "heating" },
+      scale: 1.0,
+      note: "Shaped by the outdoor temperature at your site (core/heatpump.js); not shiftable.",
+    },
+    {
       id: "pool", kind: "pool", name: "Pool pump", source: "manual",
       kwhByHour: null, annualKwh: round3(0.5 * 8 * DAYS_PER_YEAR), detection: null,
       schedule: { mode: "spread", daysPerWeek: 7, window: [10, 18], daylightFraction: 1.0,
@@ -1252,11 +1275,20 @@ function summarize(flex) {
         : ` - ${d.sessions.length} runs of about ${d.hoursPerDay || sch.hoursPerDay} h at ` +
           `${d.chargerKW} kW`) +
       `, confidence ${Math.round((d.confidence || 0) * 100)}%.`);
+  } else if (flex.kind === "heatpump") {
+    parts.push(`${flex.name}: ${kwh(annual)} kWh/yr (your estimate).`);
   } else {
     parts.push(`${flex.name}: ${kwh(annual)} kWh/yr (entered by hand).`);
   }
 
-  if (flex.kind === "pool") {
+  if (flex.kind === "heatpump") {
+    const hp = flex.heatpump || {};
+    const bal = hp.balanceC != null ? hp.balanceC : 16;
+    parts.push(flex.kwhByHour
+      ? `Follows the outdoor temperature at your site: it runs below ${bal} \u00b0C and harder the colder it gets. ` +
+        `It is not shifted, because heating is needed when it is cold.`
+      : "Waiting for weather data for your site before it can be placed.");
+  } else if (flex.kind === "pool") {
     parts.push(`Runs flat at up to ${sch.maxKW} kW for ${sch.hoursPerDay} h from ` +
                `${hr(sch.window[0])} every day.`);
   } else if (sch.mode === "asRecorded") {
@@ -1317,6 +1349,16 @@ var __ns_SolarEngine = (function () {
  *   shading  { annual: fractionLost } | { monthly: [12 fractions lost] }
  *   Orientation is baked into the profile by core/pv.js; the engine never applies
  *   orientation factors of its own.  PV per hour = sum over planes.
+ *
+ * params.billing  "nbt" (default) | "nem2" | "nem1": which export-credit regime settles the
+ *   bill.  NEM 1/2 credits each exported kWh at that hour's retail import price (NEM 2
+ *   less the non-bypassable charges), rolls the dollars monthly and zeroes them at the
+ *   annual true-up after paying Net Surplus Compensation on the surplus kWh.  See
+ *   docs/nem2.md.
+ * params.existing = { planeId, panels } | null: panels ALREADY on the roof.  The meter
+ *   then records import and export of a house with solar, so the household load is
+ *   reconstructed as import - export + the modelled output of those panels, and every
+ *   scenario (both baselines included) carries them.
  *
  * params.flex[] = FlexLoad (core/flexload.js).  The engine subtracts every detected
  *   `kwhByHour` from the recorded load to get the base load, then adds each flex load
@@ -1816,13 +1858,19 @@ function resolveTrueUpMonth(t, override) {
   return isMonth(f) ? f : DEFAULT_TRUE_UP_MONTH;
 }
 
+/** The billing regime: "nem2" / "nem1" as given, anything else is Net Billing. */
+const BILLING_REGIMES = ["nbt", "nem2", "nem1"];
+function nemBilling(v) { return v === "nem2" || v === "nem1" ? v : "nbt"; }
+
 /**
  * Per-hour import/export prices + period codes for one (plan, provider).
  *
  * accPlus     undefined / null = the tariff file's nbt.acc_plus_adder_per_kwh;
  *             a number is an explicit override.
- * opts        { baselineRegion, trueUpMonth, municipalSurchargeFactor } - all optional,
- *             see DEFAULTS.
+ * opts        { baselineRegion, trueUpMonth, municipalSurchargeFactor, billing } - all
+ *             optional, see DEFAULTS.  billing "nem2"/"nem1" swaps the ACC export matrix
+ *             for the hour's retail price (less NBCs on NEM 2) and switches off ACC Plus,
+ *             the ARECR and the export cap.
  */
 function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capExport, opts) {
   const t = ctx.tariffs, planRes = resolvePlan(t, planId), plan = planRes.plan;
@@ -1833,15 +1881,21 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
   const imp = new Float64Array(N), exp = new Float64Array(N);
   const per = new Uint8Array(N), summer = new Uint8Array(N);
   const nbc = applyNbc ? (t.nbt.nonbypassable_charges_per_kwh || 0) : 0;
-  const accPlusUsed = (accPlus === undefined || accPlus === null) ? tariffAccPlus(t) : +accPlus;
-  const arecr = tariffArecr(t);
+  // NEM 1 / NEM 2 (an existing array on a legacy agreement): retail-rate export credit,
+  // so none of the Net Billing machinery - ACC matrix, ACC Plus, ARECR, export cap -
+  // applies, and none of it is read from the file.
+  const billing = nemBilling(o.billing);
+  const nem = billing !== "nbt";
+  const accPlusUsed = nem ? 0 : (accPlus === undefined || accPlus === null) ? tariffAccPlus(t) : +accPlus;
+  const arecr = nem ? 0 : tariffArecr(t);
+  if (nem) capExport = false;
   const baseline = resolveBaseline(t, o.baselineRegion);
   const baselinePct = (typeof plan.baseline_credit_pct === "number" && plan.baseline_credit_pct > 0)
     ? plan.baseline_credit_pct : 1;
   // CCA export adder: one key in all three utility files, applied to any non-bundled
   // provider (provider id differs from utility.id).
   const uidForAdder = t.utility && t.utility.id;
-  const adder = (uidForAdder && providerId !== uidForAdder) ? (t.nbt.cca_export_adder_per_kwh || 0) : 0;
+  const adder = (!nem && uidForAdder && providerId !== uidForAdder) ? (t.nbt.cca_export_adder_per_kwh || 0) : 0;
   // Two bill lines deliberately kept out of the rate tables (sce.json meta.notes): a
   // city's generation municipal surcharge, levied on the GENERATION component only, and
   // CPA's flat per-kWh energy surcharge.  Folding both into the hourly import price is
@@ -1860,6 +1914,12 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
   const cellP = new Uint8Array(576), cellR = new Float64Array(576), cellS = new Uint8Array(576);
   const cellDone = new Uint8Array(576);
   const nbcDollarsPerKwh = (t.nbt && t.nbt.nonbypassable_charges_per_kwh) || 0;
+  // NEM 2 credits an exported kWh at the retail price of that hour less the NBCs, which
+  // are charged on every imported kWh and never netted (NEM 2 SC "Non-Bypassable
+  // Charges").  NEM 1 predates that rule: the full retail price.  `imp` already holds
+  // the NBCs whether they sit inside the rate table or were added with applyNbc, so the
+  // subtraction is the same either way.
+  const nemExportDeduct = billing === "nem2" ? nbcDollarsPerKwh : 0;
   for (let i = 0; i < N; i++) {
     const mo = ctx.month[i], h = ctx.hour[i], dt = ctx.dayType[i];
     const key = (mo - 1) * 48 + dt * 24 + h;
@@ -1886,10 +1946,11 @@ function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capEx
       cellDone[key] = 1;
     }
     per[i] = cellP[key]; imp[i] = cellR[key]; summer[i] = cellS[key];
-    exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
+    if (nem) { const v = imp[i] - nemExportDeduct; exp[i] = v > 0 ? v : 0; }
+    else exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
   }
   return { plan, planRequested: planRes.requested, planFallback: planRes.fallback,
-           imp, exp, period: per, summer,
+           billing, imp, exp, period: per, summer,
            providerId, providerRequested: prov.requested, providerFallback: prov.fallback,
            accPlus: accPlusUsed, arecr,
            capExport, munFactor, cpaSurcharge,
@@ -1915,7 +1976,7 @@ function tariffTerms(r) {
            baselineRegion: r.baselineRegion, baselineRegionFallback: r.baselineRegionFallback,
            baselineKwhPerDay: { summer: r.baselineAllow.summer, winter: r.baselineAllow.winter },
            baselineCreditPct: r.baselineCreditPct, baselineCreditPerKwh: r.baselineCredit,
-           trueUpMonth: r.trueUpMonth };
+           trueUpMonth: r.trueUpMonth, billing: r.billing };
 }
 
 // ---------------------------------------------------------------- scenario
@@ -1998,10 +2059,34 @@ function buildScenario(ctx, params, opts) {
     for (let i = 0; i < N; i++) { const v = src[i]; clean[i] = isFinite(v) ? v : 0; }
     return Object.assign({}, f, { kwhByHour: clean });
   });
+  // An existing array: the meter saw import and export of a house that already has
+  // solar, so the household's own draw is import - export + what those panels made.
+  // Our modelled output stands in for the real one; where the model undershoots a
+  // sunny hour the sum can dip below zero, and it is clipped there (and counted).
+  const existing = resolveExisting(p.existing, planes);
   const base = new Float64Array(N);
-  base.set(ctx.recorded);
+  if (existing) {
+    const exp = ctx.exportKwh, valid = ctx.valid;
+    const per = planes[existing.planeIndex].pvPerPanel, n = existing.panels;
+    const xpv = new Float64Array(N);
+    let xKwh = 0, clipKwh = 0, clipHours = 0;
+    for (let i = 0; i < N; i++) {
+      if (valid && !valid[i]) continue;
+      const v = per[i] * n;
+      xpv[i] = v; xKwh += v;
+      const g = ctx.recorded[i] - (exp ? exp[i] : 0) + v;
+      if (g < 0) { clipKwh -= g; clipHours++; } else base[i] = g;
+    }
+    existing.pv = xpv; existing.pvKwhTotal = xKwh;
+    existing.grossClippedKwh = clipKwh; existing.grossClippedHours = clipHours;
+  } else {
+    base.set(ctx.recorded);
+  }
   for (const f of flexList) {
-    if (!f.kwhByHour) continue;
+    // Only a DETECTED load was ever in the meter record.  A manual load may carry a
+    // built hourly series (a heat pump's, from weather) that is added back below but
+    // was never metered, so it must not be subtracted out of the base.
+    if (!f.kwhByHour || f.source === "manual") continue;
     const s = f.kwhByHour;
     for (let i = 0; i < N; i++) base[i] -= s[i];
   }
@@ -2040,10 +2125,29 @@ function buildScenario(ctx, params, opts) {
     rates: buildRates(ctx, p.planId, p.providerId, p.applyNbc, climateCredit(ctx, p),
                       p.accPlusAdder, !p.ngom,
                       { baselineRegion: p.baselineRegion, trueUpMonth: p.trueUpMonth,
-                        municipalSurchargeFactor: p.municipalSurchargeFactor }),
+                        municipalSurchargeFactor: p.municipalSurchargeFactor,
+                        billing: p.billing }),
+    existing,
     weatherKey: p.weatherKey,
     _pv: null,
   };
+}
+
+/**
+ * Which plane the existing panels sit on, and how many.  An id the planes do not carry
+ * (the face was deleted or renamed) falls back to the first plane and says so; with no
+ * plane at all there is nowhere to model them, which is a caller bug, not a zero.
+ */
+function resolveExisting(ex, planes) {
+  if (!ex) return null;
+  const panels = Math.max(0, Math.round(+ex.panels || 0));
+  if (!panels) return null;
+  if (!planes.length) throw new Error("params.existing needs a roof plane to model the existing panels on");
+  let k = planes.findIndex((pl) => pl.id === ex.planeId);
+  const fallback = k < 0;
+  if (k < 0) k = 0;
+  return { planeIndex: k, planeId: planes[k].id, requestedPlaneId: ex.planeId == null ? null : ex.planeId,
+           planeFallback: fallback, panels };
 }
 
 /**
@@ -2245,6 +2349,7 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
   // bank that only ever grows stops changing after one warm pass, because every month's
   // room is already full.
   const adderFirst = r.bankDrawOrder === "adderFirst";   // test-only: proves order-freedom
+  const nem = r.billing === "nem2" || r.billing === "nem1";
   function runCycle(ce0, ca0) {
     const usedA = new Float64Array(M), accUsedA = new Float64Array(M), trueUpA = new Float64Array(M);
     const forfeitSettleA = new Float64Array(M), balA = new Float64Array(M);
@@ -2269,7 +2374,14 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
       pExpKwh += expKwhA[m]; pImpKwh += mImpKwh[m];
       const [fromE, fromCe, fromA, fromCa] = take(Math.max(0, subtotalA[m] - creditFloorA[m]));
       let trueUp = 0, forfeitCredit = 0;
-      if (isPoint[m]) {
+      if (isPoint[m] && nem) {
+        // NEM 1/2 true-up: net surplus kWh are paid at NSC (AB 920) and whatever dollar
+        // credit is left is zeroed - it does not roll into the next year.  No ARECR.
+        const surplusKwh = Math.max(0, pExpKwh - pImpKwh);
+        trueUp = surplusKwh * r.nsc;
+        forfeitCredit = e$ + ce$ + a$ + ca$;
+        e$ = 0; ce$ = 0; a$ = 0; ca$ = 0; pExpKwh = 0; pImpKwh = 0;
+      } else if (isPoint[m]) {
         // Schedule NBT SC 4.e.i, in order: the credit bank is first reduced by the
         // "Average Retail Export Compensation Rate" applied to the net surplus kWh, THEN
         // the net surplus kWh are paid at Net Surplus Compensation.  The ARECR is about
@@ -2303,13 +2415,14 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
   const { usedA, accUsedA, trueUpA, forfeitSettleA, balA, endBank$, endBankKwh } = cyc;
 
   // ---- 3. totals and rows, in record order
-  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0, accPlusValue = 0;
+  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0, accPlusValue = 0, nscValue = 0;
   const rows = detail ? [] : null;
   for (let m = 0; m < M; m++) {
     const bill = subtotalA[m] - usedA[m] - accUsedA[m] - climateA[m] - trueUpA[m];
     total += bill;
     exportValue += usedA[m] + accUsedA[m] + trueUpA[m];   // dollars sourced from exported kWh
     accPlusValue += accUsedA[m];                          // ...of which the ACC Plus adder
+    nscValue += trueUpA[m];                               // ...of which the true-up payout
     forfeitedTotal += forfeitSettleA[m];
     if (rows) {
       const q = pre[m];
@@ -2341,7 +2454,7 @@ function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mB
     return { start: ctx.monthKey[from], end: ctx.monthKey[p], months };
   });
   return { total, months: rows, leftoverCredit: endBank$, forfeited: forfeitedTotal,
-           exportValue, accPlusValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
+           exportValue, accPlusValue, nscValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
 }
 
 // ---------------------------------------------------------------- dispatch
@@ -2369,8 +2482,12 @@ function runHours(scn, params, detail) {
   const floorKwh = cap * Math.max(0, Math.min(0.9, p.minReserve));
   const backup = p.strategy === "backup_only";
   const tou = p.strategy === "tou_arbitrage" || p.strategy === "export_arbitrage";
-  const expArb = p.strategy === "export_arbitrage";
-  const gridCharge = !!p.gridCharge && tou;
+  // A battery added to a NEM 1/2 array is installed non-exporting and solar-charged
+  // only (the usual way to keep the array's legacy agreement), so under NEM billing it
+  // never sells to the grid and never buys from it.
+  const nemRun = r.billing === "nem2" || r.billing === "nem1";
+  const expArb = p.strategy === "export_arbitrage" && !nemRun;
+  const gridCharge = !!p.gridCharge && tou && !nemRun;
   const thr = p.exportThreshold;
   let soc = backup ? cap : cap * 0.5;
 
@@ -2497,6 +2614,7 @@ function runHours(scn, params, detail) {
   }
 
   const years = ctx.years;
+  const xs = scn.existing;
   const billing = settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mBandKwh, mBandCred);
   const out = {
     panels: pvInfo.panels, panelsByPlane: alloc.slice(), batteries,
@@ -2513,12 +2631,24 @@ function runHours(scn, params, detail) {
     // a bill, the ACC Plus adder, and the net-surplus payout at true-up.  Kept separate
     // from avoided import cost because export prices are locked at the ACC vintage
     // for nine years and do not follow retail escalation.
-    exportRevenue: billing.exportValue / years,
+    // Under NEM 1/2 the export credit IS the retail price and moves with it, so it
+    // belongs with the escalating bill saving: exportRevenue is 0 there and the export
+    // dollars are reported, for display only, as nemExportValue (of which nscRevenue is
+    // the true-up payout).
+    exportRevenue: nemRun ? 0 : billing.exportValue / years,
     // The part of exportRevenue that is the ACC Plus adder - a SUBSET of it, never extra.
     // Realised value (with the adder minus without it, so banked adder lost to the
     // true-up counts for nothing), annualised like exportRevenue.  core/finance.js
     // expires it after the vintage's nine-year lock.
-    accPlusRevenue: billing.accPlusValue / years,
+    accPlusRevenue: nemRun ? 0 : billing.accPlusValue / years,
+    billing: r.billing,
+    nemExportValue: nemRun ? billing.exportValue / years : 0,
+    nscRevenue: billing.nscValue / years,
+    // Panels already on the roof (params.existing), their modelled output, and the
+    // panels this configuration ADDS.  kwdc and panels are the whole array.
+    existingPanels: xs ? xs.panels : 0,
+    existingPvKwh: xs ? xs.pvKwhTotal / years : 0,
+    newPanels: pvInfo.panels - (xs ? xs.panels : 0),
     // Flexible-load hours whose kWh were non-finite and were priced as 0 (buildScenario).
     flexNanHours: scn.flexNanHours || 0,
     selfSufficiency: tLoad > 0 ? 1 - tImp / tLoad : 0,
@@ -2548,7 +2678,11 @@ function runHours(scn, params, detail) {
   return out;
 }
 
-/** Panel counts per plane: explicit override, else whatever the planes carry. */
+/**
+ * Panel counts per plane: explicit override, else whatever the planes carry.  Panels
+ * already on the roof are never taken away: the existing plane holds at least that many
+ * in every run, which is how both no-system baselines carry the existing array.
+ */
 function normaliseAlloc(scn, p) {
   const n = scn.planes.length;
   const src = p.panelsByPlane;
@@ -2557,6 +2691,8 @@ function normaliseAlloc(scn, p) {
     const v = src && src[k] !== undefined ? src[k] : scn.planes[k].panels;
     out[k] = Math.max(0, Math.round(v || 0));
   }
+  const xs = scn.existing;
+  if (xs && out[xs.planeIndex] < xs.panels) out[xs.planeIndex] = xs.panels;
   return out;
 }
 
@@ -2579,6 +2715,9 @@ const DEFAULTS = {
   // A city's generation municipal surcharge / utility-user tax as a fraction of the
   // generation charge (Agoura Hills: sce.json meta.bill_validation).  null = none.
   municipalSurchargeFactor: null,
+  // "nbt" | "nem2" | "nem1" (docs/nem2.md), and the panels already on the roof as
+  // { planeId, panels } (panels of panelW watts), or null.
+  billing: "nbt", existing: null,
   strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5,
   exportLimitKW: 0,
 };
@@ -2595,7 +2734,7 @@ function withDefaults(p) {
  */
 function billPeriod(ctx, params, startDate, endDate) {
   const p = withDefaults(params);
-  const scn = buildScenario(ctx, Object.assign({}, p, { flex: [], planes: [], baseLoadScale: 1 }));
+  const scn = buildScenario(ctx, Object.assign({}, p, { flex: [], planes: [], baseLoadScale: 1, existing: null }));
   const r = scn.rates;
   const plan = r.plan;
   const byPeriod = { on: { kwh: 0, cost: 0 }, mid: { kwh: 0, cost: 0 },
@@ -2628,7 +2767,11 @@ function billPeriod(ctx, params, startDate, endDate) {
            total: fixed + energy - baseCredit - climate };
 }
 
-/** One scenario run with no panels and no battery: the no-system arm of a baseline. */
+/**
+ * One scenario run with no NEW panels and no battery: the no-system arm of a baseline.
+ * With params.existing that is "the existing array, no battery" (normaliseAlloc keeps
+ * the existing panels on their plane).
+ */
 function noSystem(scn, p, detail) {
   const zero = Object.assign({}, p, { batteries: 0, panelsByPlane: scn.planes.map(() => 0) });
   return runHours(scn, zero, detail);
@@ -2713,7 +2856,7 @@ const _internal = { isDST, spread, fallbackReshape, dayBounds,
 const SolarEngine = {
   prepare, buildScenario, runHours, simulate, billPeriod, billOnAllPlans, billOnAllProviders,
   baselines, attachSavings, buildRates, settle, settlementPoints, planById, resolvePlan,
-  resolveTrueUpMonth, profileFor, pvFor, climateCredit,
+  resolveTrueUpMonth, profileFor, pvFor, climateCredit, resolveExisting, BILLING_REGIMES,
   resolveProvider, resolveBaseline, tariffAccPlus, tariffArecr,
   MIN_USABLE_DAYS, DEFAULT_TRUE_UP_MONTH,
   reshapeFlex, setFlexReshape, flexReshapeSource,
@@ -2772,6 +2915,28 @@ var __ns_SolarFinance = (function () {
  * 20 - exactly what the single-replacement rule used to give.  The battery's
  * capacity-fade clock restarts at every replacement that is booked, and only then.
  *
+ * Battery hardware has two prices: costPerKwh on the usable kWh and a fixed
+ * costPerBattery per unit (inverter/gateway/install labour that does not scale with
+ * capacity).  `sim.batteries` is the unit count; absent means 0 units, so no fixed
+ * cost.  The fixed part sits inside storageCost, so discounts, the degradation cost
+ * share and the pack replacement (battReplFraction of the whole storage price) see it.
+ *
+ * Existing solar: `existingKwDc` is array already on the roof.  `sim.kwdc` stays the
+ * TOTAL (production, LCOE denominators and the simulation are about the whole array)
+ * but only newKw = max(0, kwdc - existingKwDc) is bought, so the solar price and the
+ * inverter swap are charged on new watts alone.  The resale credit is a flat input
+ * and is not scaled.  `microinverters: true` means the inverters are in the panel
+ * price and fail with the panels, so the inverter swap outlay is 0
+ * (inverterYear/inverterPerW stay in the inputs untouched).
+ *
+ * extraRevenue: batteries bring non-bill value - a resilience value (what an outage
+ * is worth to the household, $/yr) and VPP/demand-response income ($/yr per unit).
+ * Each year the household has the system and batteries > 0 it adds
+ * resilienceValue + vppPerBattery x batteries, flat (not escalated, not degraded), to
+ * the household's earnings in every metric.  It is not a bill saving, so `savings`
+ * and savingsByYear exclude it; firstYearSavings includes it.  Under a lease that
+ * ends with no buyout it stops with the system.
+ *
  * Defaults mirror the app's State.DEFAULTS.fin (app/state.js ~line 101-111), which
  * is the source of truth for anything a person sees; these only fill keys a caller
  * leaves out (tests, the optimizer called without a full finance block).  Keep the
@@ -2782,8 +2947,13 @@ var __ns_SolarFinance = (function () {
 const REPLACE_MIN_REMAINING = 3;
 
 const DEFAULTS = {
-  costPerW: 3.00,            // $/W DC, installed, before incentives
+  costPerW: 2.75,            // $/W DC, installed, before incentives (= app/state.js)
   costPerKwh: 1000,          // $/kWh usable storage, installed
+  costPerBattery: 0,         // fixed $ per battery unit, on top of $/kWh (needs sim.batteries)
+  resilienceValue: 0,        // $/yr outage-protection value while batteries > 0 (not a bill saving)
+  vppPerBattery: 0,          // $/yr per battery unit of VPP / demand-response income
+  microinverters: false,     // true: no string-inverter swap is booked
+  existingKwDc: 0,           // kW DC already installed; priced only above this
   adder: 0,                  // fixed install adder (panel upgrade, trenching, ...)
   // Per-roof-face extra install cost (long conduit runs, tile roof, steep pitch...).
   // Charged whenever there are panels; hardware-agnostic, so it never enters the
@@ -2857,6 +3027,12 @@ function withDefaults(f) {
     },
   };
   o.roofCostAdder = Math.max(0, o.roofCostAdder);
+  o.costPerBattery = Math.max(0, o.costPerBattery);
+  o.resilienceValue = Math.max(0, o.resilienceValue);
+  o.vppPerBattery = Math.max(0, o.vppPerBattery);
+  o.existingKwDc = Math.max(0, o.existingKwDc);
+  o.microinverters = f && f.microinverters !== undefined && f.microinverters !== null
+    ? (f.microinverters === "false" ? false : !!f.microinverters) : DEFAULTS.microinverters;
   o.accPlusYears = Math.max(0, o.accPlusYears);
   return o;
 }
@@ -3001,8 +3177,10 @@ function evaluate(sim, f) {
   // a hand-built sim with a stray value is clamped rather than inventing savings.
   const accPlusRev = Math.min(Math.max(0, +sim.accPlusRevenue || 0), Math.max(0, exportRev));
   const watts = sim.kwdc * 1000;
-  const solarCost = watts * f.costPerW;
-  const storageCost = sim.battKWhTotal * f.costPerKwh;
+  const newWatts = Math.max(0, sim.kwdc - f.existingKwDc) * 1000;
+  const units = Math.max(0, +sim.batteries || 0);
+  const solarCost = newWatts * f.costPerW;
+  const storageCost = sim.battKWhTotal * f.costPerKwh + units * f.costPerBattery;
   // Roof work (re-roofing a face, conduit runs, structural fixes) is the household's
   // own bill: it is not part of the system's sticker price, so no vendor pass-through,
   // tax credit or rebate reaches it, and under a lease it is still paid up front.
@@ -3088,6 +3266,8 @@ function evaluate(sim, f) {
   // "pays for itself" and project-IRR figures below are about the asset, while
   // NPV and wealth are about the household's actual money.
   const cf = [-upfront], netSav = [0], savings = [0], om = [0], extras = [0], prod = [0], payments = [pay[0] || 0];
+  const extraRev = [0];
+  const extraPerYear = units > 0 ? f.resilienceValue + f.vppPerBattery * units : 0;
   // Replacement years recur (see replacementYears and the header).  The pack's
   // fade clock restarts at each one whoever pays for it - a lessor swapping a pack
   // in year 20 hands back a fresh one just the same.
@@ -3105,19 +3285,20 @@ function evaluate(sim, f) {
     const deg = wS * sFac + wB * bFac;
     // The ACC Plus adder rides inside exportRevenue for its nine-year lock, then ends.
     const exportY = exportRev - (y > f.accPlusYears ? accPlusRev : 0);
+    const xr = has ? extraPerYear : 0;
     const sav = has ? importSav * esc * deg + exportY * escX * deg : 0;
     // O&M, replacements and resale are the owner's: the household under cash or a
     // loan, the lessor under a lease until a buyout hands the system over.
     const o = owns ? f.omPerYear * Math.pow(1 + f.discountRate, y - 1) : 0;
     let ex = 0;
     if (owns) {
-      if (sim.battKWhTotal > 0 && battSwap) ex += sim.battKWhTotal * f.costPerKwh * f.battReplFraction;
-      if (watts > 0 && invRepl.indexOf(y) >= 0) ex += watts * f.inverterPerW;
+      if (sim.battKWhTotal > 0 && battSwap) ex += storageCost * f.battReplFraction;
+      if (newWatts > 0 && !f.microinverters && invRepl.indexOf(y) >= 0) ex += newWatts * f.inverterPerW;
     }
     const resale = (owns || (ownsAtH && y === H)) ? f.resaleValue : 0;
-    const earned = sav - o - ex + (y === H ? resale : 0);
+    const earned = sav + xr - o - ex + (y === H ? resale : 0);
     const net = earned - pay[y];
-    cf.push(net); netSav.push(earned); savings.push(sav); om.push(o); extras.push(ex); payments.push(pay[y]);
+    cf.push(net); netSav.push(earned); savings.push(sav); extraRev.push(xr); om.push(o); extras.push(ex); payments.push(pay[y]);
     prod.push(has ? sim.pvKwh * sFac : 0);
   }
 
@@ -3214,7 +3395,7 @@ function evaluate(sim, f) {
     // saving - which already carries the escalation split (import at retail,
     // export locked) and the degradation blend, so lifetime cost and NPV agree
     // on how much a slowly fading array is worth.
-    const billY = sim.baselineBill * escY - savings[y];
+    const billY = sim.baselineBill * escY - savings[y] - extraRev[y];
     lifetime += (billY + om[y] + extras[y] + payments[y]) / dis;
     lifetimeNoSystem += (sim.baselineBill * escY) / dis;
   }
@@ -3247,11 +3428,16 @@ function evaluate(sim, f) {
     // (savings stop after `year`) or "runs to horizon" (leased throughout).
     leaseEnd,
     // Years in which a replacement was booked (whoever paid for it).
-    replacementYears: { battery: sim.battKWhTotal > 0 ? battRepl : [], inverter: watts > 0 ? invRepl : [] },
+    replacementYears: { battery: sim.battKWhTotal > 0 ? battRepl : [], inverter: newWatts > 0 && !f.microinverters ? invRepl : [] },
     netSavingsByYear: netSav,
     lcoe, lifetimeCost: lifetime, lifetimeCostNoSystem: lifetimeNoSystem,
     wealthInvest, wealthSystem, wealthDelta: wealthSystem - wealthInvest, cashRef,
-    firstYearSavings: savings[1] || 0,
+    firstYearSavings: (savings[1] || 0) + (extraRev[1] || 0),
+    // Non-bill battery value (year-1 figures; per-year stream in extraRevenueByYear).
+    resilienceValue: extraRev[1] ? f.resilienceValue : 0,
+    vppRevenue: extraRev[1] ? f.vppPerBattery * units : 0,
+    extraRevenue: extraRev[1] || 0, extraRevenueByYear: extraRev,
+    batteryFixedCost: units * f.costPerBattery, newKwDc: newWatts / 1000,
     importSavings: importSav, exportRevenue: exportRev,
     horizon: H,
     // financing
@@ -3513,7 +3699,7 @@ function priceGrid(grid, finance, objective, basis) {
     const fin = Finance.evaluate({
       savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, baselineBill: baseline.bill,
-      pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
+      pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal, batteries: c.batteries,
     }, finance);
     return {
       panels: c.panels, panelsByPlane: c.panelsByPlane, planeIds: c.planeIds,
@@ -3528,7 +3714,7 @@ function priceGrid(grid, finance, objective, basis) {
       cashFlowPayback: fin.cashFlowPayback, totalCost: fin.totalCost,
       netCost: fin.netCost, lifetimeCost: fin.lifetimeCost, lcoe: fin.lcoe,
       wealthSystem: fin.wealthSystem, wealthInvest: fin.wealthInvest,
-      firstYearSavings: fin.firstYearSavings,
+      firstYearSavings: fin.firstYearSavings, extraRevenue: fin.extraRevenue,
       firstYearMonthlyOutlay: fin.firstYearMonthlyOutlay,
       currentMonthlyBill: fin.currentMonthlyBill,
       financingMode: fin.financingMode, monthlyPayment: fin.monthlyPayment,
@@ -3563,15 +3749,18 @@ function tornado(cell, finance, baselineBill, flexVariants) {
     savings: o.savings, importSavings: o.importSavings, exportRevenue: o.exportRevenue,
     accPlusRevenue: o.accPlusRevenue === undefined ? cell.accPlusRevenue : o.accPlusRevenue,
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
-    pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal,
+    pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
   });
   const sim = simOf(cell);
   const base = Finance.evaluate(sim, finance).npv;
   const f = Finance.withDefaults(finance);
-  const rows = [
+  let rows = [
     ["Solar $/W", "costPerW"], ["Storage $/kWh", "costPerKwh"],
     ["Rate escalation", "escalation"], ["Investment return", "investReturn"],
-  ].map(function (r) {
+  ];
+  // Only worth a bar when there is a fixed battery price to wiggle.
+  if (f.costPerBattery > 0) rows.splice(2, 0, ["Battery $/unit", "costPerBattery"]);
+  rows = rows.map(function (r) {
     const lo = Object.assign({}, f); lo[r[1]] = f[r[1]] * 0.8;
     const hi = Object.assign({}, f); hi[r[1]] = f[r[1]] * 1.2;
     return { label: r[0], low: Finance.evaluate(sim, lo).npv - base,
@@ -3632,6 +3821,11 @@ var SolarOptimizer = __ns_SolarOptimizer;
  *
  * out { type:"error", id, message, stack }        on any thrown exception
  *
+ * `params.billing` ("nbt" | "nem2" | "nem1") and `params.existing` ({ planeId, panels } |
+ * null) pass straight through to the engine.  With `existing` set, "grid" fixes the
+ * panel axis at the existing array (every panel on the existing plane) and sweeps the
+ * battery count only: the cells keep searchGrid's shape, with a one-entry panelList.
+ *
  * `params.planes` may omit `profile`: the worker fills it from the cached SolarProfiles
  * for that plane at `params.weatherKey`, which is why init carries the solar bundle.
  * ========================================================================== */
@@ -3648,6 +3842,12 @@ var SolarOptimizer = __ns_SolarOptimizer;
   function hydrate(params) {
     var p = Object.assign({}, params || {});
     var key = p.weatherKey || "tmy";
+    // Existing-solar mode: the regime and the existing array, normalised so a stale or
+    // hand-edited message cannot smuggle a half-set object into the engine.
+    p.billing = p.billing === "nem2" || p.billing === "nem1" ? p.billing : "nbt";
+    var ex = p.existing;
+    var exPanels = ex ? Math.max(0, Math.round(+ex.panels || 0)) : 0;
+    p.existing = exPanels > 0 ? { planeId: ex.planeId == null ? null : String(ex.planeId), panels: exPanels } : null;
     p.planes = (p.planes || []).map(function (pl) {
       if (pl.profile) return pl;
       var sp = solar && solar.byPlane ? solar.byPlane[pl.id] : null;
@@ -3685,6 +3885,47 @@ var SolarOptimizer = __ns_SolarOptimizer;
     return { label: "Flexible load kWh/yr", low: mk(0.8), high: mk(1.2) };
   }
 
+  var MAX_EXISTING_BATTERIES = 20;   // optimizer.MAX_SEARCH_BATTERIES
+
+  /**
+   * The grid for a household that already has solar: the panel count is not a choice
+   * (adding panels would move the whole system to Net Billing), so the only axis is
+   * the battery count.  Same return shape as SolarOptimizer.searchGrid.
+   */
+  function existingGrid(params, m) {
+    var p = E.withDefaults(params);
+    var b = E.baselines(ctx, p, false);
+    var scn = b.scnSame, xs = scn.existing;
+    var nP = scn.planes.length;
+    var alloc = [];
+    for (var k = 0; k < nP; k++) alloc.push(k === xs.planeIndex ? xs.panels : 0);
+    var maxB = Math.floor(Number(m.maxBatteries));
+    if (!isFinite(maxB) || maxB < 0) maxB = 6;
+    if (maxB > MAX_EXISTING_BATTERIES) maxB = MAX_EXISTING_BATTERIES;
+    var battList = [], cells = [];
+    for (var nb = 0; nb <= maxB; nb++) battList.push(nb);
+    for (var i = 0; i < battList.length; i++) {
+      var res = E.runHours(scn, Object.assign({}, p, { panelsByPlane: alloc.slice(), batteries: battList[i] }), false);
+      E.attachSavings(res, b.sameFlex.bill, b.asRecorded.bill);
+      cells.push(res);
+      post({ type: "progress", id: m.id, done: i + 1, total: battList.length });
+    }
+    var order = [];
+    for (var n = 0; n < xs.panels; n++) order.push(xs.planeIndex);
+    return {
+      cells: cells, panelList: [xs.panels], battList: battList,
+      planes: scn.planes.map(function (pl, k) { return { id: pl.id, name: pl.name, cap: k === xs.planeIndex ? xs.panels : 0 }; }),
+      allocationOrder: order, greedyBatteries: 0,
+      baselineSameFlex: b.sameFlex, baselineAsRecorded: b.asRecorded,
+      flexShiftOnlySavings: b.asRecorded.bill - b.sameFlex.bill,
+      weatherKey: scn.weatherKey,
+      years: ctx.years !== undefined ? ctx.years : ctx.nDays / 365, hours: ctx.N,
+      existing: { planeId: xs.planeId, planeFallback: xs.planeFallback, panels: xs.panels,
+                  pvKwh: b.sameFlex.existingPvKwh, grossClippedKwh: xs.grossClippedKwh / ctx.years,
+                  billing: p.billing },
+    };
+  }
+
   var HANDLERS = {
     init: function (m) {
       ctx = E.prepare({ load: m.load, tariffs: m.tariffs });
@@ -3698,7 +3939,12 @@ var SolarOptimizer = __ns_SolarOptimizer;
     },
 
     grid: function (m) {
-      var grid = O.searchGrid(ctx, hydrate(m.params), {
+      var hp = hydrate(m.params);
+      if (hp.existing && (hp.planes || []).length) {
+        post({ type: "grid", id: m.id, grid: existingGrid(hp, m) });
+        return;
+      }
+      var grid = O.searchGrid(ctx, hp, {
         maxPanelsTotal: m.maxPanelsTotal, maxBatteries: m.maxBatteries,
         planeCaps: m.planeCaps, step: m.step, greedyBatteries: m.greedyBatteries,
         onProgress: function (done, total) { post({ type: "progress", id: m.id, done: done, total: total }); },

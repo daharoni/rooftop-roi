@@ -2,8 +2,8 @@
 
 **Does rooftop solar plus a battery beat leaving the same cash in the market?**
 
-Rooftop ROI answers that for your house, using your own utility interval data. It simulates
-every hour of your last one to two years with a candidate solar array and battery, bills
+Rooftop ROI answers that for your house, using your own utility interval data, or just twelve
+monthly bills if that is all you have. It simulates every hour of your last one to two years with a candidate solar array and battery, bills
 each hour under California's Net Billing Tariff (NEM 3.0) rules, searches for the array and
 battery size that maximizes net present value, and compares the result with investing the
 same money at a return you choose. Cash, loan, and lease financing are all modeled.
@@ -52,6 +52,9 @@ their own file, or, if you built the scenario on the demo household, the demo lo
    - SDG&E: My Energy → Usage → Green Button Download (CSV or XML).
    Multiple files are merged. You can also try the built-in demo household (a real
    Agoura Hills home on SCE with one EV, address and account removed).
+   No interval file? Choose "I only have my bills" and type twelve monthly kWh figures. The
+   hourly shape inside each month is estimated from a typical household, so the result is less
+   certain (EV and pool timing especially). The Assumptions tab says so.
 2. **Your location**: address, ZIP, or a click on the map. This picks the weather and the
    utility's tariff library.
 3. **Your roof**: describe one face (direction and pitch), trace faces on the satellite map, or
@@ -70,6 +73,19 @@ their own file, or, if you built the scenario on the demo household, the demo lo
   inside a daytime window). Pool pumps, water heaters, laundry, or a second EV can be added
   the same way. Moving flexible usage into solar hours is often worth more than an extra
   battery.
+- **Monthly-bill start.** Twelve monthly totals become a synthetic year of hours. Totals are
+  exact; timing is estimated and flagged.
+- **Quote checker.** The Quote tab compares an installer's quote (size, batteries, price,
+  production estimate, monthly payment) with the market price band, the same system priced by
+  this model, and the model's best size, and checks the quoted production against the weather model.
+- **Existing solar on NEM 1 or NEM 2.** Model adding a battery to panels you already have:
+  the array is fixed and only the battery varies, with export credited under the old rules.
+- **Heat pump.** Add a heat pump replacing a gas furnace as a flexible load driven by hourly weather.
+- **Battery presets** for common products (specifications are approximate, check the data sheet),
+  plus a fixed per-unit cost, a yearly value for backup power and a grid-services (VPP) payment per battery.
+  Backup and VPP figures are your own inputs, not forecasts.
+- **NPV band and "why this size".** The Dashboard shows a range around the best NPV and a one-line
+  reason for the size it picked.
 - Money: upfront cost, incentives and vendor pass-through discounts, cash / loan / lease,
   rate escalation, degradation, replacements, NPV against an investment return, IRR, payback,
   wealth at the horizon, break-even prices, weather sensitivity (P90 / P50 / P10 years), SCE's 150%
@@ -119,7 +135,7 @@ core/              pure logic: parsers, load detection, PV model, weather, tarif
                    hourly engine, optimizer, finance
 data/tariffs/      tariff library     data/export/  NBT export matrices     data/demo/  demo household
 tests/             node --test suites and fixtures
-docs/              architecture contract, model notes, tariff notes
+docs/              architecture contract, model notes, tariff notes, incentives (docs/incentives.md)
 ```
 
 ## Disclaimer

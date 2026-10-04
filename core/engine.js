@@ -25,6 +25,16 @@
  *   Orientation is baked into the profile by core/pv.js; the engine never applies
  *   orientation factors of its own.  PV per hour = sum over planes.
  *
+ * params.billing  "nbt" (default) | "nem2" | "nem1": which export-credit regime settles the
+ *   bill.  NEM 1/2 credits each exported kWh at that hour's retail import price (NEM 2
+ *   less the non-bypassable charges), rolls the dollars monthly and zeroes them at the
+ *   annual true-up after paying Net Surplus Compensation on the surplus kWh.  See
+ *   docs/nem2.md.
+ * params.existing = { planeId, panels } | null: panels ALREADY on the roof.  The meter
+ *   then records import and export of a house with solar, so the household load is
+ *   reconstructed as import - export + the modelled output of those panels, and every
+ *   scenario (both baselines included) carries them.
+ *
  * params.flex[] = FlexLoad (core/flexload.js).  The engine subtracts every detected
  *   `kwhByHour` from the recorded load to get the base load, then adds each flex load
  *   back at its scheduled hours via FlexLoad.reshape(flex, cal, solarShape).
@@ -523,13 +533,19 @@ export function resolveTrueUpMonth(t, override) {
   return isMonth(f) ? f : DEFAULT_TRUE_UP_MONTH;
 }
 
+/** The billing regime: "nem2" / "nem1" as given, anything else is Net Billing. */
+export const BILLING_REGIMES = ["nbt", "nem2", "nem1"];
+function nemBilling(v) { return v === "nem2" || v === "nem1" ? v : "nbt"; }
+
 /**
  * Per-hour import/export prices + period codes for one (plan, provider).
  *
  * accPlus     undefined / null = the tariff file's nbt.acc_plus_adder_per_kwh;
  *             a number is an explicit override.
- * opts        { baselineRegion, trueUpMonth, municipalSurchargeFactor } - all optional,
- *             see DEFAULTS.
+ * opts        { baselineRegion, trueUpMonth, municipalSurchargeFactor, billing } - all
+ *             optional, see DEFAULTS.  billing "nem2"/"nem1" swaps the ACC export matrix
+ *             for the hour's retail price (less NBCs on NEM 2) and switches off ACC Plus,
+ *             the ARECR and the export cap.
  */
 export function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus, capExport, opts) {
   const t = ctx.tariffs, planRes = resolvePlan(t, planId), plan = planRes.plan;
@@ -540,15 +556,21 @@ export function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus
   const imp = new Float64Array(N), exp = new Float64Array(N);
   const per = new Uint8Array(N), summer = new Uint8Array(N);
   const nbc = applyNbc ? (t.nbt.nonbypassable_charges_per_kwh || 0) : 0;
-  const accPlusUsed = (accPlus === undefined || accPlus === null) ? tariffAccPlus(t) : +accPlus;
-  const arecr = tariffArecr(t);
+  // NEM 1 / NEM 2 (an existing array on a legacy agreement): retail-rate export credit,
+  // so none of the Net Billing machinery - ACC matrix, ACC Plus, ARECR, export cap -
+  // applies, and none of it is read from the file.
+  const billing = nemBilling(o.billing);
+  const nem = billing !== "nbt";
+  const accPlusUsed = nem ? 0 : (accPlus === undefined || accPlus === null) ? tariffAccPlus(t) : +accPlus;
+  const arecr = nem ? 0 : tariffArecr(t);
+  if (nem) capExport = false;
   const baseline = resolveBaseline(t, o.baselineRegion);
   const baselinePct = (typeof plan.baseline_credit_pct === "number" && plan.baseline_credit_pct > 0)
     ? plan.baseline_credit_pct : 1;
   // CCA export adder: one key in all three utility files, applied to any non-bundled
   // provider (provider id differs from utility.id).
   const uidForAdder = t.utility && t.utility.id;
-  const adder = (uidForAdder && providerId !== uidForAdder) ? (t.nbt.cca_export_adder_per_kwh || 0) : 0;
+  const adder = (!nem && uidForAdder && providerId !== uidForAdder) ? (t.nbt.cca_export_adder_per_kwh || 0) : 0;
   // Two bill lines deliberately kept out of the rate tables (sce.json meta.notes): a
   // city's generation municipal surcharge, levied on the GENERATION component only, and
   // CPA's flat per-kWh energy surcharge.  Folding both into the hourly import price is
@@ -567,6 +589,12 @@ export function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus
   const cellP = new Uint8Array(576), cellR = new Float64Array(576), cellS = new Uint8Array(576);
   const cellDone = new Uint8Array(576);
   const nbcDollarsPerKwh = (t.nbt && t.nbt.nonbypassable_charges_per_kwh) || 0;
+  // NEM 2 credits an exported kWh at the retail price of that hour less the NBCs, which
+  // are charged on every imported kWh and never netted (NEM 2 SC "Non-Bypassable
+  // Charges").  NEM 1 predates that rule: the full retail price.  `imp` already holds
+  // the NBCs whether they sit inside the rate table or were added with applyNbc, so the
+  // subtraction is the same either way.
+  const nemExportDeduct = billing === "nem2" ? nbcDollarsPerKwh : 0;
   for (let i = 0; i < N; i++) {
     const mo = ctx.month[i], h = ctx.hour[i], dt = ctx.dayType[i];
     const key = (mo - 1) * 48 + dt * 24 + h;
@@ -593,10 +621,11 @@ export function buildRates(ctx, planId, providerIdIn, applyNbc, climate, accPlus
       cellDone[key] = 1;
     }
     per[i] = cellP[key]; imp[i] = cellR[key]; summer[i] = cellS[key];
-    exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
+    if (nem) { const v = imp[i] - nemExportDeduct; exp[i] = v > 0 ? v : 0; }
+    else exp[i] = t.nbt.export_rates[dt ? "weekend" : "weekday"][mo - 1][h] + adder;
   }
   return { plan, planRequested: planRes.requested, planFallback: planRes.fallback,
-           imp, exp, period: per, summer,
+           billing, imp, exp, period: per, summer,
            providerId, providerRequested: prov.requested, providerFallback: prov.fallback,
            accPlus: accPlusUsed, arecr,
            capExport, munFactor, cpaSurcharge,
@@ -622,7 +651,7 @@ function tariffTerms(r) {
            baselineRegion: r.baselineRegion, baselineRegionFallback: r.baselineRegionFallback,
            baselineKwhPerDay: { summer: r.baselineAllow.summer, winter: r.baselineAllow.winter },
            baselineCreditPct: r.baselineCreditPct, baselineCreditPerKwh: r.baselineCredit,
-           trueUpMonth: r.trueUpMonth };
+           trueUpMonth: r.trueUpMonth, billing: r.billing };
 }
 
 // ---------------------------------------------------------------- scenario
@@ -705,10 +734,34 @@ export function buildScenario(ctx, params, opts) {
     for (let i = 0; i < N; i++) { const v = src[i]; clean[i] = isFinite(v) ? v : 0; }
     return Object.assign({}, f, { kwhByHour: clean });
   });
+  // An existing array: the meter saw import and export of a house that already has
+  // solar, so the household's own draw is import - export + what those panels made.
+  // Our modelled output stands in for the real one; where the model undershoots a
+  // sunny hour the sum can dip below zero, and it is clipped there (and counted).
+  const existing = resolveExisting(p.existing, planes);
   const base = new Float64Array(N);
-  base.set(ctx.recorded);
+  if (existing) {
+    const exp = ctx.exportKwh, valid = ctx.valid;
+    const per = planes[existing.planeIndex].pvPerPanel, n = existing.panels;
+    const xpv = new Float64Array(N);
+    let xKwh = 0, clipKwh = 0, clipHours = 0;
+    for (let i = 0; i < N; i++) {
+      if (valid && !valid[i]) continue;
+      const v = per[i] * n;
+      xpv[i] = v; xKwh += v;
+      const g = ctx.recorded[i] - (exp ? exp[i] : 0) + v;
+      if (g < 0) { clipKwh -= g; clipHours++; } else base[i] = g;
+    }
+    existing.pv = xpv; existing.pvKwhTotal = xKwh;
+    existing.grossClippedKwh = clipKwh; existing.grossClippedHours = clipHours;
+  } else {
+    base.set(ctx.recorded);
+  }
   for (const f of flexList) {
-    if (!f.kwhByHour) continue;
+    // Only a DETECTED load was ever in the meter record.  A manual load may carry a
+    // built hourly series (a heat pump's, from weather) that is added back below but
+    // was never metered, so it must not be subtracted out of the base.
+    if (!f.kwhByHour || f.source === "manual") continue;
     const s = f.kwhByHour;
     for (let i = 0; i < N; i++) base[i] -= s[i];
   }
@@ -747,10 +800,29 @@ export function buildScenario(ctx, params, opts) {
     rates: buildRates(ctx, p.planId, p.providerId, p.applyNbc, climateCredit(ctx, p),
                       p.accPlusAdder, !p.ngom,
                       { baselineRegion: p.baselineRegion, trueUpMonth: p.trueUpMonth,
-                        municipalSurchargeFactor: p.municipalSurchargeFactor }),
+                        municipalSurchargeFactor: p.municipalSurchargeFactor,
+                        billing: p.billing }),
+    existing,
     weatherKey: p.weatherKey,
     _pv: null,
   };
+}
+
+/**
+ * Which plane the existing panels sit on, and how many.  An id the planes do not carry
+ * (the face was deleted or renamed) falls back to the first plane and says so; with no
+ * plane at all there is nowhere to model them, which is a caller bug, not a zero.
+ */
+export function resolveExisting(ex, planes) {
+  if (!ex) return null;
+  const panels = Math.max(0, Math.round(+ex.panels || 0));
+  if (!panels) return null;
+  if (!planes.length) throw new Error("params.existing needs a roof plane to model the existing panels on");
+  let k = planes.findIndex((pl) => pl.id === ex.planeId);
+  const fallback = k < 0;
+  if (k < 0) k = 0;
+  return { planeIndex: k, planeId: planes[k].id, requestedPlaneId: ex.planeId == null ? null : ex.planeId,
+           planeFallback: fallback, panels };
 }
 
 /**
@@ -952,6 +1024,7 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
   // bank that only ever grows stops changing after one warm pass, because every month's
   // room is already full.
   const adderFirst = r.bankDrawOrder === "adderFirst";   // test-only: proves order-freedom
+  const nem = r.billing === "nem2" || r.billing === "nem1";
   function runCycle(ce0, ca0) {
     const usedA = new Float64Array(M), accUsedA = new Float64Array(M), trueUpA = new Float64Array(M);
     const forfeitSettleA = new Float64Array(M), balA = new Float64Array(M);
@@ -976,7 +1049,14 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
       pExpKwh += expKwhA[m]; pImpKwh += mImpKwh[m];
       const [fromE, fromCe, fromA, fromCa] = take(Math.max(0, subtotalA[m] - creditFloorA[m]));
       let trueUp = 0, forfeitCredit = 0;
-      if (isPoint[m]) {
+      if (isPoint[m] && nem) {
+        // NEM 1/2 true-up: net surplus kWh are paid at NSC (AB 920) and whatever dollar
+        // credit is left is zeroed - it does not roll into the next year.  No ARECR.
+        const surplusKwh = Math.max(0, pExpKwh - pImpKwh);
+        trueUp = surplusKwh * r.nsc;
+        forfeitCredit = e$ + ce$ + a$ + ca$;
+        e$ = 0; ce$ = 0; a$ = 0; ca$ = 0; pExpKwh = 0; pImpKwh = 0;
+      } else if (isPoint[m]) {
         // Schedule NBT SC 4.e.i, in order: the credit bank is first reduced by the
         // "Average Retail Export Compensation Rate" applied to the net surplus kWh, THEN
         // the net surplus kWh are paid at Net Surplus Compensation.  The ARECR is about
@@ -1010,13 +1090,14 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
   const { usedA, accUsedA, trueUpA, forfeitSettleA, balA, endBank$, endBankKwh } = cyc;
 
   // ---- 3. totals and rows, in record order
-  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0, accPlusValue = 0;
+  let total = 0, forfeitedTotal = forfeitedCap, exportValue = 0, accPlusValue = 0, nscValue = 0;
   const rows = detail ? [] : null;
   for (let m = 0; m < M; m++) {
     const bill = subtotalA[m] - usedA[m] - accUsedA[m] - climateA[m] - trueUpA[m];
     total += bill;
     exportValue += usedA[m] + accUsedA[m] + trueUpA[m];   // dollars sourced from exported kWh
     accPlusValue += accUsedA[m];                          // ...of which the ACC Plus adder
+    nscValue += trueUpA[m];                               // ...of which the true-up payout
     forfeitedTotal += forfeitSettleA[m];
     if (rows) {
       const q = pre[m];
@@ -1048,7 +1129,7 @@ export function settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPv
     return { start: ctx.monthKey[from], end: ctx.monthKey[p], months };
   });
   return { total, months: rows, leftoverCredit: endBank$, forfeited: forfeitedTotal,
-           exportValue, accPlusValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
+           exportValue, accPlusValue, nscValue, settledMonths: points.map((k) => ctx.monthKey[k]), periods, trailing };
 }
 
 // ---------------------------------------------------------------- dispatch
@@ -1076,8 +1157,12 @@ export function runHours(scn, params, detail) {
   const floorKwh = cap * Math.max(0, Math.min(0.9, p.minReserve));
   const backup = p.strategy === "backup_only";
   const tou = p.strategy === "tou_arbitrage" || p.strategy === "export_arbitrage";
-  const expArb = p.strategy === "export_arbitrage";
-  const gridCharge = !!p.gridCharge && tou;
+  // A battery added to a NEM 1/2 array is installed non-exporting and solar-charged
+  // only (the usual way to keep the array's legacy agreement), so under NEM billing it
+  // never sells to the grid and never buys from it.
+  const nemRun = r.billing === "nem2" || r.billing === "nem1";
+  const expArb = p.strategy === "export_arbitrage" && !nemRun;
+  const gridCharge = !!p.gridCharge && tou && !nemRun;
   const thr = p.exportThreshold;
   let soc = backup ? cap : cap * 0.5;
 
@@ -1204,6 +1289,7 @@ export function runHours(scn, params, detail) {
   }
 
   const years = ctx.years;
+  const xs = scn.existing;
   const billing = settle(r, ctx, mImpCost, mImpKwh, mExpCred, mExpKwh, detail, mPvKwh, mBandKwh, mBandCred);
   const out = {
     panels: pvInfo.panels, panelsByPlane: alloc.slice(), batteries,
@@ -1220,12 +1306,24 @@ export function runHours(scn, params, detail) {
     // a bill, the ACC Plus adder, and the net-surplus payout at true-up.  Kept separate
     // from avoided import cost because export prices are locked at the ACC vintage
     // for nine years and do not follow retail escalation.
-    exportRevenue: billing.exportValue / years,
+    // Under NEM 1/2 the export credit IS the retail price and moves with it, so it
+    // belongs with the escalating bill saving: exportRevenue is 0 there and the export
+    // dollars are reported, for display only, as nemExportValue (of which nscRevenue is
+    // the true-up payout).
+    exportRevenue: nemRun ? 0 : billing.exportValue / years,
     // The part of exportRevenue that is the ACC Plus adder - a SUBSET of it, never extra.
     // Realised value (with the adder minus without it, so banked adder lost to the
     // true-up counts for nothing), annualised like exportRevenue.  core/finance.js
     // expires it after the vintage's nine-year lock.
-    accPlusRevenue: billing.accPlusValue / years,
+    accPlusRevenue: nemRun ? 0 : billing.accPlusValue / years,
+    billing: r.billing,
+    nemExportValue: nemRun ? billing.exportValue / years : 0,
+    nscRevenue: billing.nscValue / years,
+    // Panels already on the roof (params.existing), their modelled output, and the
+    // panels this configuration ADDS.  kwdc and panels are the whole array.
+    existingPanels: xs ? xs.panels : 0,
+    existingPvKwh: xs ? xs.pvKwhTotal / years : 0,
+    newPanels: pvInfo.panels - (xs ? xs.panels : 0),
     // Flexible-load hours whose kWh were non-finite and were priced as 0 (buildScenario).
     flexNanHours: scn.flexNanHours || 0,
     selfSufficiency: tLoad > 0 ? 1 - tImp / tLoad : 0,
@@ -1255,7 +1353,11 @@ export function runHours(scn, params, detail) {
   return out;
 }
 
-/** Panel counts per plane: explicit override, else whatever the planes carry. */
+/**
+ * Panel counts per plane: explicit override, else whatever the planes carry.  Panels
+ * already on the roof are never taken away: the existing plane holds at least that many
+ * in every run, which is how both no-system baselines carry the existing array.
+ */
 function normaliseAlloc(scn, p) {
   const n = scn.planes.length;
   const src = p.panelsByPlane;
@@ -1264,6 +1366,8 @@ function normaliseAlloc(scn, p) {
     const v = src && src[k] !== undefined ? src[k] : scn.planes[k].panels;
     out[k] = Math.max(0, Math.round(v || 0));
   }
+  const xs = scn.existing;
+  if (xs && out[xs.planeIndex] < xs.panels) out[xs.planeIndex] = xs.panels;
   return out;
 }
 
@@ -1286,6 +1390,9 @@ export const DEFAULTS = {
   // A city's generation municipal surcharge / utility-user tax as a fraction of the
   // generation charge (Agoura Hills: sce.json meta.bill_validation).  null = none.
   municipalSurchargeFactor: null,
+  // "nbt" | "nem2" | "nem1" (docs/nem2.md), and the panels already on the roof as
+  // { planeId, panels } (panels of panelW watts), or null.
+  billing: "nbt", existing: null,
   strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5,
   exportLimitKW: 0,
 };
@@ -1302,7 +1409,7 @@ export function withDefaults(p) {
  */
 export function billPeriod(ctx, params, startDate, endDate) {
   const p = withDefaults(params);
-  const scn = buildScenario(ctx, Object.assign({}, p, { flex: [], planes: [], baseLoadScale: 1 }));
+  const scn = buildScenario(ctx, Object.assign({}, p, { flex: [], planes: [], baseLoadScale: 1, existing: null }));
   const r = scn.rates;
   const plan = r.plan;
   const byPeriod = { on: { kwh: 0, cost: 0 }, mid: { kwh: 0, cost: 0 },
@@ -1335,7 +1442,11 @@ export function billPeriod(ctx, params, startDate, endDate) {
            total: fixed + energy - baseCredit - climate };
 }
 
-/** One scenario run with no panels and no battery: the no-system arm of a baseline. */
+/**
+ * One scenario run with no NEW panels and no battery: the no-system arm of a baseline.
+ * With params.existing that is "the existing array, no battery" (normaliseAlloc keeps
+ * the existing panels on their plane).
+ */
 function noSystem(scn, p, detail) {
   const zero = Object.assign({}, p, { batteries: 0, panelsByPlane: scn.planes.map(() => 0) });
   return runHours(scn, zero, detail);
@@ -1420,7 +1531,7 @@ export const _internal = { isDST, spread, fallbackReshape, dayBounds,
 const SolarEngine = {
   prepare, buildScenario, runHours, simulate, billPeriod, billOnAllPlans, billOnAllProviders,
   baselines, attachSavings, buildRates, settle, settlementPoints, planById, resolvePlan,
-  resolveTrueUpMonth, profileFor, pvFor, climateCredit,
+  resolveTrueUpMonth, profileFor, pvFor, climateCredit, resolveExisting, BILLING_REGIMES,
   resolveProvider, resolveBaseline, tariffAccPlus, tariffArecr,
   MIN_USABLE_DAYS, DEFAULT_TRUE_UP_MONTH,
   reshapeFlex, setFlexReshape, flexReshapeSource,

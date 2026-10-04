@@ -562,3 +562,60 @@ details.data-view .table-scroll { margin-top: 8px; max-height: 320px; overflow-y
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ============================================================ v2 features */
+/* ---- unit B: monthly-bill form (lives in the landing start panel) ---- */
+.dropzone .btn { margin-block: 3px; }          /* three doors wrap cleanly on a phone */
+.billform { border: 1px solid var(--border); border-radius: var(--r-md); padding: 18px 16px; background: var(--page); }
+.billform .dropzone-note { margin-bottom: 14px; }
+.bill-helpers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.bill-helper .field-row > input { min-width: 0; width: 100%; }
+.bill-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.bill-cell label { display: block; font-size: 11px; color: var(--ink-2); margin-bottom: 2px; }
+.bill-cell input { width: 100%; min-width: 0; box-sizing: border-box; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.bill-zip { max-width: 160px; margin-bottom: 12px; }
+.bill-zip input { width: 100%; box-sizing: border-box; }
+.bill-checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.bill-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.bill-check input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+.field-error { margin: 8px 0 0; font-size: 12.5px; color: var(--critical); }
+.bill-actions { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
+.btn-link { background: none; border: 0; padding: 4px 2px; font: inherit; font-size: 13px; color: var(--ink-2); text-decoration: underline; cursor: pointer; }
+.btn-link:hover { color: var(--ink); }
+@media (max-width: 520px) {
+  .bill-helpers { grid-template-columns: 1fr; }
+  .bill-grid { grid-template-columns: repeat(3, 1fr); }
+  .billform { padding: 14px 12px; }
+}
+
+/* D2: dashboard hero band and why-line, EV re-timing callout. */
+.hero-band, .hero-why { margin: 0; font-size: 12px; color: var(--ink-2); max-width: 44ch; }
+.hero-band { color: var(--ink-3, var(--ink-2)); }
+.hero-why { color: var(--ink); }
+.hero-band[hidden], .hero-why[hidden], .retime[hidden] { display: none; }
+.retime { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline;
+  margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.retime-k { font-size: 12px; color: var(--ink-2); }
+.retime-v { font-size: 20px; font-weight: 600; text-align: right; color: var(--good-text, var(--ink)); }
+.retime-d { grid-column: 1 / -1; font-size: 11px; color: var(--ink-2); }
+
+/* Quote tab (unit E) */
+.tiles.tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 700px) { .tiles.tiles-3 { grid-template-columns: minmax(0, 1fr); } }
+.quote-list { margin: 6px 0 10px; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; line-height: 1.45; }
+.qband { position: relative; height: 22px; margin: 12px 0 2px; }
+.qband-track { position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: var(--border); }
+.qband-zone { position: absolute; top: 5px; height: 12px; border-radius: 3px;
+  background: color-mix(in srgb, var(--good) 28%, transparent); border: 1px solid var(--good); box-sizing: border-box; }
+.qband-marker { position: absolute; top: 1px; width: 4px; height: 20px; margin-left: -2px; border-radius: 2px; background: var(--ink); }
+.qband-marker.qband-out { background: var(--critical); }
+.qband-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-3); margin-bottom: 8px; }
+
+/* Unit F: existing-solar form, shown inside #landing-notice (app/ui/existing.js).
+   Reuses .field-lab / .field-row / .field-error from B.css. */
+.existing-form { display: grid; gap: 12px; margin-top: 10px; max-width: 32rem; }
+.existing-form .field-row { display: flex; align-items: center; gap: 8px; }
+.existing-form input[type="text"] { width: 7rem; }
+.existing-form select { max-width: 100%; }
+.existing-form .ctl-note { margin: 4px 0 0; }
+.existing-actions { display: flex; flex-wrap: wrap; gap: 8px; }

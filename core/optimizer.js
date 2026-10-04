@@ -203,7 +203,7 @@ export function priceGrid(grid, finance, objective, basis) {
     const fin = Finance.evaluate({
       savings, importSavings: importSav, exportRevenue: exportRev, accPlusRevenue: accPlusRev,
       bill: c.bill, baselineBill: baseline.bill,
-      pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal,
+      pvKwh: c.pvKwh, kwdc: c.kwdc, battKWhTotal: c.battKWhTotal, batteries: c.batteries,
     }, finance);
     return {
       panels: c.panels, panelsByPlane: c.panelsByPlane, planeIds: c.planeIds,
@@ -218,7 +218,7 @@ export function priceGrid(grid, finance, objective, basis) {
       cashFlowPayback: fin.cashFlowPayback, totalCost: fin.totalCost,
       netCost: fin.netCost, lifetimeCost: fin.lifetimeCost, lcoe: fin.lcoe,
       wealthSystem: fin.wealthSystem, wealthInvest: fin.wealthInvest,
-      firstYearSavings: fin.firstYearSavings,
+      firstYearSavings: fin.firstYearSavings, extraRevenue: fin.extraRevenue,
       firstYearMonthlyOutlay: fin.firstYearMonthlyOutlay,
       currentMonthlyBill: fin.currentMonthlyBill,
       financingMode: fin.financingMode, monthlyPayment: fin.monthlyPayment,
@@ -253,15 +253,18 @@ export function tornado(cell, finance, baselineBill, flexVariants) {
     savings: o.savings, importSavings: o.importSavings, exportRevenue: o.exportRevenue,
     accPlusRevenue: o.accPlusRevenue === undefined ? cell.accPlusRevenue : o.accPlusRevenue,
     bill: o.bill, baselineBill: o.baselineBill === undefined ? baselineBill : o.baselineBill,
-    pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal,
+    pvKwh: cell.pvKwh, kwdc: cell.kwdc, battKWhTotal: cell.battKWhTotal, batteries: cell.batteries,
   });
   const sim = simOf(cell);
   const base = Finance.evaluate(sim, finance).npv;
   const f = Finance.withDefaults(finance);
-  const rows = [
+  let rows = [
     ["Solar $/W", "costPerW"], ["Storage $/kWh", "costPerKwh"],
     ["Rate escalation", "escalation"], ["Investment return", "investReturn"],
-  ].map(function (r) {
+  ];
+  // Only worth a bar when there is a fixed battery price to wiggle.
+  if (f.costPerBattery > 0) rows.splice(2, 0, ["Battery $/unit", "costPerBattery"]);
+  rows = rows.map(function (r) {
     const lo = Object.assign({}, f); lo[r[1]] = f[r[1]] * 0.8;
     const hi = Object.assign({}, f); hi[r[1]] = f[r[1]] * 1.2;
     return { label: r[0], low: Finance.evaluate(sim, lo).npv - base,

@@ -20,7 +20,7 @@
  *   3,582 kWh/yr, 8.02 kW charger, 254 sessions, 2.41 sessions/week.
  *
  * FlexLoad shape - docs/ARCHITECTURE.md:
- *   { id, kind: "ev"|"pool"|"custom", name, source: "detected"|"manual",
+ *   { id, kind: "ev"|"pool"|"heatpump"|"custom", name, source: "detected"|"manual",
  *     kwhByHour: Float64Array|null, annualKwh, detection: {...}|null,
  *     schedule: { mode, daysPerWeek, window, daylightFraction, overnightWindow,
  *                 maxKW, followSolar, hoursPerDay }, scale }
@@ -879,6 +879,13 @@ export function reshape(flex, calIn, solarShape) {
   const cap = sch.maxKW > 0 ? sch.maxKW : Infinity;
   const bounds = dayBounds(cal);
 
+  // A heat pump follows the weather, so it is never moved and never invented from
+  // annualKwh alone: its series is either built (kwhByHour, added back where it is) or the
+  // weather is not ready yet, in which case it contributes nothing.
+  if (flex.kind === "heatpump") {
+    if (rec) for (let i = 0; i < N; i++) out[i] = rec[i] * scale;
+    return out;
+  }
   if (sch.mode === "asRecorded" && rec) {
     for (let i = 0; i < N; i++) out[i] = rec[i] * scale;
     return out;
@@ -1056,6 +1063,22 @@ export function presets() {
       note: "Same schedule as the detected EV; set annualKwh and maxKW from EV 1 if you have one.",
     },
     {
+      id: "evp", kind: "ev", name: "An EV (planned)", source: "manual",
+      kwhByHour: null, annualKwh: 3000, detection: null,
+      schedule: { ...DEFAULT_SCHEDULE, mode: "spread", daysPerWeek: 5, window: [8, 15],
+                  daylightFraction: 0.9, overnightWindow: [1, 5], maxKW: 8, followSolar: true },
+      scale: 1.0,
+      note: "For a household without an EV today: about 3,000 kWh a year, charged mostly in daylight.",
+    },
+    {
+      id: "hp", kind: "heatpump", name: "Heat pump, replacing a gas furnace", source: "manual",
+      kwhByHour: null, annualKwh: 2500, detection: null,
+      schedule: { ...DEFAULT_SCHEDULE, mode: "asRecorded" },
+      heatpump: { annualKwh: 2500, cop: 3.0, balanceC: 16, mode: "heating" },
+      scale: 1.0,
+      note: "Shaped by the outdoor temperature at your site (core/heatpump.js); not shiftable.",
+    },
+    {
       id: "pool", kind: "pool", name: "Pool pump", source: "manual",
       kwhByHour: null, annualKwh: round3(0.5 * 8 * DAYS_PER_YEAR), detection: null,
       schedule: { mode: "spread", daysPerWeek: 7, window: [10, 18], daylightFraction: 1.0,
@@ -1103,11 +1126,20 @@ export function summarize(flex) {
         : ` - ${d.sessions.length} runs of about ${d.hoursPerDay || sch.hoursPerDay} h at ` +
           `${d.chargerKW} kW`) +
       `, confidence ${Math.round((d.confidence || 0) * 100)}%.`);
+  } else if (flex.kind === "heatpump") {
+    parts.push(`${flex.name}: ${kwh(annual)} kWh/yr (your estimate).`);
   } else {
     parts.push(`${flex.name}: ${kwh(annual)} kWh/yr (entered by hand).`);
   }
 
-  if (flex.kind === "pool") {
+  if (flex.kind === "heatpump") {
+    const hp = flex.heatpump || {};
+    const bal = hp.balanceC != null ? hp.balanceC : 16;
+    parts.push(flex.kwhByHour
+      ? `Follows the outdoor temperature at your site: it runs below ${bal} \u00b0C and harder the colder it gets. ` +
+        `It is not shifted, because heating is needed when it is cold.`
+      : "Waiting for weather data for your site before it can be placed.");
+  } else if (flex.kind === "pool") {
     parts.push(`Runs flat at up to ${sch.maxKW} kW for ${sch.hoursPerDay} h from ` +
                `${hr(sch.window[0])} every day.`);
   } else if (sch.mode === "asRecorded") {

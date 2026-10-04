@@ -15,8 +15,9 @@ import assert from "node:assert/strict";
 import {
   DEFAULTS, freshState, clone, getPath, setPath,
   toHash, fromHash, toStorage, fromStorage,
-  MAX_LIST, NAME_MAX, cleanName,
+  MAX_LIST, NAME_MAX, cleanName, TABS, CODEC_VERSION,
 } from "../app/state.js";
+import { BATTERY_PRESETS, applyPreset, presetOptions, matchPreset } from "../app/ui/presets.js";
 
 /** A state with something changed at every level of nesting. */
 function scenario() {
@@ -92,7 +93,7 @@ test("the hash carries only what differs from the defaults", () => {
   const s = freshState();
   s.fin.costPerW = 2.5;
   const h = toHash(s);
-  assert.equal(h, "v=1&cw=2.5", "a versioned hash: v first, then only what differs");
+  assert.equal(h, "v=2&cw=2.5", "a versioned hash: v first, then only what differs");
   assert.ok(!h.includes("hz="), "an untouched horizon must not appear");
 });
 
@@ -239,7 +240,7 @@ test("storage keeps a custom tariff", () => {
 test("a corrupt or empty storage payload falls back to the defaults", () => {
   assert.deepEqual(fromStorage(null, freshState()), freshState());
   assert.deepEqual(fromStorage("not an object", freshState()), freshState());
-  assert.deepEqual(fromStorage({}, freshState()), freshState());
+  assert.deepEqual(fromStorage({ v: 2 }, freshState()), freshState());
 });
 
 test("hash beats storage, which is what makes a shared link authoritative", () => {
@@ -536,7 +537,7 @@ test("storage: stored planes and loads go through the link's field coercion", ()
 });
 
 test("storage: a __proto__ key never becomes a prototype, and `in` never reads through one", () => {
-  const raw = JSON.parse('{"v":1,"__proto__":{"cw":9,"planes":[null]},"ovp":{"__proto__":3,"p1":4},'
+  const raw = JSON.parse('{"v":2,"__proto__":{"cw":9,"planes":[null]},"ovp":{"__proto__":3,"p1":4},'
     + '"customTariff":{"__proto__":{"polluted":true},"plans":[]},"flex":[{"id":"f1","kind":"ev","annualKwh":3000,"detection":{"__proto__":{"x":1}}}]}');
   const rep = {};
   let s;
@@ -611,4 +612,87 @@ test("storage and links drop flexible loads that describe no real load", () => {
   // ...and a mixed link keeps the usable token only.
   const mixed = fromHash("v=1&flex=f1:rocket:3000:manual;f2:pool:1800:manual", freshState(), {});
   assert.deepEqual(mixed.flex.map((f) => [f.id, f.kind, f.annualKwh]), [["f2", "pool", 1800]]);
+});
+
+// ------------------------------------------------------------------ v2 additions
+
+const NEW_KEYS = [
+  ["system.battPreset", "pw3", "bp"], ["fin.costPerBattery", 4500, "cb"], ["fin.resilienceValue", 600, "rv"],
+  ["fin.vppPerBattery", 350, "vpp"], ["fin.microinverters", true, "micro"],
+  ["quote.kwDc", 8.2, "qkw"], ["quote.batteries", 2, "qb"], ["quote.battKWh", 13.5, "qbk"],
+  ["quote.price", 41000, "qpr"], ["quote.annualKwh", 12400, "qkwh"], ["quote.monthly", 199, "qmo"],
+  ["existing.kwDc", 5.5, "xkw"], ["existing.planeId", "p1", "xpl"], ["existing.nem", "nem2", "xnem"],
+];
+
+test("every v2 key round-trips through the hash and through storage", () => {
+  for (const [path, value, key] of NEW_KEYS) {
+    const s = freshState();
+    setPath(s, path, value);
+    const h = toHash(s);
+    assert.ok(h.includes(key + "="), key + " appears in the hash");
+    assert.deepEqual(getPath(fromHash(h, freshState()), path), value, path + " via hash");
+    assert.deepEqual(getPath(fromStorage(JSON.parse(JSON.stringify(toStorage(s))), freshState()), path), value, path + " via storage");
+  }
+});
+
+test("nullable quote numbers are omitted when null and rejected out of range", () => {
+  const h = toHash(Object.assign(freshState(), { baseLoadScale: 1.2 }));
+  assert.ok(!/q(kw|b|bk|pr|kwh|mo)=|x(kw|pl|nem)=/.test(h), "defaults never appear");
+  assert.equal(toStorage(freshState()).qkw, undefined);
+  const rep = {};
+  const s = fromHash("v=2&qkw=99&qb=2.5&xnem=bogus", freshState(), rep);
+  assert.equal(s.quote.kwDc, null);
+  assert.equal(s.quote.batteries, 0);
+  assert.equal(s.existing.nem, "none");
+  assert.deepEqual(rep.keys.sort(), ["qb", "qkw", "xnem"]);
+});
+
+test("the version 1 to 2 migration restores the old defaults a v1 link left out", () => {
+  assert.equal(CODEC_VERSION, 2);
+  assert.equal(fromHash("tab=roof", freshState()).fin.costPerW, 3.0, "no v, no cw: the old default");
+  assert.equal(fromHash("tab=roof", freshState()).system.rte, 0.9);
+  assert.equal(fromHash("v=2&tab=roof", freshState()).fin.costPerW, 2.75, "v=2 means today's default");
+  assert.equal(fromHash("v=2&tab=roof", freshState()).system.rte, 0.88);
+  assert.equal(fromHash("v=1&cw=2.2", freshState()).fin.costPerW, 2.2, "an explicit value is kept");
+  assert.equal(fromHash("v=1&cw=2.2", freshState()).system.rte, 0.9);
+  assert.equal(fromStorage({ v: 1, hz: 20 }, freshState()).fin.costPerW, 3.0, "storage migrates too");
+  assert.equal(fromStorage({ hz: 20 }, freshState()).system.rte, 0.9);
+  assert.equal(fromStorage({ v: 2, hz: 20 }, freshState()).fin.costPerW, 2.75);
+});
+
+test("a heat-pump flexible load keeps annualKwh, cop and balance point through both codecs", () => {
+  const s = freshState();
+  s.flex = [{ id: "hp1", kind: "heatpump", name: "Heat pump", annualKwh: 2800, source: "manual",
+    kwhByHour: new Float64Array(4), detection: null,
+    schedule: { mode: "asRecorded", daysPerWeek: 7, window: [0, 24], daylightFraction: 0.5, overnightWindow: [1, 5], maxKW: 5, followSolar: false },
+    scale: 1, heatpump: { annualKwh: 2800, cop: 2.6, balanceC: 14.5, mode: "heating" } }];
+  const h = toHash(s);
+  const a = fromHash(h, freshState()).flex[0];
+  assert.deepEqual(a.heatpump, { annualKwh: 2800, cop: 2.6, balanceC: 14.5, mode: "heating" });
+  assert.equal(a.kind, "heatpump");
+  assert.equal(a.kwhByHour, null);
+  const b = fromStorage(JSON.parse(JSON.stringify(toStorage(s))), freshState()).flex[0];
+  assert.deepEqual(b.heatpump, a.heatpump);
+  assert.equal(b.kwhByHour, null);
+  // An old 15-field EV token is unchanged and carries no heatpump block.
+  const ev = fromHash("v=2&flex=f1:ev:3000:manual:asRecorded:5:8:15:0.9:1:5:8:1:1:EV", freshState()).flex[0];
+  assert.equal(ev.heatpump, undefined);
+});
+
+test("TABS gains quote after dashboard", () => {
+  assert.deepEqual(TABS, ["dashboard", "quote", "roof", "loads", "bills", "assumptions"]);
+});
+
+test("battery presets: apply, list and match", () => {
+  const sys = freshState().system;
+  const pw = applyPreset(sys, "pw3");
+  assert.deepEqual([pw.battKWh, pw.battKW, pw.rte, pw.battPreset], [13.5, 11.5, 0.89, "pw3"]);
+  assert.equal(sys.battKWh, 10, "the input is not mutated");
+  const keep = applyPreset(pw, "custom");
+  assert.deepEqual([keep.battKWh, keep.battKW, keep.battPreset], [13.5, 11.5, "custom"]);
+  assert.equal(presetOptions()[0].v, "custom");
+  assert.equal(presetOptions().length, BATTERY_PRESETS.length);
+  assert.equal(matchPreset(pw), "pw3");
+  assert.equal(matchPreset({ battKWh: 13.505, battKW: 11.5 }), "pw3");
+  assert.equal(matchPreset(sys), "custom");
 });

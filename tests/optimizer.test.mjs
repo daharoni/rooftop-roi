@@ -186,7 +186,8 @@ test("the reference optimum survives the new API", async () => {
   const grid = Optimizer.searchGrid(ctx, refParams(0, 0), { maxPanelsTotal: 60, maxBatteries: 6 });
   // The prototype dated every flow at year end, priced under the vendor pass-through
   // default and never expired the ACC Plus adder.
-  const fin = { escalation: R.escalation, midYear: false, incentiveMode: "vendor", accPlusYears: 99 };
+  // The reference was priced at the old $3.00/W default; pin it rather than follow the new $2.75.
+  const fin = { costPerW: 3.0, escalation: R.escalation, midYear: false, incentiveMode: "vendor", accPlusYears: 99 };
   const priced = Optimizer.priceGrid(grid, fin, "npv", "sameFlex");
   // One rule separates today's engine from the prototype: Net Surplus Compensation is
   // paid on the kWh exported in excess of the kWh imported over the relevant period
@@ -254,4 +255,11 @@ test("the sweep and the re-price stay inside their budgets", () => {
   // Budgets: ~300 ms and ~15 ms on a dev machine; loosened for shared CI runners.
   assert.ok(sweepMs < 1500, `grid sweep took ${sweepMs.toFixed(0)} ms`);
   assert.ok(priceMs < 200, `re-price took ${priceMs.toFixed(1)} ms`);
+});
+
+test("tornado adds a battery $/unit bar only when that price is set", () => {
+  const priced = Optimizer.priceGrid(SMALL, {}, "npv", "sameFlex");
+  const labels = (f) => Optimizer.tornado(priced.best, f, priced.baseline.bill, null).rows.map((r) => r.label);
+  assert.ok(!labels({}).includes("Battery $/unit"));
+  assert.ok(labels({ costPerBattery: 2000 }).includes("Battery $/unit"));
 });

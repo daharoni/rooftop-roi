@@ -32,8 +32,11 @@ import { summaryText, copyToClipboard } from "./ui/summary.js";
 import { destroyAll } from "./charts/base.js";
 import { fmtKwh } from "./ui/format.js";
 import { adoptGeocodeNote } from "./privacy.js";
+import { renderExistingForm } from "./ui/existing.js";
+import { applyPreset, matchPreset } from "./ui/presets.js";
 
 import * as dashboardTab from "./tabs/dashboard.js";
+import * as quoteTab from "./tabs/quote.js";
 import * as roofTab from "./tabs/roof.js";
 import * as loadsTab from "./tabs/loads.js";
 import * as billsTab from "./tabs/bills.js";
@@ -44,7 +47,7 @@ const hasOwn = (obj, key) => !!obj && typeof key === "string" && Object.prototyp
 const utilityOf = (id) => (ctx.tariffLib && hasOwn(ctx.tariffLib.utilities, id) ? ctx.tariffLib.utilities[id] : null);
 
 const TAB_MODULES = {
-  dashboard: dashboardTab, roof: roofTab, loads: loadsTab, bills: billsTab, assumptions: assumptionsTab,
+  dashboard: dashboardTab, quote: quoteTab, roof: roofTab, loads: loadsTab, bills: billsTab, assumptions: assumptionsTab,
 };
 
 /** Tab ids from links and sessions saved before the dashboard existed. */
@@ -59,6 +62,7 @@ const NGOM_COST_DEFAULT = 600;   // one-time metering charge; overridden from th
 const Core = {
   greenbutton: null, flexload: null, tariff: null, pv: null, weather: null,
   geocode: null, engine: null, finance: null, optimizer: null, sizing: null, coverage: null,
+  synthload: null, heatpump: null,
 };
 
 async function loadCore() {
@@ -68,6 +72,7 @@ async function loadCore() {
     geocode: "../core/geocode.js", engine: "../core/engine.js",
     finance: "../core/finance.js", optimizer: "../core/optimizer.js",
     sizing: "../core/sizing.js", coverage: "../core/coverage.js",
+    synthload: "../core/synthload.js", heatpump: "../core/heatpump.js",
   };
   await Promise.all(Object.entries(wanted).map(async ([key, path]) => {
     try { Core[key] = await import(path); }
@@ -111,6 +116,11 @@ const ctx = {
   blockReason: "",           // non-empty: the reason no simulation runs, shown in the banner
   coverageBlocked: false,    // the block is about the utility; only an explicit UI pick lifts it
   siteNotice: "",            // one-line note after a roof-tab location change
+  // Existing solar on NEM 1/2, battery-only mode: { kwDc, nem } or null (simParams).
+  existingMode: null,
+  // The fetched weather years themselves (state.solar.weatherYears holds only the
+  // year numbers): a planned heat pump's hourly shape is built from their temperatures.
+  weatherYears: null,
   getState: State.get,
   actions: {},
 };
@@ -286,9 +296,31 @@ function onWorkerMessage(m) {
 
 // ---------------------------------------------------------------- simulation
 
+/**
+ * The existing-solar mode the state describes, or null.  Guarded with defaults so a
+ * state without the `existing` block (an old session) reads as "no existing array".
+ */
+function existingModeOf(s) {
+  const ex = (s && s.existing) || {};
+  const kwDc = Number(ex.kwDc);
+  const nem = ex.nem === "nem2" || ex.nem === "nem1" ? ex.nem : null;
+  if (!nem || !Number.isFinite(kwDc) || kwDc <= 0 || !(s.roof.planes || []).length) return null;
+  const planeId = s.roof.planes.some((p) => p.id === ex.planeId) ? ex.planeId : s.roof.planes[0].id;
+  return { kwDc, nem, planeId };
+}
+
+/** The existing array as a count of the panel size the engine models. */
+const existingPanelsOf = (xm, panelW) => Math.max(1, Math.round(xm.kwDc * 1000 / panelW));
+
 function simParams() {
   const s = State.get();
+  const xm = existingModeOf(s);
+  ctx.existingMode = xm ? { kwDc: xm.kwDc, nem: xm.nem } : null;
   return {
+    // Existing solar: the engine bills on the legacy agreement and rebuilds usage from
+    // import - export + the existing panels' output; the worker sweeps batteries only.
+    billing: xm ? xm.nem : "nbt",
+    existing: xm ? { planeId: xm.planeId, panels: existingPanelsOf(xm, s.system.panelW) } : null,
     planes: s.roof.planes.map((p) => ({
       id: p.id, name: p.name, tilt: p.tilt, azimuth: p.azimuth,
       panels: p.maxPanels, maxPanels: p.maxPanels, shading: p.shading,
@@ -312,6 +344,12 @@ function runGrid() {
   if (!worker || !workerReady) return;
   const s = State.get();
   if (!s.roof.planes.length) { status("Add a roof face on the Roof tab to simulate.", 1); return; }
+  // No sunlight, no verdict: a sweep over faces with no profile would price a roof
+  // that makes nothing and call the market the winner.
+  if (!s.roof.planes.every((p) => s.solar.byPlane[p.id])) {
+    status(s.site.lat === null ? "Set a location on the Roof tab so the sunlight can be fetched." : "Waiting for sunlight data…", 1);
+    return;
+  }
   pendingGrid = ++reqId;
   markStale();
   status("Simulating…", 0.02);
@@ -393,9 +431,16 @@ function runReplay() {
 function finEff(roofCostAdder = 0) {
   const s = State.get();
   const ngomCost = (ctx.tariff && ctx.tariff.meta && ctx.tariff.meta.ngom_cost) || NGOM_COST_DEFAULT;
+  // Existing solar: the array is already paid for.  Only watts above it are bought
+  // (finance prices kwdc - existingKwDc, and the engine's panel count is what kwdc is
+  // made of, so the two agree exactly); no roof-face adder for panels already up, and no
+  // NGOM, which is a Net Billing meter.
+  const xm = existingModeOf(s);
+  const existingKwDc = xm ? existingPanelsOf(xm, s.system.panelW) * s.system.panelW / 1000 : 0;
   return Object.assign({}, s.fin, {
-    adder: s.fin.adder + (s.system.ngom ? ngomCost : 0),
-    roofCostAdder: Number.isFinite(roofCostAdder) && roofCostAdder > 0 ? roofCostAdder : 0,
+    adder: s.fin.adder + (s.system.ngom && !xm ? ngomCost : 0),
+    roofCostAdder: !xm && Number.isFinite(roofCostAdder) && roofCostAdder > 0 ? roofCostAdder : 0,
+    existingKwDc,
   });
 }
 
@@ -405,6 +450,8 @@ function finEff(roofCostAdder = 0) {
  * (cell.panelsByPlane, aligned with cell.planeIds); a face the optimiser leaves
  * empty costs nothing.  An override cell from the map carries the same arrays.
  */
+ctx.finEff = finEff;
+
 export function roofAdderFor(cell, planes = State.get().roof.planes) {
   if (!cell || !cell.panels) return 0;
   const byId = new Map(planes.map((p) => [p.id, Number(p.costAdder) || 0]));
@@ -477,7 +524,8 @@ function selectedCell(priced) {
     // An override names a battery count; the panel count comes from the map if
     // the user clicked a cell, else from the optimum for that many batteries.
     const p = s.system.override.panelsByPlane;
-    if (p && p.__total !== undefined) {
+    // Battery-only mode has one panel count; a stale map click cannot name another.
+    if (p && p.__total !== undefined && !ctx.existingMode) {
       const hit = Core.optimizer.findCell(priced, p.__total, b);
       if (hit) return hit;
     }
@@ -520,7 +568,7 @@ function repriceAndRender() {
       savings: ctx.selected.savings, importSavings: ctx.selected.importSavings,
       exportRevenue: ctx.selected.exportRevenue, accPlusRevenue: ctx.selected.accPlusRevenue, bill: ctx.selected.bill,
       baselineBill: ctx.baselineBill, pvKwh: ctx.selected.pvKwh,
-      kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal,
+      kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal, batteries: ctx.selected.batteries,
     };
     ctx.breakEvenPerW = Core.finance.breakEven(sim, finSel, "costPerW");
     ctx.breakEvenPerKwh = Core.finance.breakEven(sim, finSel, "costPerKwh");
@@ -563,6 +611,7 @@ function afterDetail() {
         savings: w.savings, importSavings: w.importSavings, exportRevenue: w.exportRevenue,
         accPlusRevenue: w.accPlusRevenue, bill: w.bill, baselineBill: w.baselineBill,
         pvKwh: w.pvKwh, kwdc: ctx.selected.kwdc, battKWhTotal: ctx.selected.battKWhTotal,
+        batteries: ctx.selected.batteries,
       }, finSel);
       return { key: w.key, label: w.label, npv: f.npv, savings: f.firstYearSavings,
                pv: w.pvKwh, perKw: ctx.selected.kwdc ? w.pvKwh / ctx.selected.kwdc : null };
@@ -891,9 +940,19 @@ function onControlSet(path, value, spec) {
     return;
   }
 
+  // A battery product fills the three hardware sliders; a slider moved by hand
+  // turns the product back to Custom unless it lands exactly on a spec sheet.
+  if (path === "system.battPreset") {
+    State.update((s) => { s.system = applyPreset(s.system, value); }, "sim");
+    return;
+  }
+
   const reason = spec.reason || defaultReason(path);
   State.update((s) => {
     State.setPath(s, path, value);
+    if (path === "system.battKWh" || path === "system.battKW" || path === "system.rte") {
+      s.system.battPreset = matchPreset(s.system);
+    }
     // Choosing export arbitrage without the meter that makes it billable is a
     // trap, so the meter comes on with it.
     if (path === "system.strategy" && value === "export_arbitrage") s.system.ngom = true;
@@ -976,8 +1035,29 @@ function addPreset(kind) {
     next.annualKwh = detectedEv.annualKwh;
     next.schedule.maxKW = detectedEv.schedule.maxKW;
   }
-  State.update((st) => { st.flex = st.flex.concat([next]); }, "sim");
+  State.update((st) => { st.flex = st.flex.concat([next]); }, next.kind === "heatpump" ? "silent" : "sim");
+  if (next.kind === "heatpump") rebuildHeatPumps("sim");
   toast(`${next.name} added.`);
+}
+
+/**
+ * A planned heat pump is the one load whose hourly shape comes from the weather,
+ * not the meter: rebuilt from the site's temperatures whenever the weather, the
+ * load record or the heat pump's own settings change.  Without weather yet the
+ * series is left null and the engine counts it as nothing (the Loads tab says
+ * "Waiting for weather").
+ */
+function rebuildHeatPumps(reason = "sim") {
+  const s = State.get();
+  if (!s.flex.some((f) => f.kind === "heatpump")) return;
+  const years = ctx.weatherYears;
+  const ready = Core.heatpump && years && years.length && ctx.loadSet;
+  State.update((st) => {
+    for (const f of st.flex) {
+      if (f.kind !== "heatpump") continue;
+      f.kwhByHour = ready ? Core.heatpump.profileFor(f, ctx.loadSet, years) : null;
+    }
+  }, reason);
 }
 
 const ACTIONS = {
@@ -994,6 +1074,7 @@ const ACTIONS = {
   setStrategy: (v) => State.setAt("system.strategy", v, "sim"),
   setFinancing: (mode) => State.setAt("fin.financing.mode", mode, "finance"),
   setMaxPanels: (n) => State.setAt("system.maxPanels", n, "sim"),
+  setMaxBatteries: (n) => State.setAt("system.maxBatteries", n, "sim"),
   setSite: (site) => onSiteChange(site),
   setPlanes: (planes) => State.update((s) => { s.roof.planes = planes; }, "roof"),
   /**
@@ -1019,10 +1100,24 @@ const ACTIONS = {
   }, "roof"),
   removePlane: (id) => State.update((s) => { s.roof.planes = s.roof.planes.filter((p) => p.id !== id); }, "roof"),
   resetPlanes: () => State.update((s) => { s.roof.planes = [defaultPlane("p1", "South face")]; }, "roof"),
-  updateFlex: (id, path, value) => State.update((s) => {
-    const f = s.flex.find((x) => x.id === id);
-    if (f) State.setPath(f, path, value);
-  }, "sim"),
+  updateFlex: (id, path, value) => {
+    let heatPumpChanged = false;
+    State.update((s) => {
+      const f = s.flex.find((x) => x.id === id);
+      if (!f) return;
+      if (f.kind === "heatpump" && path === "heatpump.cop" && f.heatpump) {
+        // Same heat, a better machine: the electricity falls as the COP rises.  Without
+        // this the series is rescaled to annualKwh and the COP slider would change nothing.
+        const was = Number(f.heatpump.cop) || 3;
+        const kwh = Math.round((Number(f.heatpump.annualKwh) || f.annualKwh || 0) * was / Number(value) / 10) * 10;
+        f.heatpump.annualKwh = kwh; f.annualKwh = kwh;
+      }
+      State.setPath(f, path, value);
+      if (f.kind === "heatpump" && path === "heatpump.annualKwh") f.annualKwh = value;
+      heatPumpChanged = f.kind === "heatpump" && path.startsWith("heatpump.");
+    }, heatPumpChanged ? "silent" : "sim");
+    if (heatPumpChanged) rebuildHeatPumps("sim");
+  },
   removeFlex: (id) => State.update((s) => { s.flex = s.flex.filter((f) => f.id !== id); }, "sim"),
 };
 
@@ -1166,6 +1261,8 @@ async function ensureSolar() {
   ctx.solarStatusText = "Modelling each roof face…";
   renderRoofOnly();
   const years = result.years;
+  ctx.weatherYears = years;
+  rebuildHeatPumps("silent");
   const now = State.get();             // planes as they are now, not when the fetch began
   for (const plane of now.roof.planes) {
     now.solar.byPlane[plane.id] = Core.pv.profilesForPlane(years, plane, {
@@ -1226,12 +1323,56 @@ async function onFiles(files) {
   try {
     const loadSet = await readFiles(files);
     // New data: a previous file's "continue anyway" does not carry over.
-    State.update((s) => { s.ui.demo = false; s.ui.existingSolarAck = false; }, "silent");
+    State.update((s) => {
+      s.ui.demo = false; s.ui.existingSolarAck = false;
+      s.existing = { kwDc: 0, planeId: null, nem: "none" };
+    }, "silent");
     await adoptLoadSet(loadSet);
   } catch (err) {
     console.error(err);
     // LoadFileError (greenbutton) carries a userMessage written for people.
     landingError(userMessageOf(err, "That file could not be read as Green Button data."));
+  }
+}
+
+/**
+ * Twelve monthly bills instead of a meter file: a synthetic hourly year shaped
+ * like a typical household (core/synthload.js), then exactly the path a parsed
+ * file takes.  An EV or a pool pump the person ticked is added as a planned load,
+ * since the detector has nothing to find in a synthetic record.
+ */
+async function onMonthlyBills(spec) {
+  if (!Core.synthload) { landingError("The bill-based estimate is not available in this build."); return; }
+  supersedeQuestion();
+  landingError("");
+  landingNotice(null);
+  try {
+    const loadSet = Core.synthload.synthesize({ monthlyKwh: spec.monthlyKwh, tz: "America/Los_Angeles" });
+    State.update((s) => {
+      s.ui.demo = false; s.ui.existingSolarAck = false;
+      s.existing = { kwDc: 0, planeId: null, nem: "none" };
+      // A synthetic record has no detectable loads, so a stale detected EV would be a ghost.
+      s.flex = s.flex.filter((f) => f.source === "manual");
+    }, "silent");
+    // The ZIP is the only location a bill gives: its centroid is the patch of sky the
+    // sunlight is fetched for, exactly as the landing page's own ZIP field does it.
+    if (Core.geocode && State.get().site.lat === null) {
+      try {
+        const hit = await Core.geocode.zipCentroid(spec.zip);
+        const elevation = Core.geocode.elevationFor ? await Core.geocode.elevationFor(hit.lat, hit.lon).catch(() => null) : null;
+        State.update((s) => {
+          s.site.lat = State.roundCoord(hit.lat); s.site.lon = State.roundCoord(hit.lon);
+          if (elevation !== null) s.site.elevationM = elevation;
+          s.site.addressLabel = hit.label || null;
+        }, "silent");
+      } catch (err) { console.warn("ZIP could not be located:", err && err.message); }
+    }
+    await adoptLoadSet(loadSet, spec.zip);
+    if (spec.ev && !State.get().flex.some((f) => f.kind === "ev")) addPreset("evp");
+    if (spec.pool && !State.get().flex.some((f) => f.kind === "pool")) addPreset("pool");
+  } catch (err) {
+    console.error(err);
+    landingError(userMessageOf(err, "The monthly figures could not be turned into a year of readings."));
   }
 }
 
@@ -1261,6 +1402,7 @@ async function onDemo(opts = {}) {
       // Flagged in the hash so a shared link built on the demo loads the demo.
       s.ui.demo = true;
       s.ui.existingSolarAck = false;
+      if (!has("xkw")) s.existing = { kwDc: 0, planeId: null, nem: "none" };
       if (!has("lat")) s.site.lat = 34.15;
       if (!has("lon")) s.site.lon = -118.75;
       if (!has("elev")) s.site.elevationM = 280;
@@ -1345,6 +1487,8 @@ async function adoptLoadSet(loadSet, zipHint, opts = {}) {
     } catch (err) { console.warn("Flexible-load detection failed:", err && err.message); }
   }
 
+  rebuildHeatPumps("silent");
+
   // Which rate book. A ZIP out of the file header beats anything we guessed.
   const zip = opts.skipZip ? null : (zipHint || fileZipOf(loadSet));
   State.saveLoadSet(loadSet);
@@ -1355,8 +1499,10 @@ async function adoptLoadSet(loadSet, zipHint, opts = {}) {
 
 /**
  * How much the meter already exports. A file with real export is from a home
- * that already has solar on NEM 1 or 2; the engine reads only import, so the
- * results would describe a different house under a different tariff.
+ * that already has solar on NEM 1 or 2: read as plain import, the results would
+ * describe a different house under a different tariff, so proceedIfClear asks
+ * whether to model a battery on the existing array (the engine then rebuilds
+ * usage as import - export + that array's output and bills on NEM) or to ignore it.
  */
 export function existingSolarShare(loadSet) {
   if (!loadSet || !loadSet.exportKwh || !loadSet.kwh) return 0;
@@ -1368,8 +1514,41 @@ export function existingSolarShare(loadSet) {
 const EXISTING_SOLAR_THRESHOLD = 0.01;
 const hasExistingSolar = (ls) => existingSolarShare(ls) > EXISTING_SOLAR_THRESHOLD;
 
-const EXISTING_SOLAR_BLOCK = "This meter already exports power, so it is on NEM 1 or 2 and this tool's Net "
-  + "Billing model does not apply yet; results would be wrong.";
+const EXISTING_SOLAR_NOTICE = "This meter already exports power, so the home already has solar on NEM 1 or NEM 2. "
+  + "We can model adding a battery to that system, or ignore the panels and treat what you import as your whole usage.";
+const EXISTING_FORM_NOTICE = "Tell us about the solar you already have. The panels stay as they are; only a battery is added.";
+
+/** The banner line for battery-only mode on an existing array. */
+function existingModeBanner(xm) {
+  const kw = Math.round(xm.kwDc * 10) / 10;
+  const plan = xm.nem === "nem1" ? "NEM 1" : "NEM 2";
+  return `Your ${kw} kW array stays on ${plan}; only the battery is new. Adding more than 1 kW or 10% of panels `
+    + "would move the whole system to Net Billing, which this mode does not model.";
+}
+
+/** Landing: the two-question form for an existing array, then on into the app. */
+function showExistingForm() {
+  landingNotice({ tone: "warn", text: EXISTING_FORM_NOTICE });
+  const host = $("landing-notice");
+  if (!host) return;
+  const slot = el("div");
+  host.appendChild(slot);
+  const prior = State.get().existing || {};
+  const form = renderExistingForm(slot, {
+    initial: { kwDc: Number(prior.kwDc) || null, nem: prior.nem },
+    onSubmit: ({ kwDc, nem }) => {
+      State.update((st) => {
+        const planeId = (st.roof.planes[0] || {}).id || null;
+        st.existing = { kwDc, planeId, nem };
+        st.ui.existingSolarAck = true;
+      }, "silent");
+      landingNotice(null);
+      proceedIfClear();
+    },
+    onCancel: () => { landingNotice(null); proceedIfClear(); },
+  });
+  form.focus();
+}
 const EXISTING_SOLAR_BANNER = "This meter already exports power (NEM 1 or 2). You chose to continue, so import "
   + "is treated as your full usage and your existing panels are ignored. These results are not your real bill.";
 
@@ -1385,12 +1564,19 @@ async function proceedIfClear() {
   if (hasExistingSolar(ctx.loadSet) && !s.ui.existingSolarAck) {
     showLanding();
     landingNotice({
-      tone: "bad",
-      text: EXISTING_SOLAR_BLOCK,
+      tone: "warn",
+      text: EXISTING_SOLAR_NOTICE,
       actions: [{
-        label: "Continue anyway, treating import as my full usage",
+        label: "Model adding a battery to my existing solar",
+        primary: true,
+        onClick: showExistingForm,
+      }, {
+        label: "Ignore the existing panels (treat import as my whole usage)",
         onClick: () => {
-          State.update((st) => { st.ui.existingSolarAck = true; }, "silent");
+          State.update((st) => {
+            st.ui.existingSolarAck = true;
+            st.existing = { kwDc: 0, planeId: null, nem: "none" };
+          }, "silent");
           landingNotice(null);
           proceedIfClear();
         },
@@ -1734,7 +1920,10 @@ function renderBanner(question) {
     items.push({ tone: "warn", text: ctx.siteNotice,
       actions: [{ label: "Dismiss", onClick: () => { ctx.siteNotice = ""; renderBanner(); } }] });
   }
-  if (ctx.loadSet && State.get().ui.existingSolarAck && hasExistingSolar(ctx.loadSet)) {
+  const xm = existingModeOf(State.get());
+  if (xm) {
+    items.push({ tone: "warn", text: existingModeBanner(xm) });
+  } else if (ctx.loadSet && State.get().ui.existingSolarAck && hasExistingSolar(ctx.loadSet)) {
     items.push({ tone: "bad", text: EXISTING_SOLAR_BANNER });
   }
   node.hidden = !items.length;
@@ -1902,7 +2091,7 @@ async function onLinkUtility(prevUtil) {
   }
   ctx.grid = null; ctx.priced = null; ctx.selected = null; ctx.detail = null; ctx.replay = null;
   ctx.planOptions = []; ctx.providerOptions = [];
-  ctx.weatherRows = null; ctx.tornado = null;
+  ctx.weatherRows = null; ctx.tornado = null; ctx.weatherYears = null;
   markStale();
   const ok = await chooseTariff(null);
   // A baseline region carried over from the old utility means nothing in the new rate book.
@@ -1929,7 +2118,11 @@ async function boot() {
 
   // The landing goes up first, so nothing in a stored session or a pasted link
   // can leave the visitor looking at a blank page.
-  renderLanding($("landing"), { onFiles, onDemo, onAddress, onZip, onMap });
+  renderLanding($("landing"), {
+    onFiles, onDemo, onAddress, onZip, onMap, onMonthlyBills,
+    seasonalSplit: (annual) => (Core.synthload ? Core.synthload.seasonalSplit(annual)
+      : Array.from({ length: 12 }, () => annual / 12)),
+  });
 
   // Hash beats localStorage beats defaults: a shared link always wins.
   let start = State.freshState();

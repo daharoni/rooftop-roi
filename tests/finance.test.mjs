@@ -551,3 +551,76 @@ test("a stray accPlusRevenue is clamped to the export revenue", () => {
   assert.equal(neg.npv, none.npv, "a negative value is treated as none");
   assert.ok(ok.savingsByYear[10] >= 0, "savings never go negative when the adder expires");
 });
+
+// ============================================================ v2: battery & existing-array inputs
+test("v2 defaults: $2.75/W matches the app; the new inputs start neutral", () => {
+  near(Finance.DEFAULTS.costPerW, 2.75, 1e-12, "demo $/W default");
+  near(STATE_DEFAULTS.fin.costPerW, Finance.DEFAULTS.costPerW, 1e-12, "app and core agree on $/W");
+  const d = Finance.withDefaults({ costPerBattery: -5, resilienceValue: "x", vppPerBattery: -1,
+                                   existingKwDc: -2, microinverters: 1 });
+  assert.equal(d.costPerBattery, 0); assert.equal(d.resilienceValue, 0);
+  assert.equal(d.vppPerBattery, 0); assert.equal(d.existingKwDc, 0);
+  assert.equal(d.microinverters, true, "boolean coercion");
+  assert.equal(Finance.withDefaults({}).microinverters, false);
+});
+
+test("fixed battery cost adds exactly batteries x costPerBattery, nothing at zero units", () => {
+  const sim = { ...SIM, battKWhTotal: 10 };
+  const f = { ...FLAT, costPerKwh: 0, costPerBattery: 3000 };
+  near(Finance.evaluate({ ...sim, batteries: 2 }, f).netCost, 1000 + 6000, 1e-9, "two units");
+  near(Finance.evaluate({ ...sim, batteries: 0 }, f).netCost, 1000, 1e-9, "no units");
+  near(Finance.evaluate(sim, f).netCost, 1000, 1e-9, "absent count means no fixed cost");
+  near(Finance.evaluate({ ...sim, batteries: 2 }, { ...f, costPerKwh: 100 }).netCost, 1000 + 1000 + 6000, 1e-9,
+       "adds to the per-kWh price");
+});
+
+test("existingKwDc is priced only above the existing array", () => {
+  const sim = { ...SIM, kwdc: 5 };
+  const f = { ...FLAT, costPerW: 2 };
+  near(Finance.evaluate(sim, f).solarCost, 10000, 1e-9, "no existing array: all 5 kW");
+  near(Finance.evaluate(sim, { ...f, existingKwDc: 3 }).solarCost, 4000, 1e-9, "only the 2 new kW");
+  near(Finance.evaluate(sim, { ...f, existingKwDc: 9 }).solarCost, 0, 1e-9, "all existing: nothing to buy");
+  near(Finance.evaluate(sim, { ...f, existingKwDc: 3 }).savingsByYear[1], 1000, 1e-9, "savings are the whole system's");
+});
+
+test("microinverters zero the inverter swap; NPV rises by the discounted swap", () => {
+  const f = { ...FLAT, horizon: 5, inverterYear: 2, inverterPerW: 0.5 };
+  const str = Finance.evaluate(SIM, f), micro = Finance.evaluate(SIM, { ...f, microinverters: true });
+  near(str.extrasByYear[2], 500, 1e-9, "string inverter swap of $500 in year 2");
+  assert.equal(micro.extrasByYear.every((v) => v === 0), true, "no swap with microinverters");
+  assert.deepEqual(micro.replacementYears.inverter, []);
+  near(micro.npv - str.npv, 500 / 1.21, 1e-9, "the discounted swap");
+  near(micro.inputs.inverterPerW, 0.5, 0, "inputs untouched");
+  const part = Finance.evaluate({ ...SIM, kwdc: 3 }, { ...f, existingKwDc: 2 });
+  near(part.extrasByYear[2], 500, 1e-9, "the swap is on the 1 new kW only");
+});
+
+test("extraRevenue: discounted annuity, lease return, first-year but not bill savings", () => {
+  const f = { ...FLAT, resilienceValue: 200, vppPerBattery: 50 };
+  const sim = { ...SIM, batteries: 1 };
+  const base = Finance.evaluate(sim, { ...FLAT });
+  const r = Finance.evaluate(sim, f);
+  near(r.npv - base.npv, 250 / 1.1 + 250 / 1.21, 1e-9, "cash purchase: the discounted annuity");
+  near(r.extraRevenue, 250, 1e-12, "year-1 extra revenue"); near(r.resilienceValue, 200, 1e-12, "resilience");
+  near(r.vppRevenue, 50, 1e-12, "VPP");
+  near(r.firstYearSavings, 1250, 1e-9, "first-year savings include it");
+  near(r.savingsByYear[1], 1000, 1e-9, "bill savings do not");
+  const r3 = Finance.evaluate({ ...sim, batteries: 3 }, f);
+  near(r3.extraRevenue, 200 + 150, 1e-12, "VPP scales with units; resilience does not");
+  const none = Finance.evaluate({ ...sim, batteries: 0 }, f);
+  near(none.extraRevenue, 0, 0, "no batteries, no extra revenue");
+  // Wealth identity still holds with the extra stream.
+  const long = Finance.evaluate(sim, { ...f, horizon: 25, midYear: true, discountRate: 0.025 });
+  near(long.wealthDelta, long.npv * Math.pow(1.1, 25), 1e-6 * Math.abs(long.wealthDelta) + 1e-6, "wealth identity");
+  // Lease handed back after 2 of 5 years: the revenue goes with the system.
+  const lf = { ...f, horizon: 5, financing: { mode: "lease", lease: { monthly: 0, escalatorPct: 0, termYears: 2, buyout: 0 } } };
+  const lease = Finance.evaluate(sim, lf), leaseBase = Finance.evaluate(sim, { ...lf, resilienceValue: 0, vppPerBattery: 0 });
+  near(lease.npv - leaseBase.npv, 250 / 1.1 + 250 / 1.21, 1e-9, "stops at lease return");
+  assert.equal(lease.extraRevenueByYear.slice(3).every((v) => v === 0), true);
+});
+
+test("breakEven supports costPerBattery", () => {
+  const sim = { ...SIM, battKWhTotal: 0, batteries: 2 };
+  const be = Finance.breakEven(sim, { ...FLAT, costPerBattery: 100 }, "costPerBattery");
+  near(Finance.evaluate(sim, { ...FLAT, costPerBattery: be }).npv, 0, 1e-6, "NPV zero at the break-even unit price");
+});

@@ -555,15 +555,16 @@ test("reshape: works on the real DST calendar, where two days are 23 hours long"
 // ---------------------------------------------------------------------------
 // 4. presets + summarize
 // ---------------------------------------------------------------------------
-test("presets: four manual templates, every one a valid FlexLoad", () => {
+test("presets: six manual templates, every one a valid FlexLoad", () => {
   const ps = FL.presets();
-  assert.equal(ps.length, 4);
+  assert.equal(ps.length, 6);
   const cal = mondayCal(28);
   for (const p of ps) {
+    if (p.kind === "heatpump") continue;   // weather-shaped; covered below
     assert.equal(p.source, "manual");
     assert.equal(p.kwhByHour, null);
     assert.equal(p.detection, null);
-    assert.ok(["ev", "pool", "custom"].includes(p.kind));
+    assert.ok(["ev", "pool", "heatpump", "custom"].includes(p.kind));
     assert.ok(p.annualKwh > 0);
     assert.ok(p.schedule && Array.isArray(p.schedule.window));
     const out = FL.reshape(p, cal, SHAPE);
@@ -593,4 +594,44 @@ test("summarize: says what was detected and where it will be put", () => {
 
   assert.match(FL.summarize({ ...EV, scale: 1.2 }), /Scaled to 120%/);
   assert.equal(FL.summarize(null), "");
+});
+
+// ------------------------------------------------------------ heat pump and planned EV
+test("presets: heat pump and planned EV templates", () => {
+  const ps = FL.presets();
+  const hp = ps.find((p) => p.id === "hp"), evp = ps.find((p) => p.id === "evp");
+  assert.equal(hp.kind, "heatpump");
+  assert.equal(hp.source, "manual");
+  assert.equal(hp.kwhByHour, null);
+  assert.equal(hp.schedule.mode, "asRecorded");
+  assert.deepEqual(hp.heatpump, { annualKwh: 2500, cop: 3.0, balanceC: 16, mode: "heating" });
+  const ev2 = ps.find((p) => p.id === "ev2");
+  assert.equal(evp.kind, "ev");
+  assert.equal(evp.annualKwh, 3000);
+  assert.deepEqual(evp.schedule, ev2.schedule);
+  assert.match(evp.note, /without an EV today/);
+});
+
+test("reshape: a heat pump with a series is added back where it is, scaled", () => {
+  const hp = FL.presets().find((p) => p.id === "hp");
+  const series = Float64Array.from({ length: CAL.N }, (_, i) => (i % 24 === 7 ? 1.5 : 0));
+  const out = FL.reshape({ ...hp, kwhByHour: series, scale: 2 }, CAL);
+  for (let i = 0; i < CAL.N; i += 13) assert.equal(out[i], series[i] * 2);
+});
+
+test("reshape: a heat pump with no series (weather not ready) contributes nothing", () => {
+  const hp = FL.presets().find((p) => p.id === "hp");
+  for (const mode of ["asRecorded", "spread"]) {
+    const out = FL.reshape({ ...hp, schedule: { ...hp.schedule, mode } }, CAL);
+    assert.equal(out.length, CAL.N);
+    assert.equal(sum(out), 0);
+  }
+});
+
+test("summarize: heat pump sentence", () => {
+  const hp = FL.presets().find((p) => p.id === "hp");
+  assert.match(FL.summarize(hp), /Waiting for weather/);
+  const s = FL.summarize({ ...hp, kwhByHour: new Float64Array(4) });
+  assert.match(s, /outdoor temperature/);
+  assert.match(s, /16 °C/);
 });

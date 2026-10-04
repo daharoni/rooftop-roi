@@ -10,6 +10,7 @@
 
 import { el, clear, $ } from "./dom.js";
 import { DISCLAIMER } from "./blocks.js";
+import { renderBillForm } from "./billform.js";
 import { CLAIM, EXPLANATION, CALLS, STORAGE_NOTE, GEOCODE_NOTE, adoptGeocodeNote } from "../privacy.js";
 
 /* Averaged summer weekday from data/demo/*.csv, and the TMY profile for 15 July
@@ -36,8 +37,8 @@ export function renderLanding(root, handlers) {
       text: "Rooftop ROI replays your own utility interval data hour by hour with panels and a battery bolted "
         + "on, bills the result under California's Net Billing rules, and sets it against leaving the same cash "
         + "in the market. It is for a homeowner holding an installer's quote who wants to know whether the "
-        + "number on it is any good. You need one thing to start: a Green Button download from SCE, PG&E or "
-        + "SDG&E — the instructions are below, and it takes about two minutes.",
+        + "number on it is any good. The best way to start is a Green Button file from SCE, PG&E or SDG&E — "
+        + "the instructions are below, and it takes about two minutes — but twelve monthly bills will do.",
     }),
   ]));
 
@@ -144,6 +145,8 @@ function startPanel(handlers) {
     on: { change: (e) => { handlers.onFiles(Array.from(e.target.files || [])); e.target.value = ""; } },
   });
 
+  // The panel keeps one "door" slot: the dropzone by default, the bill form on request.
+  const door = el("div.door");
   const zone = el("div.dropzone", { id: "dropzone" }, [
     el("div.dropzone-title", { text: "Drop your Green Button file here" }),
     el("p.dropzone-note", {
@@ -151,9 +154,28 @@ function startPanel(handlers) {
         + "years of readings gives a much steadier answer than one.",
     }),
     el("button.btn.btn-primary.btn-lg", { type: "button", text: "Choose a file", on: { click: () => fileInput.click() } }),
+    el("button.btn.btn-lg", { type: "button", text: "I only have my bills", on: { click: () => showBills() } }),
     el("button.btn.btn-lg", { type: "button", text: "Try the demo household", on: { click: () => handlers.onDemo() } }),
     fileInput,
   ]);
+
+  // The bill form carries its own ZIP, so the location block below is hidden
+  // while it is open: two ZIP fields on one screen is a question nobody can answer.
+  const locationBlock = () => door.parentElement && door.parentElement.querySelector(".landing-location");
+  function showDrop() {
+    clear(door); door.appendChild(zone);
+    const loc = locationBlock(); if (loc) loc.hidden = false;
+  }
+  function showBills() {
+    const form = renderBillForm(door, {
+      onSubmit: (spec) => { if (handlers.onMonthlyBills) handlers.onMonthlyBills(spec); },
+      onBack: showDrop,
+      seasonalSplit: handlers.seasonalSplit,
+    });
+    const loc = locationBlock(); if (loc) loc.hidden = true;
+    form.focus();
+  }
+  showDrop();
 
   zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("is-over"); });
   zone.addEventListener("dragleave", () => zone.classList.remove("is-over"));
@@ -169,11 +191,12 @@ function startPanel(handlers) {
 
   return el("section.panel", {}, [
     el("h2", { text: "Start here" }),
-    el("p.panel-sub", { text: "Two things: your meter readings, and where the roof is." }),
-    zone,
+    el("p.panel-sub", { text: "Two things: your meter readings (or twelve monthly bills), and where the roof is." }),
+    door,
     el("p.note", { id: "landing-error", hidden: true }),
     el("div", { id: "landing-notice", hidden: true }),
 
+    el("div.landing-location", {}, [
     el("div.or-rule", { text: "and the location" }),
 
     el("div", { style: "display:flex;flex-direction:column;gap:12px" }, [
@@ -202,6 +225,7 @@ function startPanel(handlers) {
             + "imagery from Esri, and the tile requests show Esri roughly which block you are looking at "
             + "(about 75 m), along with your IP address. No address or ZIP is sent from the map." }),
       ]),
+    ]),
     ]),
 
     utilityGuide(),

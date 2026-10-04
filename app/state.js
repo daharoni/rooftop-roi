@@ -19,6 +19,7 @@
  * share link places a neighbourhood, never a house - see roundCoord().
  * ========================================================================== */
 
+import { BATTERY_PRESETS } from "./ui/presets.js";
 import { openSharedDb, closeSharedDb, sharedDbExists, forgetCaches, SHARED_DB_NAME } from "../core/weather.js";
 
 export const STORAGE_KEY = "rooftop-roi:v1";
@@ -37,7 +38,7 @@ export const STORAGE_KEY = "rooftop-roi:v1";
  *                   the page can say some settings may not have come through.
  *   v unreadable    treated like a newer version.
  */
-export const CODEC_VERSION = 1;
+export const CODEC_VERSION = 2;
 
 /** Read a `v` from a link or a stored session; flags anything this build cannot fully vouch for. */
 function readVersion(raw, report) {
@@ -54,7 +55,15 @@ function readVersion(raw, report) {
  * links and sessions are read as version 1.
  */
 const MIGRATIONS = {
-  // 1: (kv) => { /* e.g. if (!("cw" in kv)) kv.cw = 3.0;  // the old default */ return kv; },
+  // v1 -> v2: the defaults moved (solar $3.00 -> $2.75 /W, round trip 90% -> 88%).  A v1 link or
+  // session omits a key that equalled the old default, so write the old value back explicitly or
+  // the shared scenario would silently re-price.  The same flat key/value object reaches here from
+  // both the hash (encoded strings) and storage (numbers); Number() reads either.
+  1: (kv) => {
+    if (!("cw" in kv)) kv.cw = 3.0;
+    if (!("rte" in kv)) kv.rte = 0.9;
+    return kv;
+  },
 };
 
 function migrate(kv, from) {
@@ -75,7 +84,7 @@ export const DB_NAME = SHARED_DB_NAME;
 export const DB_STORE = "loads";
 export const LOAD_KEY = "current";
 
-export const TABS = ["dashboard", "roof", "loads", "bills", "assumptions"];
+export const TABS = ["dashboard", "quote", "roof", "loads", "bills", "assumptions"];
 
 /** Defaults. Anything equal to these is omitted from the hash and from storage. */
 export const DEFAULTS = {
@@ -92,14 +101,19 @@ export const DEFAULTS = {
     utilityId: null, planId: null, providerId: null, custom: null,
   },
   system: {
-    panelW: 460, battKWh: 10, battKW: 5, rte: 0.9, minReserve: 0.2,
+    battPreset: "custom",     // id from app/ui/presets.js; a label only, the three numbers below are what the model reads
+    panelW: 460, battKWh: 10, battKW: 5, rte: 0.88, minReserve: 0.2,
     acFactor: 0.9,            // CEC-AC per panel as a share of nameplate (PTC x inverter), for the SCE sizing line
     strategy: "tou_arbitrage", gridCharge: false, exportThreshold: 0.5, ngom: false,
     maxPanels: 40, maxBatteries: 6,
     override: { panelsByPlane: null, batteries: null },
   },
   fin: {
-    costPerW: 3.0, costPerKwh: 1000, adder: 0,
+    costPerW: 2.75, costPerKwh: 1000, adder: 0,
+    costPerBattery: 0,        // fixed $ per battery unit, on top of the per-kWh price
+    resilienceValue: 0,       // $/yr a household puts on not losing power; own line, never in the bill saving
+    vppPerBattery: 0,         // $/battery/yr from a virtual power plant / grid-services programme
+    microinverters: false,    // true: no central inverter to replace
     trueUpMonth: null,        // 1-12, PTO anniversary month for the NBT true-up; null = utility default (October, from the tariff file)
     incentiveMode: "none", discountPct: 0, passThroughPct: 0.34, taxCreditPct: 0,
     sgipPerKwh: 0, rebates: 0,
@@ -112,6 +126,12 @@ export const DEFAULTS = {
       lease: { monthly: 180, escalatorPct: 0.029, termYears: 25, buyout: 0 },
     },
   },
+  // The installer quote being checked (Quote tab). null = not filled in.
+  quote: {
+    kwDc: null, batteries: 0, battKWh: null, price: null, annualKwh: null, monthly: null,
+  },
+  // Solar already on the roof (NEM 1/2 customer modelling a battery). kwDc 0 = none.
+  existing: { kwDc: 0, planeId: null, nem: "none" },
   ui: {
     tab: "dashboard", demo: false, basis: "sameFlex", season: 0, weatherKey: "tmy", objective: "npv",
     replayStart: "", replayEnd: "", replayActual: 0,
@@ -158,6 +178,7 @@ const SCALARS = [
 
   ["pw", "system.panelW", "num", { min: 350, max: 560 }],   // the knob's range (app/ui/knobs.js)
   ["acf", "system.acFactor", "num", { min: 0.5, max: 1 }],
+  ["bp", "system.battPreset", "str", { enum: BATTERY_PRESETS.map((p) => p.id) }],
   ["bkwh", "system.battKWh", "num", { min: 1, max: 100 }],
   ["bkw", "system.battKW", "num", { min: 0.5, max: 50 }],
   ["rte", "system.rte", "num", { min: 0.5, max: 1 }],
@@ -172,6 +193,10 @@ const SCALARS = [
 
   ["cw", "fin.costPerW", "num", { min: 0, max: 15 }],
   ["ck", "fin.costPerKwh", "num", { min: 0, max: 5000 }],
+  ["cb", "fin.costPerBattery", "num", { min: 0, max: 30000 }],
+  ["rv", "fin.resilienceValue", "num", { min: 0, max: 5000 }],
+  ["vpp", "fin.vppPerBattery", "num", { min: 0, max: 2000 }],
+  ["micro", "fin.microinverters", "bool", {}],
   ["add", "fin.adder", "num", { min: 0, max: 200000 }],
   ["imode", "fin.incentiveMode", "str", { enum: ["none", "discount", "vendor"] }],
   ["disc", "fin.discountPct", "num", { min: 0, max: 1 }],
@@ -202,6 +227,17 @@ const SCALARS = [
   ["lsesc", "fin.financing.lease.escalatorPct", "num", { min: 0, max: 0.2 }],
   ["lsterm", "fin.financing.lease.termYears", "num", { min: 1, max: 40, int: true }],
   ["lsbuy", "fin.financing.lease.buyout", "num", { min: 0, max: 500000 }],
+
+  // Quote tab. Nullable numbers (default null) are omitted when unset, set when a valid value arrives.
+  ["qkw", "quote.kwDc", "num", { min: 0, max: 50 }],
+  ["qb", "quote.batteries", "num", { min: 0, max: 10, int: true }],
+  ["qbk", "quote.battKWh", "num", { min: 0, max: 100 }],
+  ["qpr", "quote.price", "num", { min: 0, max: 300000 }],
+  ["qkwh", "quote.annualKwh", "num", { min: 0, max: 100000 }],
+  ["qmo", "quote.monthly", "num", { min: 0, max: 3000 }],
+  ["xkw", "existing.kwDc", "num", { min: 0, max: 50 }],
+  ["xpl", "existing.planeId", "str", { re: ID_RE, max: 24 }],
+  ["xnem", "existing.nem", "str", { enum: ["none", "nem2", "nem1"] }],
 
   // Tab ids are normalised by main.js (old links say "money" or "home").
   ["tab", "ui.tab", "str", { re: /^[a-z]+$/, max: 20 }],
@@ -329,20 +365,25 @@ function planeFromFields(f, i) {
 function flexToToken(f) {
   const s = f.schedule || {};
   const w = s.window || [8, 15], ow = s.overnightWindow || [1, 5];
+  // A heat pump appends annualKwh:cop:balanceC (fields 15-17); other kinds keep the old 15-field shape.
+  const hp = f.kind === "heatpump" ? [
+    Math.round((f.heatpump && f.heatpump.annualKwh) || f.annualKwh || 0),
+    round(num(f.heatpump && f.heatpump.cop, 3), 2), round(num(f.heatpump && f.heatpump.balanceC, 16), 1)] : [];
   return [
     f.id, f.kind, Math.round(f.annualKwh || 0), f.source || "manual",
     s.mode || "asRecorded", s.daysPerWeek ?? 5, w[0], w[1],
     round(s.daylightFraction ?? 0.9, 2), ow[0], ow[1], round(s.maxKW ?? 8, 1),
     s.followSolar === false ? 0 : 1, round(f.scale ?? 1, 2),
-    cleanName(f.name, ""),
+    cleanName(f.name, ""), ...hp,
   ].map((x) => encodeURIComponent(String(x))).join(":");
 }
 
 function flexFromFields(p, i) {
   const pick = (v, list, d) => (list.includes(v) ? v : d);
-  return {
+  const kind = pick(p[1], FLEX_KINDS, "custom");
+  const out = {
     id: isSafeId(p[0], 40) ? p[0] : "f" + (i + 1),
-    kind: pick(p[1], ["ev", "pool", "custom"], "custom"),
+    kind,
     annualKwh: inRange(p[2], 0, 0, 200000),
     source: pick(p[3], ["detected", "manual"], "manual"),
     name: cleanName(p[14], "Flexible load"),
@@ -357,6 +398,15 @@ function flexFromFields(p, i) {
     },
     scale: inRange(p[13], 1, 0, 10),
   };
+  if (kind === "heatpump") {
+    // kwhByHour stays null: core/heatpump.js rebuilds it from these three numbers once weather is ready.
+    out.heatpump = {
+      annualKwh: inRange(p[15], out.annualKwh, 0, 200000), cop: inRange(p[16], 3, 1, 8),
+      balanceC: inRange(p[17], 16, -10, 30), mode: "heating",
+    };
+    out.schedule.mode = "asRecorded";
+  }
+  return out;
 }
 
 // ---------------------------------------------------- stored-object coercion
@@ -398,7 +448,7 @@ function planeFromStored(p, i) {
 }
 
 /** The flexible-load kinds core/flexload.js knows how to reshape, and the schedule modes. */
-export const FLEX_KINDS = ["ev", "pool", "custom"];
+export const FLEX_KINDS = ["ev", "pool", "custom", "heatpump"];
 const FLEX_MODES = ["asRecorded", "spread"];
 
 /**
@@ -431,6 +481,7 @@ function flexFromStored(f, i) {
   const out = flexFromFields([
     f.id, f.kind, f.annualKwh, f.source, s.mode, s.daysPerWeek, w[0], w[1],
     s.daylightFraction, ow[0], ow[1], s.maxKW, s.followSolar === false ? "0" : "1", f.scale, f.name,
+    ...(isPlainObject(f.heatpump) ? [f.heatpump.annualKwh, f.heatpump.cop, f.heatpump.balanceC] : []),
   ], i);
   if (s.hoursPerDay !== undefined) out.schedule.hoursPerDay = inRange(s.hoursPerDay, 8, 0, 24);
   // Provenance from the detector (confidence, charger kW): display-only, kept as plain data.
