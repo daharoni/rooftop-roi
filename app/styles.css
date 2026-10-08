@@ -392,24 +392,34 @@ tr.is-best td { background: color-mix(in srgb, var(--s1) 9%, transparent); }
 }
 .chip .mono { color: var(--ink); }
 .topbar-right { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
-/* A quiet text link among the buttons: feedback should be easy to find and hard to mistake for an action on the data. */
-.feedback-link { font-size: var(--fs-xs); color: var(--ink-2); text-decoration: none; padding: 4px 6px; margin-right: 2px; white-space: nowrap; }
-.feedback-link:hover { color: var(--accent); text-decoration: underline; }
 
 .status { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--ink-3); min-height: 18px; }
 .bar { flex: none; width: 90px; height: 3px; background: var(--grid); border-radius: 2px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .12s linear; }
 
-.data-actions { position: relative; }
-.data-actions > summary { list-style: none; }
-.data-actions > summary::-webkit-details-marker { display: none; }
-.data-actions > summary::after { content: "\2304"; }
-.data-actions-menu {
-  position: absolute; top: calc(100% + var(--sp-2)); right: 0; z-index: var(--z-menu); width: 235px;
-  padding: var(--sp-4); display: grid; gap: var(--sp-2);
+/* Two menus, Household and Share, hold every action; main.js gives them one
+   behaviour (Escape, click outside, one open at a time). */
+.menu { position: relative; }
+.menu > summary { list-style: none; cursor: pointer; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::after { content: ""; width: 6px; height: 6px; margin: -3px 0 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform .15s; }
+.menu[open] > summary { border-color: var(--ink-3); }
+.menu[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+.menu-body {
+  position: absolute; top: calc(100% + var(--sp-2)); right: 0; z-index: var(--z-menu); width: 280px;
+  padding: var(--sp-3); display: grid; gap: var(--sp-1);
   background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); box-shadow: var(--shadow-pop);
 }
-.data-actions-menu p { font-size: var(--fs-xs); color: var(--ink-2); margin: 0 0 var(--sp-1); }
+.menu-note { font-size: var(--fs-xs); color: var(--ink-2); margin: 0 0 var(--sp-2); padding: 0 var(--sp-1); }
+.menu-body > .btn { width: 100%; justify-content: flex-start; }
+/* An item is a label with a one-line grey description, whether button or link. */
+.menu-item {
+  display: grid; gap: 2px; width: 100%; padding: var(--sp-2) var(--sp-3); text-align: left; text-decoration: none;
+  font-family: var(--sans); color: var(--ink); background: transparent; border: 0; border-radius: var(--r-sm); cursor: pointer;
+}
+.menu-item:hover { background: var(--page); }
+.menu-label { font-size: var(--fs-sm); font-weight: 500; }
+.menu-desc { font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.35; }
 
 /* Tabs.  The strip scrolls sideways when the labels do not fit; a fade on the
    right edge says so, and main.js adds .at-end once the last tab is in view. */
@@ -446,6 +456,18 @@ tr.is-best td { background: color-mix(in srgb, var(--s1) 9%, transparent); }
   min-height: 44px; padding: 10px 0 8px;
   font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
 }
+/* The summary row: a dot when anything is off its default, the title, and the
+   current values in mono at the right, which step aside once the group is open. */
+.group > summary .group-title { flex: none; }
+.group > summary .group-sum {
+  flex: 1 1 0; min-width: 0; margin-left: auto; text-align: right;
+  font-family: var(--mono); font-size: var(--fs-xs); font-weight: 400;
+  letter-spacing: 0; text-transform: none; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.group > summary .group-sum[hidden], .group[open] > summary .group-sum { display: none; }
+.group-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: calc(var(--sp-1) * -1); }
+.group-dot[hidden] { display: none; }
 .rail > div > .group:first-child { border-top: 0; }
 .rail > div > .group:first-child > summary { padding-top: var(--sp-3); }
 .group-body { display: flex; flex-direction: column; gap: var(--sp-3); padding: 2px 0 var(--sp-4); }
@@ -494,6 +516,20 @@ details.hero-more { margin-top: 2px; }
 .hero-verdict > .eyebrow { text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-2); max-width: 32ch; }
 /* The one-line caption under the big number: tight to it, and wide enough to stay one line. */
 .hero-caption { margin-top: 2px; max-width: 60ch; }
+
+/* The band's right column: the two ranking figures as one serif sentence with
+   its small print, then the describing figures as mono marginalia rows. */
+.readout { margin: 0 0 var(--sp-2); }
+.readout-line { margin: 0; font: 400 var(--fs-lg)/1.3 var(--editorial); color: var(--ink); max-width: 38ch; letter-spacing: -0.005em; }
+.readout-fine { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--ink-3); max-width: 60ch; }
+.readout-fine:empty { display: none; }
+/* Two columns of rows on a wide pane, so the band stays as short as the verdict column. */
+.fig-rows { margin: 0; font-family: var(--mono); border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--sp-5); }
+.fig-row { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 0 var(--sp-3); padding: 3px 0; border-bottom: 1px solid var(--border); align-items: baseline; }
+.fig-row dt { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
+.fig-row dd { margin: 0; font-size: var(--fs-xs); line-height: 1.35; color: var(--ink-2); }
+.fig-v { color: var(--ink); font-size: var(--fs-sm); font-weight: 500; font-variant-numeric: tabular-nums; margin-right: var(--sp-2); }
+.fig-d { font-size: var(--fs-xs); color: var(--ink-2); }
 .config-line { margin: var(--sp-2) 0 0; }
 
 .tiles {
@@ -592,30 +628,34 @@ details.hero-more { margin-top: 2px; }
 .landing-head .wordmark b { font-size: 22px; }
 .edition { font-size: var(--fs-xs); color: var(--ink-2); }
 
-.landing-hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 44px; align-items: center; padding: 64px 0 var(--sp-8); }
+/* The chart is the hero: headline block stacked above the full-width figure. */
+.landing-hero { display: block; padding: 48px 0 var(--sp-6); }
+.hero-intro { margin-bottom: var(--sp-6); }
+.hero-intro .eyebrow { margin: 0; }
 .lede {
-  margin: 14px 0 0; max-width: 12ch; text-wrap: initial;
+  margin: 14px 0 0; max-width: 22ch; text-wrap: initial;
   font: 500 clamp(38px, 4.2vw, 58px)/1.06 var(--editorial); letter-spacing: -0.015em;
 }
 /* The italic second line stays in the accent: the owner's favourite line on the page. */
 .lede em { display: block; font-style: italic; color: var(--accent); }
 .landing-sub { margin: 22px 0 0; max-width: 45ch; font-size: var(--fs-md); line-height: 1.65; color: var(--ink-2); }
-.hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: var(--sp-6); }
-.hero-trust { font-size: var(--fs-xs); margin: 14px 0 5px; color: var(--ink-2); }
-.hero-coverage { font-size: var(--fs-xs); color: var(--ink-2); margin: 0; }
+/* Actions sit under the evening gap at the figure's right edge; the caption points up at it. */
+.hero-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-2); margin: var(--sp-4) 0 0 auto; width: max-content; max-width: 100%; text-align: right; }
+.gap-caption { margin: 0; font: italic 500 var(--fs-lg)/1.3 var(--editorial); color: var(--ink); }
+.hero-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+/* One ledger line stands in for the trust lines: short items divided by hairlines. */
+.ledger { list-style: none; margin: var(--sp-6) 0 var(--sp-7); padding: var(--sp-3) 0; display: flex; flex-wrap: wrap; border-block: 1px solid var(--rule); font: var(--fs-xs)/1.4 var(--mono); color: var(--ink-2); }
+.ledger li { padding: 2px var(--sp-4); border-left: 1px solid var(--rule); }
+.ledger li:first-child { padding-left: 0; border-left: 0; }
 
 /* The hero graphic: one real summer weekday from the demo household's meter,
    next to what 6 kW of panels would have made that day.  The gap between the
    two curves is the entire subject of the tool, so it is the first thing on
    the page rather than a decorative band. */
-.hero-figure-wrap {
-  margin: 0; padding: var(--sp-6) var(--sp-5) var(--sp-5); background: var(--surface);
-  border-top: 3px solid var(--accent); border-bottom: 1px solid var(--rule);
-}
+.hero-figure-wrap { margin: 0; padding: var(--sp-3) 0 0; background: none; border-top: 3px solid var(--accent); position: relative; }
 .hero-figure-wrap svg { display: block; width: 100%; height: auto; max-width: 100%; }
-.figure-heading { margin-bottom: var(--sp-6); }
-.figure-heading h2 { font: 500 var(--fs-xl)/1.22 var(--editorial); letter-spacing: -0.01em; margin-top: var(--sp-2); }
-.figcap { font-size: var(--fs-sm); line-height: 1.65; color: var(--ink-2); margin: 18px 0 0; max-width: 78ch; }
+.figure-marker { margin: 0 0 var(--sp-2); }
+.figcap { font-size: var(--fs-sm); line-height: 1.65; color: var(--ink-2); margin: var(--sp-4) 0 0; max-width: 78ch; }
 
 .landing-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--sp-7); align-items: start; }
 .landing-grid > * { min-width: 0; }
@@ -670,8 +710,11 @@ details.hero-more { margin-top: 2px; }
 /* Privacy: a claim this specific has to be checkable, so the exact call list
    sits beside it rather than behind a link.  The panel loses its box so it
    reads as a statement, not a form. */
-.privacy { padding: 10px 0; }
-.privacy-claim { margin: 10px 0 var(--sp-2); }
+/* The privacy text is a field note beside the start panel, not a second card. */
+.privacy-note { border-left: 3px solid var(--accent); padding: 0 0 0 var(--sp-5); }
+.privacy-note .privacy { padding: 0; }
+.privacy-note .field-note { border-left: 0; padding-left: 0; }
+.privacy-claim { margin: 6px 0 var(--sp-2); }
 .privacy .panel-sub { font-size: var(--fs-base); line-height: 1.65; }
 .privacy-details { border-block: 1px solid var(--grid); padding: var(--sp-3) 0; }
 .privacy-details > summary { padding-block: var(--sp-1); }
@@ -688,16 +731,13 @@ details.hero-more { margin-top: 2px; }
 /* The pipeline is genuinely a sequence, so its steps are numbered. */
 .pipeline { margin-top: var(--sp-8); border-top: 1px solid var(--rule); padding-top: var(--sp-6); }
 .pipeline > h2 { font: 500 var(--fs-xl)/1.22 var(--editorial); letter-spacing: -0.01em; }
-.pipe { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: stretch; counter-reset: steps; }
-.pipe-step {
-  flex: 1 1 165px; min-width: 0; display: flex; flex-direction: column; gap: 5px;
-  border-top: 1px solid var(--rule); padding: 14px 0; counter-increment: steps;
-}
-.pipe-step strong { font-size: var(--fs-sm); }
+/* Set as a field-guide index: one ruled row per step, in a single column. */
+.pipe { list-style: none; margin: 14px 0 0; padding: 0; max-width: 70ch; counter-reset: steps; }
+.pipe-step { padding: 10px 0; border-top: 1px solid var(--grid); counter-increment: steps; }
+.pipe-step:last-child { border-bottom: 1px solid var(--grid); }
+.pipe-step strong { font-size: var(--fs-sm); margin-right: var(--sp-2); }
 .pipe-step strong::before { content: "0" counter(steps) " / "; font: var(--fs-xs) var(--mono); color: var(--ink-2); }
-.pipe-body { font-size: var(--fs-sm); line-height: 1.55; color: var(--ink-2); }
-/* landing.js still emits these; the numbering replaced them. */
-.pipe-glyph, .pipe-arrow { display: none; }
+.pipe-body { display: inline; font-size: var(--fs-sm); line-height: 1.55; color: var(--ink-2); }
 
 .landing-foot {
   margin-top: 40px; padding-top: var(--sp-4); border-top: 1px solid var(--grid);
@@ -711,7 +751,6 @@ details.hero-more { margin-top: 2px; }
    side by side, so the band narrows its tiles and the columns stack. */
 @media (min-width: 1001px) and (max-width: 1300px) {
   .headline { grid-template-columns: minmax(220px, .8fr) minmax(0, 1.2fr); }
-  .headline .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dash-cols { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -744,12 +783,11 @@ details.hero-more { margin-top: 2px; }
   .toast { bottom: 72px; max-width: calc(100vw - 32px); text-align: center; }
 
   .row2, .dash-cols, .headline { grid-template-columns: minmax(0, 1fr); }
+  .fig-rows { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-note, .hero-band, .hero-why { max-width: 70ch; }
 
-  .landing-hero { gap: 28px; padding-block: 40px; }
   .landing-grid { grid-template-columns: minmax(0, 1fr); }
-  .landing-grid > .panel:has(> .privacy) { padding: 10px var(--sp-6); }
 }
 
 @media (max-width: 600px) {
@@ -762,15 +800,12 @@ details.hero-more { margin-top: 2px; }
   .chip > * { margin-right: 6px; }
   .topbar .status { order: 3; width: 100%; min-height: 0; flex-wrap: wrap; }
   .topbar .status:has(#status-text:empty) { display: none; }
-  .topbar-right { order: 4; width: 100%; margin-left: 0; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
-  .topbar-right > .btn, .topbar-right > .data-actions { flex: 1 1 0; min-width: 0; }
-  .topbar-right .btn, .data-actions > summary {
-    display: block; width: 100%; min-height: 44px; padding: 6px var(--sp-1); line-height: 30px; text-align: center;
-    font-size: var(--fs-xs); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    background: var(--page); color: var(--ink); border-color: var(--rule);
-  }
-  .data-actions-menu .btn { width: 100%; }
-  .feedback-link { order: 9; flex-basis: 100%; text-align: right; padding: 0 4px; line-height: 18px; }
+  .topbar-right { order: 4; width: 100%; margin-left: 0; flex-wrap: nowrap; justify-content: stretch; gap: 6px; }
+  .topbar-right > .menu { flex: 1 1 0; min-width: 0; position: static; }
+  .topbar-right .menu > summary { display: flex; width: 100%; min-height: 44px; font-size: var(--fs-sm); }
+  /* The popover spans the bar's width instead of hanging off one button. */
+  .topbar { position: relative; }
+  .menu-body { left: 14px; right: 14px; width: auto; top: auto; margin-top: var(--sp-2); }
 
   .tabs { padding: 0 6px; }
   .tabs button { padding: 9px 10px 8px; }
@@ -779,22 +814,24 @@ details.hero-more { margin-top: 2px; }
   .card { padding: var(--sp-3) 14px; }
   .headline { padding: var(--sp-4); }
   .hero-num { font-size: 34px; }
+  .fig-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .readout-line { max-width: none; }
   .slices, .tiles.tiles-3 { grid-template-columns: minmax(0, 1fr); }
   .section-jumps-label { flex-basis: 100%; }
 
   .landing { padding: 0 20px 48px; }
   .landing-head { align-items: flex-start; flex-direction: column; gap: 6px; padding-block: 20px var(--sp-4); }
-  .landing-hero { grid-template-columns: minmax(0, 1fr); padding-block: var(--sp-7); }
+  .landing-hero { padding-block: var(--sp-6); }
   .lede { font-size: 40px; max-width: 14ch; }
   .landing-sub { font-size: 15px; }
-  .hero-actions > .btn { flex: 1 1 auto; }
-  .hero-figure-wrap { padding: 18px var(--sp-3); }
-  .hero-figure-wrap svg { min-height: 150px; }
-  .figure-heading { margin-bottom: 18px; }
-  .figure-heading h2, .start-panel > h2, .privacy-claim, .pipeline > h2 { font-size: 23px; }
+  /* Actions fill the width under the chart; ledger items wrap. */
+  .hero-actions { margin-left: 0; width: auto; align-items: stretch; text-align: left; }
+  .hero-buttons { flex-direction: column; }
+  .hero-buttons > .btn { width: 100%; }
+  .ledger li { padding: 2px var(--sp-3); }
+  .start-panel > h2, .privacy-claim, .pipeline > h2 { font-size: 23px; }
   .start-panel { padding: var(--sp-5) var(--sp-4); }
   .dropzone .btn { width: 100%; margin-inline: 0; }
-  .landing-grid > .panel:has(> .privacy) { padding-inline: 0; border: 0; background: none; }
   .calls li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .bill-helpers { grid-template-columns: 1fr; }
   .bill-grid { grid-template-columns: repeat(3, 1fr); }

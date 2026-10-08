@@ -802,7 +802,6 @@ function mountTab() {
     }
   }
   watchTabStrip();
-  watchTopbarMenu();
   { const t = $("tabs"); if (t) t.dispatchEvent(new Event("scroll")); }
   const pane = $("pane");
   pane.scrollTop = 0;
@@ -893,20 +892,6 @@ function watchTabStrip() {
   strip.addEventListener("scroll", upd, { passive: true });
   window.addEventListener("resize", upd, { passive: true });
   upd();
-}
-
-/** On phones "Copy summary" lives inside the Data & settings menu. */
-function watchTopbarMenu() {
-  const copy = $("btn-copy"), menu = document.querySelector(".data-actions-menu");
-  const right = document.querySelector(".topbar-right"), details = document.querySelector(".data-actions");
-  if (!copy || !menu || !right || !details || !window.matchMedia) return;
-  const mq = window.matchMedia("(max-width: 600px)");
-  const place = () => {
-    if (mq.matches) { if (copy.parentNode !== menu) menu.insertBefore(copy, menu.querySelector("#btn-reset")); }
-    else if (copy.parentNode !== right) right.insertBefore(copy, details);
-  };
-  if (mq.addEventListener) mq.addEventListener("change", place); else mq.addListener(place);
-  place();
 }
 
 function render() {
@@ -2159,19 +2144,25 @@ async function shareLink() {
 }
 
 function bindShell() {
-  const dataActions = document.querySelector("details.data-actions");
-  if (dataActions) {
-    const summary = dataActions.querySelector("summary");
-    document.addEventListener("keydown", (e) => {
-      if (e.key !== "Escape" || !dataActions.open) return;
-      e.preventDefault();
-      dataActions.open = false;
-      if (summary) summary.focus();
-    });
-    document.addEventListener("pointerdown", (e) => {
-      if (dataActions.open && !dataActions.contains(e.target)) dataActions.open = false;
+  // Any details.menu: one open at a time; closes on Escape (focus back to its summary) and outside clicks.
+  const menus = Array.from(document.querySelectorAll("details.menu"));
+  for (const m of menus) {
+    m.addEventListener("toggle", () => {
+      if (m.open) for (const o of menus) if (o !== m) o.open = false;
     });
   }
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const open = menus.find((m) => m.open);
+    if (!open) return;
+    e.preventDefault();
+    open.open = false;
+    const summary = open.querySelector("summary");
+    if (summary) summary.focus();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    for (const m of menus) if (m.open && !m.contains(e.target)) m.open = false;
+  });
   const skip = document.querySelector(".skip-link");
   if (skip) skip.addEventListener("click", (e) => {
     const pane = $("pane");

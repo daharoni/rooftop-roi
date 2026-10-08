@@ -37,16 +37,30 @@
       <span class="bar" id="status-bar"><i></i></span>
     </div>
     <div class="topbar-right">
-      <a class="feedback-link" id="link-feedback" href="https://github.com/daharoni/rooftop-roi/issues" target="_blank" rel="noopener">Feedback</a>
-      <button class="btn" id="btn-household" type="button">Change household</button>
-      <button class="btn btn-primary" id="btn-share" type="button" title="Copy a link that reproduces every setting on this page">Share link</button>
-      <button class="btn" id="btn-copy" type="button">Copy summary</button>
-      <details class="data-actions">
-        <summary class="btn">Data &amp; settings</summary>
-        <div class="data-actions-menu">
-          <p>Manage what stays on this device.</p>
+      <details class="menu">
+        <summary class="btn">Household</summary>
+        <div class="menu-body">
+          <p class="menu-note">Manage what stays on this device.</p>
+          <button class="btn" id="btn-household" type="button">Change household</button>
           <button class="btn" id="btn-reset" type="button">Reset system &amp; prices</button>
           <button class="btn btn-danger" id="btn-forget" type="button">Forget my data</button>
+        </div>
+      </details>
+      <details class="menu">
+        <summary class="btn">Share</summary>
+        <div class="menu-body">
+          <button class="menu-item" id="btn-share" type="button" title="Copy a link that reproduces every setting on this page">
+            <span class="menu-label">Copy share link</span>
+            <span class="menu-desc">A link that reproduces every setting. Your meter data is not in it.</span>
+          </button>
+          <button class="menu-item" id="btn-copy" type="button">
+            <span class="menu-label">Copy summary</span>
+            <span class="menu-desc">The verdict and key figures as text.</span>
+          </button>
+          <a class="menu-item" id="link-feedback" href="https://github.com/daharoni/rooftop-roi/issues" target="_blank" rel="noopener">
+            <span class="menu-label">Send feedback</span>
+            <span class="menu-desc">Opens a GitHub issue in a new tab.</span>
+          </a>
         </div>
       </details>
     </div>

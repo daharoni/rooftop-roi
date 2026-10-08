@@ -16,6 +16,14 @@ import { presetOptions } from "./presets.js";
 const mode = (s) => s.fin.financing.mode;
 /** Whole dollars with a thousands separator ("$1,400 /kWh"), for the slider label and aria-valuetext. */
 const dollars = (unit = "") => (v) => "$" + Math.round(Number(v)).toLocaleString("en-US") + unit;
+/** A group summary helpers: the label of the option a select/seg currently holds. */
+const optT = (g, path, s) => {
+  const spec = g.items.find((i) => i.path === path);
+  const v = path.split(".").reduce((o, k) => (o == null ? o : o[k]), s);
+  const o = spec && (spec.opts || []).find((x) => String(x.v) === String(v));
+  return o ? o.t : "";
+};
+const pctText = (x, dp = 1) => (Number(x) * 100).toFixed(dp).replace(/\.?0+$/, "") + "%";
 /** A year-of-life slider reads "year 12", not a bare 12. */
 const yearN = (v) => "year " + Math.round(Number(v));
 
@@ -50,7 +58,7 @@ export const item = {
 };
 
 export function goal(ctx, open = true) {
-  return { group: "What counts as a win", open, items: [
+  return { group: "What counts as a win", open, summary: (s, g) => optT(g, "ui.objective", s), items: [
     // Objective and basis change how the cached grid is priced; weather changes the simulation.
     { path: "ui.objective", kind: "select", label: "Optimise for", opts: OBJECTIVE_OPTS, reason: "finance",
       footnote: (s) => (ctx.objective && ctx.objective !== s.ui.objective
@@ -72,7 +80,8 @@ export function price(ctx, open = true) {
       ? `Effective after incentives: $${(s.fin.costPerW * (1 - d)).toFixed(2)}/W`
       : `Effective after incentives: $${Math.round(s.fin.costPerKwh * (1 - d))}/kWh`;
   };
-  return { group: "Price", open, items: [
+  return { group: "Price", open,
+    summary: (s) => `$${Number(s.fin.costPerW).toFixed(2)}/W · ${dollars("/kWh")(s.fin.costPerKwh)}`, items: [
     { path: "fin.costPerW", kind: "range", label: "Solar, installed", min: 0.5, max: 6, step: 0.05, money: 2, unit: "/W",
       footnote: (s) => effective(s, "w") },
     { path: "fin.costPerKwh", kind: "range", label: "Storage, installed", min: 200, max: 2000, step: 25, money: 0, fmt: dollars("/kWh"), unit: "/kWh",
@@ -85,7 +94,13 @@ export function price(ctx, open = true) {
 }
 
 export function financing(open = true) {
-  return { group: "How it is paid for", open, items: [
+  return { group: "How it is paid for", open,
+    summary: (s) => {
+      const f = s.fin.financing;
+      if (f.mode === "loan") return `Loan ${pctText(f.loan.apr, 2)} · ${f.loan.termYears} yr`;
+      if (f.mode === "lease") return `Lease ${dollars("/mo")(f.lease.monthly)} · ${f.lease.termYears} yr`;
+      return "Cash";
+    }, items: [
     { path: "fin.financing.mode", kind: "seg", label: "Financing", opts: [
       { v: "cash", t: "Cash" }, { v: "loan", t: "Loan" }, { v: "lease", t: "Lease / PPA" }] },
     { path: "fin.financing.loan.sharePct", kind: "range", label: "Share financed", min: 0, max: 1, step: 0.05, pct: 0,
@@ -111,7 +126,15 @@ export function financing(open = true) {
 }
 
 export function incentives(open = false) {
-  return { group: "Incentives", open, items: [
+  return { group: "Incentives", open,
+    summary: (s) => {
+      const parts = [];
+      if (s.fin.incentiveMode === "discount") parts.push(`${pctText(s.fin.discountPct, 0)} discount`);
+      else if (s.fin.incentiveMode === "vendor") parts.push(`${pctText(s.fin.passThroughPct, 0)} vendor credit`);
+      if (s.fin.taxCreditPct > 0) parts.push(`${pctText(s.fin.taxCreditPct, 0)} credit`);
+      if (s.fin.sgipPerKwh > 0) parts.push(`${dollars("/kWh")(s.fin.sgipPerKwh)} storage`);
+      return parts.length ? parts.join(" · ") : "None";
+    }, items: [
     { path: "fin.incentiveMode", kind: "select", label: "Incentive treatment", opts: [
       { v: "none", t: "None" },
       { v: "discount", t: "Direct discount off price" },
@@ -139,6 +162,7 @@ export function incentives(open = false) {
 export function existingSolar(open = false) {
   const thisYear = new Date().getFullYear();
   return { group: "Your existing solar", open,
+    summary: (s, g) => [s.existing.kwDc ? `${s.existing.kwDc} kW` : "", optT(g, "existing.nem", s)].filter(Boolean).join(" · "),
     show: (s) => !!s.existing && s.existing.nem !== "none" && Number(s.existing.kwDc) > 0,
     items: [
       { path: "existing.kwDc", kind: "number", label: "Array size, kW DC", min: 0.5, max: 50, step: 0.1 },
@@ -159,7 +183,8 @@ export function existingSolar(open = false) {
 }
 
 export function hardware(open = false) {
-  return { group: "Hardware", open, items: [
+  return { group: "Hardware", open,
+    summary: (s) => `${s.system.panelW} W · ${s.system.battKWh} kWh`, items: [
     { path: "system.battPreset", kind: "select", label: "Battery product", reason: "sim", opts: presetOptions(),
       note: "Spec-sheet figures, approximate. Picking one fills the three sliders below; moving a slider turns this back to Custom." },
     item.panelW(),
@@ -177,7 +202,7 @@ export function hardware(open = false) {
 }
 
 export function dispatch(open = false) {
-  return { group: "Battery dispatch", open, items: [
+  return { group: "Battery dispatch", open, summary: (s, g) => optT(g, "system.strategy", s), items: [
     { path: "system.strategy", kind: "select", label: "Battery strategy", opts: [
       { v: "self_consumption", t: "Self-consumption" },
       { v: "tou_arbitrage", t: "Time-of-use arbitrage" },
@@ -199,7 +224,8 @@ export function dispatch(open = false) {
 }
 
 export function search(open = false) {
-  return { group: "Search space", open, items: [
+  return { group: "Search space", open,
+    summary: (s) => `up to ${s.system.maxPanels} panels · ${s.system.maxBatteries} batteries`, items: [
     { ...item.maxPanels(),
       footnote: (s) => {
         const cap = s.roof.planes.reduce((a, p) => a + p.maxPanels, 0);
@@ -215,7 +241,8 @@ export function search(open = false) {
 }
 
 export function household(open = false) {
-  return { group: "Household", open, items: [
+  return { group: "Household", open,
+    summary: (s) => `${Math.round(s.baseLoadScale * 100)}% of today's load`, items: [
     { ...item.baseLoadScale(),
       note: "Scales the household load left after the flexible loads are taken out — a bigger family, "
         + "a heat pump swap, a lighter year." },
@@ -255,7 +282,8 @@ export const futureTitle = (years) => `The next ${years} years`;
 
 export function future(ctx, open = false, state = null) {
   const years = state && state.fin && Number.isFinite(state.fin.horizon) ? state.fin.horizon : 25;
-  return { group: futureTitle(years), open, items: [
+  return { group: futureTitle(years), open,
+    summary: (s) => `${(s.fin.investReturn * 100).toFixed(1)}% invested · ${(s.fin.escalation * 100).toFixed(1)}%/yr rates`, items: [
     { path: "fin.horizon", kind: "range", label: "Analysis horizon", min: 10, max: 40, step: 1, unit: " yr" },
     { path: "fin.investReturn", kind: "range", label: "Return if invested instead", min: 0, max: 0.15, step: 0.005, pct: 1, unit: "/yr" },
     { path: "fin.escalation", kind: "range", label: "Utility rate escalation", min: 0, max: 0.1, step: 0.005, pct: 1, unit: "/yr",
@@ -268,7 +296,8 @@ export function future(ctx, open = false, state = null) {
 }
 
 export function wear(open = false) {
-  return { group: "Wear and tear", open, items: [
+  return { group: "Wear and tear", open,
+    summary: (s) => `battery year ${s.fin.battReplYear} · ${dollars("/yr")(s.fin.omPerYear)} O&M`, items: [
     { path: "fin.panelDeg", kind: "range", label: "Panel degradation", min: 0, max: 0.015, step: 0.001, pct: 2, unit: "/yr" },
     { path: "fin.battDeg", kind: "range", label: "Battery degradation", min: 0, max: 0.05, step: 0.002, pct: 1, unit: "/yr" },
     { path: "fin.battReplYear", kind: "range", label: "Replace the battery in year", min: 10, max: 30, step: 1, fmt: yearN },
@@ -284,7 +313,7 @@ export function wear(open = false) {
 }
 
 export function replay(open = true) {
-  return { group: "Check it against a paper bill", open, items: [
+  return { group: "Check it against a paper bill", open, summary: () => "", items: [
     { path: "ui.replayStart", kind: "date", label: "Billing period starts" },
     { path: "ui.replayEnd", kind: "date", label: "Billing period ends" },
     { path: "ui.replayActual", kind: "number", label: "Total new charges, $", min: 0, step: 0.01 },

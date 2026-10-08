@@ -44,20 +44,12 @@ export function renderLanding(root, handlers) {
       el("p.eyebrow", { text: "Your roof. Your money. Your call." }),
       el("h1.lede", {}, ["A sunny roof. ", el("em", { text: "A sound investment?" })]),
       el("p.landing-sub", { text: "Find out whether solar and a battery earn their keep. Run your home's electricity use hour by hour, check an installer's quote, and compare the cost with investing the same money." }),
-      el("div.hero-actions", {}, [
-        el("a.btn.btn-primary.btn-lg", { href: "#start", text: "Use my home’s numbers", on: { click: (e) => {
-          e.preventDefault();
-          const start = $("start");
-          start.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-          start.focus({ preventScroll: true });
-        } } }),
-        el("button.btn.btn-lg", { type: "button", text: "Explore a demo →", on: { click: () => handlers.onDemo() } }),
-      ]),
-      el("p.hero-trust", { text: "Free to use · No account · Your meter file stays on this device" }),
-      el("p.hero-coverage", { text: "Built for SCE, PG&E and SDG&E households." }),
     ]),
-    heroFigure(),
+    heroFigure(handlers),
   ]));
+  root.appendChild(el("ul.ledger", { "aria-label": "At a glance" }, [
+    "Stays on this device", "No account", "Open source", "SCE, PG&E, SDG&E",
+  ].map((t) => el("li", { text: t }))));
   root.appendChild(el("div.landing-grid", {}, [startPanel(handlers), privacyPanel()]));
 
   root.appendChild(pipeline());
@@ -86,8 +78,12 @@ export function renderLanding(root, handlers) {
 
 /* ------------------------------------------------------------------ hero */
 
-function heroFigure() {
-  const W = 760, H = 220, ML = 62, MR = 14, MT = 12, MB = 26;
+function heroFigure(handlers) {
+  // The chart is drawn at the size it is shown (about 300px tall on desktop,
+  // 200px on a phone) so its type is never scaled down with the page.
+  const vw = window.innerWidth || 1200;
+  const [W, H] = vw <= 600 ? [360, 210] : vw < 1000 ? [720, 280] : [1120, 300];
+  const ML = 62, MR = 14, MT = 12, MB = 26;
   const plotW = W - ML - MR, plotH = H - MT - MB;
   const yMax = 4.5;
   const x = (h) => ML + (h / 23) * plotW;
@@ -136,13 +132,29 @@ function heroFigure() {
     t.textContent = text;
     node.appendChild(t);
   };
-  tag("What the roof makes", 10.5, 4.42, "var(--ink-2)");
-  tag("What the house uses", 4.6, 3.62, "var(--ink)");
-  tag("evening peak, no sun", 18.5, 4.42, "var(--ink-2)");
+  const phone = W <= 400;  // shorter labels so the three never collide on a phone
+  tag(phone ? "Roof makes" : "What the roof makes", 10.5, 4.42, "var(--ink-2)");
+  tag(phone ? "House uses" : "What the house uses", 4.6, 3.62, "var(--ink)");
+  tag(phone ? "evening, no sun" : "evening peak, no sun", phone ? 19.6 : 18.5, 4.42, "var(--ink-2)");
+
+  // The actions sit under the evening gap, right-aligned to the figure.
+  const actions = el("div.hero-actions", {}, [
+    el("p.gap-caption", { text: "What is this gap worth?" }),
+    el("div.hero-buttons", {}, [
+      el("a.btn.btn-primary.btn-lg", { href: "#start", text: "Use my home’s numbers", on: { click: (e) => {
+        e.preventDefault();
+        const start = $("start");
+        start.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        start.focus({ preventScroll: true });
+      } } }),
+      el("button.btn.btn-lg", { type: "button", text: "Explore a demo →", on: { click: () => handlers.onDemo() } }),
+    ]),
+  ]);
 
   return el("figure.hero-figure-wrap", {}, [
-    el("div.figure-heading", {}, [el("span.eyebrow", { text: "Field note / 01" }), el("h2", { text: "The sun keeps different hours." })]),
+    el("p.figure-marker", {}, [el("span.eyebrow", { text: "Field note / 01" })]),
     node,
+    actions,
     el("figcaption.figcap", {
       text: "A summer weekday at the demo home. A modeled 6 kW roof makes most of its power at midday; the home needs more in the evening. A battery can bridge the gap. The question is what that gap is worth.",
     }),
@@ -294,7 +306,7 @@ function utilityGuide() {
 /* ---------------------------------------------------------------- privacy */
 
 function privacyPanel() {
-  return el("section.panel", {}, [
+  return el("section.privacy-note", {}, [
     el("div.privacy", {}, [
       el("p.eyebrow", { text: "A calculator, not a sales pitch" }),
       el("h2.privacy-claim", { text: "Your meter readings stay yours." }),
@@ -320,38 +332,22 @@ function privacyPanel() {
 /* --------------------------------------------------------------- pipeline */
 
 const STEPS = [
-  { title: "Your meter file", body: "Green Button XML or CSV, parsed in this browser into one hourly series.", glyph: "file" },
-  { title: "Flexible loads", body: "The detector looks for a car charger and a pool pump inside the whole-house total. Anything it finds stays at the hours it was recorded until you choose to move it.", glyph: "pulse" },
-  { title: "Your roof", body: "Each face gets a tilt, a direction and eleven years of real sunlight.", glyph: "roof" },
-  { title: "8,760 hours", body: "Every hour dispatched and billed under Net Billing, for every system size.", glyph: "grid" },
-  { title: "Money", body: "Savings against the same cash in the market: NPV, IRR, payback, wealth.", glyph: "money" },
+  { title: "Your meter file", body: "Green Button XML or CSV, parsed in this browser into one hourly series." },
+  { title: "Flexible loads", body: "The detector looks for a car charger and a pool pump inside the whole-house total. Anything it finds stays at the hours it was recorded until you choose to move it." },
+  { title: "Your roof", body: "Each face gets a tilt, a direction and eleven years of real sunlight." },
+  { title: "8,760 hours", body: "Every hour dispatched and billed under Net Billing, for every system size." },
+  { title: "Money", body: "Savings against the same cash in the market: NPV, IRR, payback, wealth." },
 ];
 
 function pipeline() {
   return el("section.pipeline", {}, [
     el("h2", { text: "What happens after you drop the file" }),
     el("p.panel-sub", { text: "The calculations run here. Weather loads for your location first; after that, explore at your own pace." }),
-    el("ol.pipe", {}, STEPS.map((s, i) => el("li.pipe-step", {}, [
-      el("span.pipe-glyph", {}, [glyph(s.glyph)]),
+    el("ol.pipe", {}, STEPS.map((s) => el("li.pipe-step", {}, [
       el("strong", { text: s.title }),
       el("span.pipe-body", { text: s.body }),
-      i < STEPS.length - 1 ? el("span.pipe-arrow", { "aria-hidden": "true", text: "→" }) : null,
     ]))),
   ]);
-}
-
-function glyph(kind) {
-  const node = svg("svg", { viewBox: "0 0 24 24", width: 20, height: 20, fill: "none",
-    stroke: "currentColor", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
-  const paths = {
-    file: ["M6 3h8l4 4v14H6z", "M14 3v4h4"],
-    pulse: ["M2 13h4l3-8 4 16 3-8h6"],
-    roof: ["M3 12 12 4l9 8", "M6 12v8h12v-8"],
-    grid: ["M4 4h16v16H4z", "M4 10h16", "M4 16h16", "M10 4v16", "M16 4v16"],
-    money: ["M12 3v18", "M16.5 7.5c0-1.7-2-2.5-4.5-2.5s-4.5.9-4.5 2.8S9.5 11 12 11.5s4.8 1.2 4.8 3.3S14.5 19 12 19s-4.5-.9-4.5-2.6"],
-  }[kind] || [];
-  for (const d of paths) node.appendChild(svg("path", { d }));
-  return node;
 }
 
 /**

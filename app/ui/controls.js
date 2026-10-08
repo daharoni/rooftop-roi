@@ -17,7 +17,7 @@
 
 import { el, clear } from "./dom.js";
 import { fmtNum } from "./format.js";
-import { getPath } from "../state.js";
+import { getPath, DEFAULTS } from "../state.js";
 
 /** The cost class a control's path implies, unless its spec names another. */
 export function defaultReason(path) {
@@ -52,6 +52,46 @@ export function clampNumber(spec, raw) {
   return n;
 }
 
+/** A visible item's current value as short text: option label, switch label, or formatted number. */
+export function itemSummary(spec, v) {
+  if (v === null || v === undefined || v === "") return "";
+  if (spec.kind === "select" || spec.kind === "seg") {
+    const o = (spec.opts || []).find((x) => String(x.v) === String(v));
+    return o ? o.t : "";
+  }
+  if (spec.kind === "check") return v ? spec.label : "";
+  if (spec.kind === "button") return "";
+  if (spec.kind === "text" || spec.kind === "date") return String(v);
+  return formatValue(spec, v);
+}
+
+/** The text on a closed group's summary row: its own `summary(state, group)` or the first two visible values. */
+export function groupSummary(g, state) {
+  if (typeof g.summary === "function") {
+    try { return String(g.summary(state, g) || ""); } catch { return ""; }
+  }
+  const out = [];
+  for (const spec of g.items) {
+    if (out.length >= 2) break;
+    if (spec.kind === "button" || (spec.show && !spec.show(state))) continue;
+    const t = itemSummary(spec, getPath(state, spec.path));
+    if (t) out.push(t);
+  }
+  return out.join(" · ");
+}
+
+// Where a person is (their site, their tariff, their existing array) is not a tweak to the defaults.
+const NOT_A_TWEAK = /^(site|tariff|existing)\./;
+
+/** True when any control in the group holds a value other than the default. */
+export function groupChanged(g, state, defaults = DEFAULTS) {
+  const norm = (x) => (x === undefined || x === null || x === "" ? null : x);
+  return g.items.some((spec) => {
+    if (spec.kind === "button" || NOT_A_TWEAK.test(spec.path)) return false;
+    return JSON.stringify(norm(getPath(state, spec.path))) !== JSON.stringify(norm(getPath(defaults, spec.path)));
+  });
+}
+
 /** Two option lists are the same list if they name the same values in order. */
 function sameOptions(a, b) {
   if (a === b) return true;
@@ -70,6 +110,9 @@ export class ControlRail {
     this.groups = [];
     this.widgets = [];
     this._shown = [];
+    this._groupNodes = [];
+    this._open = new Set();
+    this._seen = new Set();
   }
 
   /** Rebuild the rail from a new group list (called on every tab change). */
@@ -77,12 +120,12 @@ export class ControlRail {
     this.groups = groups || [];
     this.widgets = [];
     this._shown = [];
+    this._groupNodes = [];
     this.state = state;
     clear(this.root);
-    // The rail is an accordion: one group open at a time, so a long list of
-    // knobs never pushes the one being dragged off the bottom of the screen.
-    // The first group marked open starts open; opening another closes it.
-    let opened = false;
+    // Groups open independently, so two can be compared side by side.  Which
+    // are open lives on the rail (not storage) and survives tab rebuilds; a
+    // group is seeded from its open/pinned flag the first time it is seen.
     for (const g of this.groups) {
       // An in-pane group renders its widgets into a host the tab mounted
       // (g.inPane = element id), so the same spec drives the same renderer.
@@ -93,22 +136,23 @@ export class ControlRail {
       }
       const body = el("div.group-body");
       for (const spec of g.items) body.appendChild(this._widget(spec, state));
-      // A pinned group starts open at any width and sits outside the accordion.
-      // Keep the first explicitly-open group available on phones too. The
-      // mobile jump button lands on this rail; leaving every group collapsed
-      // forces an extra discovery tap before the first setting is reachable.
-      const startOpen = g.pinned ? true : g.open !== false && !opened;
-      if (startOpen && !g.pinned) opened = true;
-      const details = el("details.group", { open: startOpen }, [
-        el("summary", { text: g.group }), body,
+      // The key is the first control's path, because a title can change ("The next 25 years").
+      const key = g.items.length ? g.items[0].path : g.group;
+      if (!this._seen.has(key)) {
+        this._seen.add(key);
+        if (g.pinned || g.open !== false) this._open.add(key);
+      }
+      const dot = el("span.group-dot", { hidden: true, title: "Changed from the default" },
+        [el("span.visually-hidden", { text: "changed from default" })]);
+      const sum = el("span.group-sum");
+      const details = el("details.group", { open: g.pinned ? true : this._open.has(key) }, [
+        el("summary", {}, [dot, el("span.group-title", { text: g.group }), sum]), body,
       ]);
       if (g.pinned) details.dataset.pinned = "1";
       details.addEventListener("toggle", () => {
-        if (!details.open || g.pinned) return;
-        for (const other of this.root.querySelectorAll("details.group[open]")) {
-          if (other !== details && !other.dataset.pinned) other.open = false;
-        }
+        if (details.open) this._open.add(key); else this._open.delete(key);
       });
+      this._groupNodes.push({ g, details, dot, sum });
       if (g.show) this._shown.push({ g, details });
       this.root.appendChild(details);
     }
@@ -258,6 +302,11 @@ export class ControlRail {
   refresh(state) {
     this.state = state;
     for (const { g, details } of this._shown) details.hidden = !g.show(state);
+    for (const n of this._groupNodes) {
+      n.dot.hidden = !groupChanged(n.g, state);
+      n.sum.textContent = groupSummary(n.g, state);
+      n.sum.hidden = !n.sum.textContent;
+    }
     for (const w of this.widgets) {
       const spec = w.spec;
       w.wrap.hidden = !!(spec.show && !spec.show(state));
@@ -307,4 +356,4 @@ export class ControlRail {
   }
 }
 
-export default { ControlRail, formatValue, defaultReason, clampNumber };
+export default { ControlRail, itemSummary, groupSummary, groupChanged, formatValue, defaultReason, clampNumber };
