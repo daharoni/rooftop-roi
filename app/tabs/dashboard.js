@@ -3,7 +3,7 @@
  *
  * The rail carries every control on the page in collapsible groups; the pane
  * carries the four things a person actually watches while dragging them: the
- * NPV verdict with its readout, the panel × battery grid, a typical day hour by
+ * NPV verdict with its gauges, the panel × battery grid, a typical day hour by
  * hour, and the money over time.  Beneath those, where the panels went, what
  * flexible load is doing, and the next thing worth trying.
  *
@@ -11,7 +11,7 @@
  * ========================================================================== */
 
 import { el, clear, $, T } from "../ui/dom.js";
-import { card, readout, figureRows, DISCLAIMER } from "../ui/blocks.js";
+import { card, DISCLAIMER } from "../ui/blocks.js";
 import { fmtCompact, fmtMoney, fmtNum, fmtPct, fmtYears, fmtKwh, fmtHour, plural } from "../ui/format.js";
 import { OBJ_LABEL, goodness, plateau, renderHeatmap, sliceFmt } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
@@ -62,7 +62,6 @@ export function mount(pane, state, ctx) {
           el("span.dot"), el("span", { id: "hero-pill-text", text: "waiting for the simulation" }),
         ]),
       ]),
-      el("p.hero-note.hero-caption", { id: "hero-caption" }),
       el("p.hero-band", { id: "hero-band", hidden: true }),
       el("p.hero-why", { id: "hero-why", hidden: true }),
       // What the figures mean is a few paragraphs most readers need once; they fold away
@@ -72,21 +71,25 @@ export function mount(pane, state, ctx) {
         el("div.hero-more-body", {}, [
           el("p.hero-note", { id: "hero-note" }),
           el("p.hero-note", { text: "NPV (the large number) is the estimated value in today’s dollars of the system after its cost, compared with leaving the same cash invested. Above $0 means the roof wins under these assumptions." }),
-          el("p.hero-note", { text: "The readout beside it gives two figures that rank systems: the return a year (IRR) is the system's estimated annualized return on its price, and paying for itself is the first year the modeled savings cover the full cost, including financing." }),
+          el("p.hero-note", { text: "Each gauge beside it is one figure for the selected system. Its bar spans every system the grid priced, better always to the right; the dot is this system and the tick is the optimiser's pick. Hover a cell in the grid to preview it here, click to keep it. The return a year (IRR) is the system's estimated annualized return on its price; paying for itself is the first year the modeled savings cover the full cost, financing included." }),
           el("p.hero-note", { text: "These are estimates, so use the Bills & money tab to see the monthly receipts and the assumptions that move the answer." }),
         ]),
       ]),
     ]),
-    el("div.hero-figures", {}, [
-      readout("readout"),
-      figureRows("figures"),
-      el("p.note.config-line", { id: "config-line" }),
-      // Next steps sit under the figures, where the column has room to spare.
-      el("div.dashboard-next", {}, [
-        el("span.note", { text: "Make this answer yours:" }),
-        ...[["roof", "Check my roof"], ["bills", "See my bills"], ["quote", "Compare a quote"]].map(([id, text]) =>
-          el("button.chip-action", { type: "button", text: text + " →", on: { click: () => ctx.actions.goTab(id) } })),
+    // The instrument: which system this is, six gauges that move as you click
+    // across the grid, and one line on what the array does.
+    el("div.hero-figures", { id: "hero-figures" }, [
+      el("div.sys-head", {}, [
+        el("span.sys-name", { id: "sys-name", text: "—" }),
+        el("span.sys-spec.mono", { id: "sys-spec" }),
+        el("span.tag", { id: "sys-tag", hidden: true }),
+        el("button.btn-link.sys-reset", { id: "sys-reset", type: "button", text: "Back to the optimiser's pick", hidden: true,
+          on: { click: () => ctx.actions.clearOverride() } }),
       ]),
+      el("div.gauges", { id: "gauges" }),
+      el("p.gauge-legend", { text: "Bars span every system priced, better to the right · ● this system · | the optimiser's pick" }),
+      el("p.sys-perf.mono", { id: "config-line" }),
+      el("p.note.sys-note", { id: "sys-note", hidden: true }),
     ]),
   ]));
 
@@ -211,6 +214,13 @@ export function render(state, ctx) {
       objective: ctx.objective || state.ui.objective,
       fin: state.fin,
       onPick: (panels, batteries) => ctx.actions.pickCell(panels, batteries),
+      // Hovering a cell previews it in the band; leaving goes back to the kept one.
+      onHover: (hovered) => {
+        const c = hovered || ctx.selected;
+        if (!c) return;
+        renderVerdict(state, ctx, c);
+        renderFigures(state, ctx, c, !!hovered);
+      },
       cap: cap ? cap.panelsAt150 : null,
     });
   }
@@ -243,21 +253,16 @@ export function render(state, ctx) {
 // ------------------------------------------------------------------ headline
 
 function renderHeadline(state, ctx, cell) {
-  const f = cell.finance || {};
-  const fin = state.fin;
+  renderVerdict(state, ctx, cell);
+  renderFigures(state, ctx, cell, false);
+  renderExplainer(state, ctx, cell);
+}
 
+/** The left column: the number, its colour and the pill.  Pure in the cell, so a hover can preview it. */
+function renderVerdict(state, ctx, cell) {
   const npvNode = $("hero-npv");
   npvNode.textContent = fmtCompact(cell.npv);
   npvNode.style.color = cell.npv >= 0 ? T["good-text"] : T.critical;
-
-  const cap = $("hero-caption");
-  if (cap) {
-    const yrs = fin.horizon + " years";
-    cap.textContent = Math.abs(cell.npv) < 50 ? `a wash against investing the same cash over ${yrs}`
-      : cell.npv > 0 ? `better than investing the same cash over ${yrs}`
-      : `worse than investing the same cash over ${yrs}`;
-  }
-
   const verdict = verdictFor(cell.npv);
   $("hero-pill").className = "verdict-pill " + verdict.pill;
   $("hero-pill-text").textContent = verdict.text;
@@ -269,8 +274,12 @@ function renderHeadline(state, ctx, cell) {
       ? `Adding a battery to your existing ${fmtNum(existing.kwDc, 1)} kW system (${nemLabel(existing.nem)})`
       : "What this system is worth versus leaving the money invested";
   }
+}
 
-  const mode = fin.financing && fin.financing.mode;
+/** The folded explainer, written for the kept cell only. */
+function renderExplainer(state, ctx, cell) {
+  const f = cell.finance || {};
+  const fin = state.fin;
   const extra = f.extraRevenue > 0 ? f.extraRevenue : 0;
   $("hero-note").textContent =
     `Estimated value in today’s dollars from ${fin.horizon} years of bill savings, after system costs, compared with `
@@ -284,60 +293,134 @@ function renderHeadline(state, ctx, cell) {
       ? ` Backup and grid-services value (${fmtMoney(extra)}/yr) is your own valuation, not a bill saving, and `
         + "does not rise with rates."
       : "");
+}
 
-  // The sentence carries the two figures that rank one system against another (both
-  // scale-free, though IRR favours small arrays, which is why NPV above is the verdict).
-  // The rows beneath describe this particular system.  No absolute "wealth at the horizon"
-  // here: it starts from the system's own price, so a dearer system reads richer for that
-  // reason alone.  The money-over-time card shows it, with that caveat.
-  const irr = irrFigure(cell, fin, f);
-  const pay = paybackFigure(cell, fin, f);
-  const ro = $("readout");
-  if (ro) {
-    clear(ro);
-    ro.appendChild(el("p.readout-line", { text: readoutSentence(irr, pay, fin) }));
-    const fine = [irr.d, pay.d].filter(Boolean).join(" · ");
-    ro.appendChild(el("p.readout-fine", { text: fine }));
-  }
-  const list = [
-    { k: "Savings, year 1", v: fmtMoney(cell.firstYearSavings ?? cell.savings),
-      d: (cell.exportRevenue > 0
-        ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
-        : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(cell.bill)}`)
-        + (extra > 0 ? ` + ${fmtMoney(extra)} backup value` : "") },
-    outlayTile(mode, fin, f, cell, ctx),
-    existing
-      ? { k: "System", v: `${fmtNum(existing.kwDc, 1)} kW existing + 0 new`, d: "panel count is fixed" }
-      : { k: "System", v: fmtNum(cell.kwdc, 2) + " kW", d: plural(cell.panels, "panel", "panels") + " @ " + state.system.panelW + " W" },
-    { k: "Storage", v: fmtNum(cell.battKWhTotal, 0) + " kWh", d: cell.batteries + " × " + state.system.battKWh + " kWh usable" },
-    backupTile(cell, f),
-    { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
+/* The six gauges.  `get` reads a cell's value, `fmt` prints it, `delta` prints a
+   difference from the optimiser's pick, `detail` is the tooltip.  Two of them rank
+   systems (return and payback); the rest describe this one.  No absolute "wealth at
+   the horizon": it starts from the system's own price, so a dearer system reads
+   richer for that reason alone; the money-over-time card shows it with that caveat. */
+function metricDefs(state, ctx) {
+  const fin = state.fin;
+  const mode = fin.financing.mode;
+  const signed = (d, dp) => (d > 0 ? "+" : "−") + fmtNum(Math.abs(d), dp);
+  const signedMoney = (d) => (d > 0 ? "+" : "−") + fmtMoney(Math.abs(d));
+  const outlay = mode === "cash"
+    ? { key: "cost", label: "Cash up front", higherBetter: false,
+        get: (c) => (c.finance ? c.finance.netCost : c.netCost),
+        fmt: (v) => fmtMoney(v), delta: signedMoney,
+        detail: (c) => outlayTile(mode, fin, c.finance || {}, c, ctx).d }
+    : { key: "payment", label: mode === "lease" ? "Lease payment" : "Loan payment", higherBetter: false,
+        get: (c) => (c.finance && Number.isFinite(c.finance.monthlyPayment) ? c.finance.monthlyPayment
+          : mode === "lease" ? fin.financing.lease.monthly : null),
+        fmt: (v) => fmtMoney(v) + "/mo", delta: (d) => signedMoney(d) + "/mo",
+        detail: (c) => outlayTile(mode, fin, c.finance || {}, c, ctx).d };
+  return [
+    { key: "payback", label: "Pays for itself", higherBetter: false,
+      get: (c) => (c.payback === null || c.payback === undefined || !Number.isFinite(c.payback) ? null : c.payback),
+      fmt: (v) => (v === null ? "never" : fmtYears(v)), delta: (d) => signed(d, 1) + " yr",
+      detail: (c) => paybackFigure(c, fin, c.finance || {}).d },
+    { key: "irr", label: "Return a year", higherBetter: true,
+      get: (c) => (Number.isFinite(c.projectIrr) ? c.projectIrr : null),
+      fmt: (v) => (v === null ? "none" : fmtPct(v, 1)), delta: (d) => signed(d * 100, 1) + " pts",
+      detail: (c) => { const r = irrFigure(c, fin, c.finance || {}); return r.d || `against ${fmtPct(fin.investReturn, 1)} invested`; } },
+    { key: "savings", label: "Savings, year 1", higherBetter: true,
+      get: (c) => c.firstYearSavings ?? c.savings,
+      fmt: (v) => fmtMoney(v), delta: signedMoney,
+      detail: (c) => (c.exportRevenue > 0
+        ? `${fmtMoney(c.importSavings)} import + ${fmtMoney(c.exportRevenue)} export`
+        : `bill ${fmtMoney(ctx.baselineBill)} → ${fmtMoney(c.bill)}`)
+        + (c.finance && c.finance.extraRevenue > 0 ? ` + ${fmtMoney(c.finance.extraRevenue)} backup value` : "") },
+    outlay,
+    { key: "self", label: "Self-sufficiency", higherBetter: true,
+      get: (c) => c.selfSufficiency, fmt: (v) => fmtPct(v, 0), delta: (d) => signed(d * 100, 0) + " pts",
+      detail: (c) => `${fmtNum(c.importKwh, 0)} kWh still bought` },
+    { key: "backup", label: "Backup power", higherBetter: true,
+      get: (c) => backupHours(c), fmt: (v) => (v === null || v <= 0 ? "none" : fmtHours(v)),
+      delta: (d) => signed(d, Math.abs(d) < 10 ? 1 : 0) + " h",
+      detail: (c) => backupTile(c, c.finance || {}).d },
   ];
-  const host = clear($("figures"));
-  for (const t of list) host.appendChild(figureRow(t));
+}
 
-  const ov = state.system.override;
-  const manual = (typeof ov.batteries === "number" && ov.batteries >= 0) || !!ov.panelsByPlane;
-  const note = $("config-line");
-  clear(note);
-  note.appendChild(el("strong", { text: manual ? "Manual selection." : `Optimiser's pick (${OBJ_LABEL[ctx.objective || state.ui.objective]}).` }));
-  note.appendChild(document.createTextNode(
-    (existing ? " The panel count is fixed at your existing system; only the battery changes." : "")
-    + ` Produces ${fmtNum(cell.pvKwh, 0)} kWh/yr, keeps ${fmtPct(cell.solarFraction, 0)} of it on site, exports `
-    + `${fmtNum(cell.exportKwh, 0)} kWh, cycles the pack ${fmtNum(cell.cycles, 0)}×/yr.`
-    // LCOE divides new hardware by the whole array's output, so it means nothing when
-    // the array was already there.
-    + (ctx.existingMode ? "" : ` LCOE ${fmtMoney(cell.lcoe, 3)}/kWh.`)
-    + (ctx.detail && ctx.detail.forfeitedCredit > 1
-      ? ` Note: ${fmtMoney(ctx.detail.forfeitedCredit)}/yr of export credit never gets used and is written off at `
-        + "true-up — the tariff will not pay for production beyond what this house can absorb."
-      : "")));
-  if (manual) {
-    note.appendChild(document.createTextNode(" "));
-    note.appendChild(el("button.chip-action", { type: "button", text: "Back to the optimiser's pick",
-      style: "font-size:11px;padding:2px 9px", on: { click: () => ctx.actions.clearOverride() } }));
+// Last printed value per gauge, so a change can flash and a repeat cannot.
+const lastGauge = new Map();
+
+/** The right column: which system, six gauges against the whole grid, one line on the array. */
+function renderFigures(state, ctx, cell, preview) {
+  const host = $("gauges");
+  if (!host) return;
+  const priced = ctx.priced || {};
+  const best = priced.best || null;
+  const pool = (priced.cells || []).filter((c) => !(c.panels === 0 && c.batteries === 0));
+  const existing = ctx.existingMode || null;
+  const isBest = !!best && cell.panels === best.panels && cell.batteries === best.batteries;
+
+  // Which system.
+  $("sys-name").textContent = existing
+    ? `Your ${fmtNum(existing.kwDc, 1)} kW array · ${plural(cell.batteries, "battery", "batteries")} added`
+    : `${plural(cell.panels, "panel", "panels")} · ${plural(cell.batteries, "battery", "batteries")}`;
+  $("sys-spec").textContent = `${fmtNum(cell.kwdc, 2)} kW · ${fmtNum(cell.battKWhTotal, 0)} kWh`;
+  const tag = $("sys-tag");
+  tag.hidden = false;
+  tag.className = "tag " + (preview ? "tag-warn" : isBest ? "tag-good" : "");
+  tag.textContent = preview ? "preview" : isBest ? `optimiser's pick · ${OBJ_LABEL[ctx.objective || state.ui.objective]}` : "your pick";
+  $("sys-reset").hidden = preview || isBest;
+  $("hero-figures").dataset.preview = preview ? "1" : "";
+
+  // The gauges.
+  clear(host);
+  for (const m of metricDefs(state, ctx)) {
+    const v = m.get(cell);
+    const vals = pool.map(m.get).filter((x) => x !== null && Number.isFinite(x));
+    const lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals) : 1;
+    const pos = (x) => {
+      if (x === null) return 0;                 // a missing value is the worst there is
+      let t = hi > lo ? (x - lo) / (hi - lo) : 0.5;
+      if (!m.higherBetter) t = 1 - t;
+      return Math.max(0, Math.min(1, t));
+    };
+    const bv = best ? m.get(best) : null;
+    const text = m.fmt(v);
+    const d = v !== null && bv !== null && !isBest ? v - bv : null;
+    const dir = d === null ? null : Math.abs(d) < 1e-9 ? "same" : (d > 0) === m.higherBetter ? "up" : "down";
+    const node = el("div.gauge", { "data-key": m.key, title: m.detail(cell) || "" }, [
+      el("span.gauge-k", { text: m.label }),
+      el("span.gauge-v.num", { text }),
+      el("span.range", { "aria-hidden": "true" }, [
+        bv !== null && !isBest ? el("i.range-best", { style: `left:${(pos(bv) * 100).toFixed(1)}%` }) : null,
+        el("i.range-mark", { style: `left:${(pos(v) * 100).toFixed(1)}%` }),
+      ]),
+      el("span.gauge-d" + (dir ? "." + dir : ""), {
+        text: d === null ? (isBest ? "" : "") : dir === "same" ? "same as the pick" : m.delta(d) + " vs pick",
+      }),
+    ]);
+    const prev = lastGauge.get(m.key);
+    if (prev !== undefined && prev !== text) node.classList.add("changed");
+    lastGauge.set(m.key, text);
+    host.appendChild(node);
+  }
+
+  // What the array does, in one line.
+  $("config-line").textContent =
+    `Makes ${fmtNum(cell.pvKwh, 0)} kWh/yr · ${fmtPct(cell.solarFraction, 0)} used at home · exports ${fmtNum(cell.exportKwh, 0)} kWh`
+    + (existing ? "" : ` · LCOE ${fmtMoney(cell.lcoe, 3)}/kWh`);
+  const note = $("sys-note");
+  const forfeited = !preview && ctx.detail && ctx.detail.forfeitedCredit > 1 ? ctx.detail.forfeitedCredit : 0;
+  note.hidden = !forfeited;
+  if (forfeited) {
+    note.textContent = `${fmtMoney(forfeited)}/yr of export credit never gets used and is written off at true-up: `
+      + "the tariff will not pay for production beyond what this house can absorb.";
   }
 }
+
+/** Hours a full pack carries the house at its average base draw; null without a pack or a load. */
+function backupHours(cell) {
+  const kwh = cell.battKWhTotal || 0;
+  const perDay = (cell.baseLoadKwh || cell.loadKwh || 0) / 365;
+  if (kwh <= 0 || !perDay) return kwh <= 0 ? null : null;
+  return kwh / perDay * 24;
+}
+function fmtHours(h) { return h < 48 ? fmtNum(h, h < 10 ? 1 : 0) + " h" : fmtNum(h / 24, 1) + " days"; }
 
 /**
  * How long a full pack carries the house in an outage, at the house's average
@@ -652,26 +735,6 @@ function paybackFigure(cell, fin, f) {
     return { years, d: `incl. ${fmtMoney(f.totalInterest)} interest · loan gone yr ${f.loanPaidOffYear} · ${cashPos}` };
   }
   return { years, d: `${fin.financing.lease.termYears}-yr lease · ${cashPos}` };
-}
-
-/** The one serif sentence: the two ranking figures, or plainly why one is missing. */
-function readoutSentence(irr, pay, fin) {
-  const first = pay.years === null
-    ? `Does not pay for itself within ${fin.horizon} years`
-    : `Pays for itself in ${fmtYears(pay.years)}`;
-  const against = irr.loanApr !== null ? `, against a loan costing ${fmtPct(irr.loanApr, 2)}`
-    : `, against ${fmtPct(fin.investReturn, 1)} invested`;
-  if (irr.value === null) return `${first}; no rate of return (${irr.d}).`;
-  const sep = pay.years === null ? "; returns" : " and returns";
-  return `${first}${sep} ${fmtPct(irr.value, 1)} a year on the cash${against}.`;
-}
-
-/** One "label  value  detail" row of the marginalia list. */
-function figureRow({ k, v, d }) {
-  return el("div.fig-row", {}, [
-    el("dt", { text: k }),
-    el("dd", {}, [el("span.fig-v.num", { text: v }), el("span.fig-d", { text: d || "" })]),
-  ]);
 }
 
 // ------------------------------------------------------------ flexible loads
