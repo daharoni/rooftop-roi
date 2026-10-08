@@ -3,7 +3,7 @@
  *
  * The rail carries every control on the page in collapsible groups; the pane
  * carries the four things a person actually watches while dragging them: the
- * NPV verdict with its tiles, the panel × battery grid, a typical day hour by
+ * NPV verdict with its readout, the panel × battery grid, a typical day hour by
  * hour, and the money over time.  Beneath those, where the panels went, what
  * flexible load is doing, and the next thing worth trying.
  *
@@ -11,7 +11,7 @@
  * ========================================================================== */
 
 import { el, clear, $, T } from "../ui/dom.js";
-import { card, tiles, tile, DISCLAIMER } from "../ui/blocks.js";
+import { card, readout, figureRows, DISCLAIMER } from "../ui/blocks.js";
 import { fmtCompact, fmtMoney, fmtNum, fmtPct, fmtYears, fmtKwh, fmtHour, plural } from "../ui/format.js";
 import { OBJ_LABEL, goodness, plateau, renderHeatmap, sliceFmt } from "../charts/heatmap.js";
 import { renderTypicalDay } from "../charts/day.js";
@@ -66,19 +66,20 @@ export function mount(pane, state, ctx) {
       el("p.hero-band", { id: "hero-band", hidden: true }),
       el("p.hero-why", { id: "hero-why", hidden: true }),
       // What the figures mean is a few paragraphs most readers need once; they fold away
-      // so the band is no taller than the tiles beside it.
+      // so the band stays short.
       el("details.data-view.hero-more", {}, [
         el("summary", { text: "What do these numbers mean?" }),
         el("div.hero-more-body", {}, [
           el("p.hero-note", { id: "hero-note" }),
           el("p.hero-note", { text: "NPV (the large number) is the estimated value in today’s dollars of the system after its cost, compared with leaving the same cash invested. Above $0 means the roof wins under these assumptions." }),
-          el("p.hero-note", { text: "IRR is the system's estimated annualized return. Pays for itself is the first year the modeled savings cover the full cost, including financing." }),
+          el("p.hero-note", { text: "The readout beside it gives two figures that rank systems: the return a year (IRR) is the system's estimated annualized return on its price, and paying for itself is the first year the modeled savings cover the full cost, including financing." }),
           el("p.hero-note", { text: "These are estimates, so use the Bills & money tab to see the monthly receipts and the assumptions that move the answer." }),
         ]),
       ]),
     ]),
     el("div.hero-figures", {}, [
-      tiles("tiles"),
+      readout("readout"),
+      figureRows("figures"),
       el("p.note.config-line", { id: "config-line" }),
       // Next steps sit under the figures, where the column has room to spare.
       el("div.dashboard-next", {}, [
@@ -284,15 +285,21 @@ function renderHeadline(state, ctx, cell) {
         + "does not rise with rates."
       : "");
 
-  // First row: the figures that rank one system against another (the accented two
-  // are scale-free, so they compare across systems directly - though IRR favours
-  // small arrays, which is why NPV above is the verdict).  Second row: what this
-  // particular system is.  No absolute "wealth at the horizon" here: it starts from
-  // the system's own price, so a dearer system reads richer for that reason alone.
-  // The money-over-time card shows it, with that caveat, for the chosen system.
+  // The sentence carries the two figures that rank one system against another (both
+  // scale-free, though IRR favours small arrays, which is why NPV above is the verdict).
+  // The rows beneath describe this particular system.  No absolute "wealth at the horizon"
+  // here: it starts from the system's own price, so a dearer system reads richer for that
+  // reason alone.  The money-over-time card shows it, with that caveat.
+  const irr = irrFigure(cell, fin, f);
+  const pay = paybackFigure(cell, fin, f);
+  const ro = $("readout");
+  if (ro) {
+    clear(ro);
+    ro.appendChild(el("p.readout-line", { text: readoutSentence(irr, pay, fin) }));
+    const fine = [irr.d, pay.d].filter(Boolean).join(" · ");
+    ro.appendChild(el("p.readout-fine", { text: fine }));
+  }
   const list = [
-    Object.assign(irrTile(cell, fin, f), { key: true }),
-    Object.assign(paybackTile(cell, fin, f), { key: true }),
     { k: "Savings, year 1", v: fmtMoney(cell.firstYearSavings ?? cell.savings),
       d: (cell.exportRevenue > 0
         ? `${fmtMoney(cell.importSavings)} import + ${fmtMoney(cell.exportRevenue)} export`
@@ -306,8 +313,8 @@ function renderHeadline(state, ctx, cell) {
     backupTile(cell, f),
     { k: "Self-sufficiency", v: fmtPct(cell.selfSufficiency, 0), d: fmtNum(cell.importKwh, 0) + " kWh still bought" },
   ];
-  const host = clear($("tiles"));
-  for (const t of list) host.appendChild(tile(t));
+  const host = clear($("figures"));
+  for (const t of list) host.appendChild(figureRow(t));
 
   const ov = state.system.override;
   const manual = (typeof ov.batteries === "number" && ov.batteries >= 0) || !!ov.panelsByPlane;
@@ -609,26 +616,25 @@ const IRR_REASON = {
  * levered IRR on the household's own cash flows is undefined with nothing down
  * and inflated with a little down, so it is not shown as a tile.
  */
-function irrTile(cell, fin, f) {
+function irrFigure(cell, fin, f) {
   const v = cell.projectIrr;
   const mode = fin.financing.mode;
   // No IRR (null, undefined, NaN): never print a number.  core/finance says why
   // in `irrReason`, a short code about the levered `irr`; for cash the levered and
-  // project returns are the same cash flow, so its reason stands for this tile.
+  // project returns are the same cash flow, so its reason stands for this figure.
   // Under a loan or lease "no money down" is about the household's cash, not the
   // system, so only a `projectIrrReason` (if finance ever adds one) is used there.
   if (typeof v !== "number" || !Number.isFinite(v)) {
     const code = f.projectIrrReason || (mode === "cash" ? f.irrReason || cell.irrReason : null);
     const why = !(f.netCost > 0) && mode !== "lease" ? "nothing is paid for the system, so no rate of return"
       : IRR_REASON[code] || (typeof code === "string" && code) || "savings never repay the price";
-    return { k: mode === "cash" ? "IRR" : "IRR, system itself", v: "—", d: why };
+    return { value: null, d: why, loanApr: null };
   }
   if (mode === "loan") {
     const apr = fin.financing.loan.apr;
-    return { k: "IRR, system itself", v: fmtPct(v, 1),
-      d: `loan APR ${fmtPct(apr, 2)} · earns ${v > apr ? "more" : "less"} than the loan costs` };
+    return { value: v, loanApr: apr, d: `loan APR ${fmtPct(apr, 2)} · earns ${v > apr ? "more" : "less"} than the loan costs` };
   }
-  return { k: mode === "lease" ? "IRR, system itself" : "IRR", v: fmtPct(v, 1), d: "vs " + fmtPct(fin.investReturn, 1) + " invested" };
+  return { value: v, loanApr: null, d: "" };
 }
 
 /**
@@ -637,16 +643,35 @@ function irrTile(cell, fin, f) {
  * fact that used to masquerade as the payback: when the loan is gone, or that
  * the household is cash-positive from day one.
  */
-function paybackTile(cell, fin, f) {
+function paybackFigure(cell, fin, f) {
   const mode = fin.financing.mode;
-  const v = cell.payback === null || cell.payback === undefined ? "never" : fmtYears(cell.payback);
-  if (mode === "cash") return { k: "Pays for itself", v, d: "discounted " + fmtYears(cell.discountedPayback) };
+  const years = cell.payback === null || cell.payback === undefined ? null : cell.payback;
+  if (mode === "cash") return { years, d: "discounted payback " + fmtYears(cell.discountedPayback) };
   const cashPos = cell.cashFlowPayback === 0 ? "cash-positive from day one" : `cash-positive after ${fmtYears(cell.cashFlowPayback)}`;
   if (mode === "loan") {
-    return { k: "Pays for itself", v,
-      d: `incl. ${fmtMoney(f.totalInterest)} interest · loan gone yr ${f.loanPaidOffYear} · ${cashPos}` };
+    return { years, d: `incl. ${fmtMoney(f.totalInterest)} interest · loan gone yr ${f.loanPaidOffYear} · ${cashPos}` };
   }
-  return { k: "Pays for itself", v, d: `${fin.financing.lease.termYears}-yr lease · ${cashPos}` };
+  return { years, d: `${fin.financing.lease.termYears}-yr lease · ${cashPos}` };
+}
+
+/** The one serif sentence: the two ranking figures, or plainly why one is missing. */
+function readoutSentence(irr, pay, fin) {
+  const first = pay.years === null
+    ? `Does not pay for itself within ${fin.horizon} years`
+    : `Pays for itself in ${fmtYears(pay.years)}`;
+  const against = irr.loanApr !== null ? `, against a loan costing ${fmtPct(irr.loanApr, 2)}`
+    : `, against ${fmtPct(fin.investReturn, 1)} invested`;
+  if (irr.value === null) return `${first}; no rate of return (${irr.d}).`;
+  const sep = pay.years === null ? "; returns" : " and returns";
+  return `${first}${sep} ${fmtPct(irr.value, 1)} a year on the cash${against}.`;
+}
+
+/** One "label  value  detail" row of the marginalia list. */
+function figureRow({ k, v, d }) {
+  return el("div.fig-row", {}, [
+    el("dt", { text: k }),
+    el("dd", {}, [el("span.fig-v.num", { text: v }), el("span.fig-d", { text: d || "" })]),
+  ]);
 }
 
 // ------------------------------------------------------------ flexible loads

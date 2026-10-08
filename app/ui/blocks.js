@@ -25,6 +25,12 @@ export function card({ id, title, tag, sub, body, dataView }) {
   return node;
 }
 
+/** Host for the sentence-led readout in the dashboard's verdict band. */
+export function readout(id) { return el("div.readout", { id }); }
+
+/** Host for the dashboard's label / value / detail rows (a definition list, no boxes). */
+export function figureRows(id) { return el("dl.fig-rows", { id }); }
+
 export function tiles(id) { return el("div.tiles", { id }); }
 
 export function tile({ k, v, d, key }) {
@@ -44,7 +50,7 @@ export function kv(pairs) {
   return node;
 }
 
-export default { card, tiles, tile, kv };
+export default { card, readout, figureRows, tiles, tile, kv };
 
 /**
  * The one disclaimer: under the dashboard, on the landing page and in the
