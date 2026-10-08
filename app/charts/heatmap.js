@@ -90,7 +90,7 @@ export function plateau(priced, objective, fin) {
   };
 }
 
-export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick, cap }) {
+export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick, onHover, cap }) {
   // `cap`, when given, is the panel count at SCE's 150% line; columns beyond it
   // are drawn faded with a rule at the edge, since SCE would refuse them.
   const host = $(hostId);
@@ -135,10 +135,17 @@ export function renderHeatmap({ hostId, priced, selected, objective, fin, onPick
           + (over ? " — above SCE's 150% sizing line" : ""),
         "aria-label": `${plural(p, "panel", "panels")}, ${plural(b, "battery", "batteries")}, NPV ${fmtMoney(cell.npv)}`
           + (isNear ? ", effectively tied with the best" : ""),
-        on: { click: () => onPick && onPick(p, b) },
+        on: {
+          click: () => onPick && onPick(p, b),
+          // Hover or focus previews the cell in the band; leaving the grid restores the kept one.
+          mouseenter: () => onHover && onHover(cell),
+          focus: () => onHover && onHover(cell),
+          blur: () => onHover && onHover(null),
+        },
       }));
     }
   }
+  if (onHover) host.addEventListener("mouseleave", () => onHover(null));
 
   const ramp = $("heat-ramp");
   if (ramp) {

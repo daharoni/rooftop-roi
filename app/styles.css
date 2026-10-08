@@ -514,23 +514,33 @@ details.hero-more { margin-top: 2px; }
 .hero-more-body .hero-note { margin: 0; }
 /* The band's title is a sentence now, so it reads as one, not as a three-line caps label. */
 .hero-verdict > .eyebrow { text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-2); max-width: 32ch; }
-/* The one-line caption under the big number: tight to it, and wide enough to stay one line. */
-.hero-caption { margin-top: 2px; max-width: 60ch; }
-
-/* The band's right column: the two ranking figures as one serif sentence with
-   its small print, then the describing figures as mono marginalia rows. */
-.readout { margin: 0 0 var(--sp-2); }
-.readout-line { margin: 0; font: 400 var(--fs-lg)/1.3 var(--editorial); color: var(--ink); max-width: 38ch; letter-spacing: -0.005em; }
-.readout-fine { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--ink-3); max-width: 60ch; }
-.readout-fine:empty { display: none; }
-/* Two columns of rows on a wide pane, so the band stays as short as the verdict column. */
-.fig-rows { margin: 0; font-family: var(--mono); border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--sp-5); }
-.fig-row { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 0 var(--sp-3); padding: 3px 0; border-bottom: 1px solid var(--border); align-items: baseline; }
-.fig-row dt { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
-.fig-row dd { margin: 0; font-size: var(--fs-xs); line-height: 1.35; color: var(--ink-2); }
-.fig-v { color: var(--ink); font-size: var(--fs-sm); font-weight: 500; font-variant-numeric: tabular-nums; margin-right: var(--sp-2); }
-.fig-d { font-size: var(--fs-xs); color: var(--ink-2); }
-.config-line { margin: var(--sp-2) 0 0; }
+/* The band's right column is an instrument: which system, six gauges that move
+   as you click across the grid, one line on the array.  Each gauge's bar spans
+   every system priced, better always to the right; the dot is this system and
+   the tick is the optimiser's pick. */
+.sys-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-3); }
+.sys-name { font: 500 var(--fs-lg)/1.2 var(--editorial); color: var(--ink); }
+.sys-spec { font-size: var(--fs-xs); color: var(--ink-3); }
+.sys-head .tag { margin-left: 0; }
+.sys-reset { font-size: var(--fs-xs); padding: 0; }
+.gauges { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-4); }
+.gauge { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: var(--sp-1) var(--sp-2) var(--sp-2); margin: 0 calc(var(--sp-2) * -1); border-radius: var(--r-sm); }
+.gauge-k { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gauge-v { font-size: 22px; line-height: 1.1; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.range { position: relative; display: block; height: 4px; margin: 5px 4px 2px; border-radius: 2px; background: var(--grid); }
+.range-mark { position: absolute; top: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); transform: translateX(-50%); }
+.range-best { position: absolute; top: -3px; width: 2px; height: 10px; background: var(--ink-3); transform: translateX(-50%); }
+.gauge-d { font-size: var(--fs-xs); min-height: 1.4em; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gauge-d.up { color: var(--good-text); }
+.gauge-d.down { color: var(--critical); }
+/* A figure that just changed flashes once, so the eye finds what moved. */
+.gauge.changed { animation: gauge-flash .7s ease-out; }
+@keyframes gauge-flash { from { background: color-mix(in srgb, var(--accent) 14%, transparent); } to { background: transparent; } }
+/* While a hovered cell is previewed, the kept system's dot stays where it was by colour alone: the tag says "preview". */
+.hero-figures[data-preview="1"] .range-mark { background: var(--warning); }
+.gauge-legend { margin: var(--sp-2) 0 0; font-size: 11px; color: var(--ink-3); }
+.sys-perf { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--ink-2); }
+.sys-note { margin: var(--sp-1) 0 0; max-width: 70ch; }
 
 .tiles {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
@@ -545,8 +555,6 @@ details.hero-more { margin-top: 2px; }
 .tile.key { box-shadow: inset 3px 0 0 var(--accent); }
 .tile.key .k { color: var(--accent); }
 
-.dashboard-next { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--sp-2); margin-top: 10px; }
-.dashboard-next > .note { margin: 0 var(--sp-1) 0 0; }
 
 .section-jumps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 0 0 var(--sp-1); }
 .section-jumps-label { font-size: var(--fs-xs); color: var(--ink-2); margin-right: var(--sp-1); }
@@ -783,7 +791,7 @@ details.hero-more { margin-top: 2px; }
   .toast { bottom: 72px; max-width: calc(100vw - 32px); text-align: center; }
 
   .row2, .dash-cols, .headline { grid-template-columns: minmax(0, 1fr); }
-  .fig-rows { grid-template-columns: minmax(0, 1fr); }
+  .gauges { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-note, .hero-band, .hero-why { max-width: 70ch; }
 
@@ -814,8 +822,7 @@ details.hero-more { margin-top: 2px; }
   .card { padding: var(--sp-3) 14px; }
   .headline { padding: var(--sp-4); }
   .hero-num { font-size: 34px; }
-  .fig-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .readout-line { max-width: none; }
+  .gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .slices, .tiles.tiles-3 { grid-template-columns: minmax(0, 1fr); }
   .section-jumps-label { flex-basis: 100%; }
 
