@@ -41,7 +41,6 @@ export function renderLanding(root, handlers) {
   ]));
   root.appendChild(el("section.landing-hero", {}, [
     el("div.hero-intro", {}, [
-      el("p.eyebrow", { text: "Your roof. Your money. Your call." }),
       el("h1.lede", {}, ["A sunny roof. ", el("em", { text: "A sound investment?" })]),
       el("p.landing-sub", { text: "Find out whether solar and a battery earn their keep. Run your home's electricity use hour by hour, check an installer's quote, and compare the cost with investing the same money." }),
     ]),
@@ -89,7 +88,7 @@ function heroFigure(handlers) {
   const x = (h) => ML + (h / 23) * plotW;
   const y = (v) => MT + plotH - (v / yMax) * plotH;
 
-  const node = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-labelledby": "hero-fig-title" });
+  const node = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-labelledby": "hero-fig-title", "data-ui": "" });
   node.appendChild(svg("title", { id: "hero-fig-title" }));
   node.lastChild.textContent = "A typical summer weekday: household draw peaks at 5 p.m., while the roof's "
     + "production peaks at noon and is gone by 6 p.m.";
@@ -152,7 +151,6 @@ function heroFigure(handlers) {
   ]);
 
   return el("figure.hero-figure-wrap", {}, [
-    el("p.figure-marker", {}, [el("span.eyebrow", { text: "Field note / 01" })]),
     node,
     actions,
     el("figcaption.figcap", {
@@ -218,7 +216,6 @@ function startPanel(handlers) {
     on: { keydown: (e) => { if (e.key === "Enter") { e.preventDefault(); handlers.onZip(zip.value); } } } });
 
   return el("section.panel.start-panel", { id: "start", tabindex: "-1", "aria-labelledby": "start-title" }, [
-    el("p.eyebrow", { text: "Start with what you have" }),
     el("h2", { id: "start-title", text: "Give your roof some real numbers." }),
     el("p.panel-sub", { text: "Two things: your meter readings (or twelve monthly bills), and where the roof is." }),
     door,
@@ -308,7 +305,6 @@ function utilityGuide() {
 function privacyPanel() {
   return el("section.privacy-note", {}, [
     el("div.privacy", {}, [
-      el("p.eyebrow", { text: "A calculator, not a sales pitch" }),
       el("h2.privacy-claim", { text: "Your meter readings stay yours." }),
       el("p.panel-sub", { text: "Your readings are processed on this device. No account, no upload, no request for your phone number. You can inspect the assumptions and the source code behind the answer." }),
       el("details.privacy-details", {}, [el("summary", { text: "See network requests & local storage" }),
@@ -341,8 +337,10 @@ const STEPS = [
 
 function pipeline() {
   return el("section.pipeline", {}, [
-    el("h2", { text: "What happens after you drop the file" }),
-    el("p.panel-sub", { text: "The calculations run here. Weather loads for your location first; after that, explore at your own pace." }),
+    el("div.pipe-intro", {}, [
+      el("h2", { text: "What happens after you drop the file" }),
+      el("p.panel-sub", { text: "The calculations run here. Weather loads for your location first; after that, explore at your own pace." }),
+    ]),
     el("ol.pipe", {}, STEPS.map((s) => el("li.pipe-step", {}, [
       el("strong", { text: s.title }),
       el("span.pipe-body", { text: s.body }),

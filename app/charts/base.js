@@ -166,7 +166,9 @@ export function legendHTML(targetId, items) {
   clear(node);
   for (const item of items) {
     node.appendChild(el("span.key", {}, [
-      el("span" + (item.line ? ".sw.line" : ".sw"), { style: `background:${item.color}` }),
+      item.dash
+        ? el("span.sw.line.dash", { style: `border-top-color:${item.color}` })
+        : el("span" + (item.line ? ".sw.line" : item.period ? ".sw.band" : ".sw"), { style: `background:${item.color}` }),
       item.label,
     ]));
   }
