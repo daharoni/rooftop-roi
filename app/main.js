@@ -970,7 +970,7 @@ function renderTopBar(s) {
   chip.appendChild(el("span.tag" + (s.ui.demo ? ".tag-warn" : ".tag-good"), {
     text: s.ui.demo ? "Demo household" : "Your household",
   }));
-  chip.appendChild(el("span.mono", { text: bits[0] || "no data" }));
+  chip.appendChild(el("span.num", { text: bits[0] || "no data" }));
   if (bits.length > 1) chip.appendChild(el("span", { text: bits.slice(1).join(" · ") }));
 }
 

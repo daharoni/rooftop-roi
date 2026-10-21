@@ -5,8 +5,10 @@
  * The day chart stacks who served the house (solar / battery / grid) as areas
  * and draws production, export and flexible load as lines over the top: the
  * stack answers "where did my kWh come from", the lines answer "what did the
- * array and the car do", and both share one kWh axis.  The tariff period in
- * force is a ribbon under the axis rather than a second scale.
+ * array and the car do", and both share one kWh axis.  Solar keeps one hue: the
+ * production line and the part of it the house used are the same colour.  The
+ * tariff period in force is a ribbon under the axis, drawn as one price ramp
+ * (pale for cheap, red for on-peak) so it borrows no series colour.
  * ========================================================================== */
 
 import { $, el, clear, T, alpha } from "../ui/dom.js";
@@ -14,22 +16,29 @@ import { fmtNum, fmtPct } from "../ui/format.js";
 import { draw, baseOpts, legendHTML } from "./base.js";
 
 const PERIOD_NAMES = { on: "On-peak", mid: "Mid-peak", off: "Off-peak", super_off: "Super-off-peak" };
-const periodColors = () => ({ on: T.s8, mid: T.s2, off: T.s4, super_off: T.s3 });
+const PERIOD_ORDER = ["on", "mid", "off", "super_off"];
+const periodColors = () => ({ on: T.s8, mid: alpha(T.s8, 0.5), off: alpha(T["ink-3"], 0.35), super_off: alpha(T["ink-3"], 0.15) });
 
 export function renderTypicalDay({ day, schedule, flexLabel }) {
   if (!day || !day.hours) return;
   const hours = day.hours;
   const labels = hours.map((h) => String(h.hour).padStart(2, "0"));
   const pvToLoad = hours.map((h) => Math.min(h.pv || 0, h.load || 0));
+  const fromBattery = hours.map((h) => h.discharge || 0);
+  const fromGrid = hours.map((h) => h.gridImport || 0);
+  // The three sources are stacked by hand (each area fills to the one below), so
+  // the lines drawn over them keep their own values on the same axis.
+  const upToBattery = pvToLoad.map((v, i) => v + fromBattery[i]);
+  const upToGrid = upToBattery.map((v, i) => v + fromGrid[i]);
 
   draw("c-day", {
     type: "line",
     data: {
       labels,
       datasets: [
-        area("Load served by solar", pvToLoad, T.s4),
-        area("by battery", hours.map((h) => h.discharge || 0), T.s3),
-        area("by the grid", hours.map((h) => h.gridImport || 0), T["ink-3"], 0.4),
+        area("Load served by solar", pvToLoad, pvToLoad, T.s2, 0.3, "origin"),
+        area("by battery", upToBattery, fromBattery, T.s3, 0.45, "-1"),
+        area("by the grid", upToGrid, fromGrid, T["ink-3"], 0.3, "-1"),
         line("Solar produced", hours.map((h) => h.pv || 0), T.s2),
         line("Exported", hours.map((h) => h.gridExport || 0), T.s1, [4, 3]),
         line(flexLabel || "Flexible load", hours.map((h) => h.flex ?? h.ev ?? 0), T.s7),
@@ -40,18 +49,21 @@ export function renderTypicalDay({ day, schedule, flexLabel }) {
         y: { stacked: false, beginAtZero: true, ticks: { callback: (v) => v + " kWh" } },
       },
       plugins: {
-        tooltip: { callbacks: { label: (c) => " " + c.dataset.label + ": " + fmtNum(c.parsed.y, 2) + " kWh" } },
+        tooltip: { callbacks: { label: (c) => " " + c.dataset.label + ": " + fmtNum((c.dataset.own || c.dataset.data)[c.dataIndex], 2) + " kWh" } },
       },
     }),
   });
 
+  const cols = periodColors();
+  const periods = schedule ? PERIOD_ORDER.filter((p) => schedule.includes(p)) : [];
   legendHTML("l-day", [
-    { label: "Load served by solar", color: alpha(T.s4, 0.55) },
-    { label: "by battery", color: alpha(T.s3, 0.55) },
-    { label: "by the grid", color: alpha(T["ink-3"], 0.4) },
+    { label: "Load served by solar", color: alpha(T.s2, 0.3) },
+    { label: "by battery", color: alpha(T.s3, 0.45) },
+    { label: "by the grid", color: alpha(T["ink-3"], 0.3) },
     { label: "Solar produced", color: T.s2, line: true },
     { label: "Exported", color: T.s1, line: true },
     { label: flexLabel || "Flexible load", color: T.s7, line: true },
+    ...periods.map((p) => ({ label: PERIOD_NAMES[p], color: cols[p], period: true })),
   ]);
 
   draw("c-soc", {
@@ -60,7 +72,7 @@ export function renderTypicalDay({ day, schedule, flexLabel }) {
       labels,
       datasets: [{
         label: "Battery state of charge", data: hours.map((h) => (h.soc || 0) * 100),
-        borderColor: T.s3, backgroundColor: alpha(T.s3, 0.12), fill: true, borderWidth: 2,
+        borderColor: T.s3, backgroundColor: alpha(T.s3, 0.12), fill: true, borderWidth: 2, tension: 0,
       }],
     },
     options: baseOpts({
@@ -72,7 +84,6 @@ export function renderTypicalDay({ day, schedule, flexLabel }) {
   const ribbon = $("period-ribbon");
   if (ribbon && schedule) {
     clear(ribbon);
-    const cols = periodColors();
     for (const p of schedule) {
       ribbon.appendChild(el("span", {
         title: PERIOD_NAMES[p] || p,
@@ -95,17 +106,19 @@ export function renderTypicalDay({ day, schedule, flexLabel }) {
   ]))));
 }
 
-function area(label, data, color, a = 0.55) {
+/* `data` is the top of the band (cumulative); `own` is this source's share, for the tooltip. */
+function area(label, data, own, color, a, fill) {
   return {
-    label, data, borderColor: "transparent", backgroundColor: alpha(color, a),
-    fill: "origin", stack: "served", borderWidth: 0, pointRadius: 0, tension: 0.2,
+    label, data, own, borderColor: "transparent", backgroundColor: alpha(color, a),
+    fill, borderWidth: 0, pointRadius: 0, tension: 0,
   };
 }
 
+// Straight segments: these are hourly averages, and a curve would invent values between them.
 function line(label, data, color, dash) {
   return {
     label, data, borderColor: color, backgroundColor: "transparent", fill: false,
-    borderWidth: 2, borderDash: dash, pointRadius: 0, tension: 0.2,
+    borderWidth: 2, borderDash: dash, pointRadius: 0, tension: 0,
   };
 }
 

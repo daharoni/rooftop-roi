@@ -48,13 +48,13 @@ export function renderCashflow({ cell, fin }) {
   lineChart("c-cash", years, [
     { label: "System, cash in hand", data: system, color: T.s1, fill: true },
     { label: "System, savings reinvested", data: reinvested, color: T.s3 },
-    { label: "Same cash left in the market", data: market, color: T.s2 },
+    { label: "Same cash left in the market", data: market, color: T["ink-3"], dash: [5, 4] },
   ], { yFmt: fmtCompact, xTitle: "years from install" });
 
   legendHTML("l-cash", [
     { label: "System, cash in hand", color: T.s1, line: true },
     { label: `System, savings reinvested at ${fmtPct(fin.investReturn, 1)}`, color: T.s3, line: true },
-    { label: `The same ${fmtCompact(cashRef)} left in the market`, color: T.s2, line: true },
+    { label: `The same ${fmtCompact(cashRef)} left in the market`, color: T["ink-3"], line: true, dash: true },
   ]);
 
   const table = $("t-cash");

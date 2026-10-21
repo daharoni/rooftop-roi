@@ -54,7 +54,7 @@ export function mount(pane, state, ctx) {
   // The verdict.
   pane.appendChild(el("section.headline", { id: "headline" }, [
     el("div.hero-verdict", {}, [
-      el("span.eyebrow", { id: "hl-title", text: "What this system is worth versus leaving the money invested" }),
+      el("p.hero-title", { id: "hl-title", text: "What this system is worth versus leaving the money invested" }),
       // Number and verdict share a row when they fit, so the column stays short.
       el("div.hero-row", {}, [
         el("div.hero-num.num", { id: "hero-npv", text: "—" }),
@@ -80,15 +80,15 @@ export function mount(pane, state, ctx) {
     // across the grid, and one line on what the array does.
     el("div.hero-figures", { id: "hero-figures" }, [
       el("div.sys-head", {}, [
-        el("span.sys-name", { id: "sys-name", text: "—" }),
-        el("span.sys-spec.mono", { id: "sys-spec" }),
+        el("h1.sys-name", { id: "sys-name", text: "Sizing your system" }),
+        el("span.sys-spec.num", { id: "sys-spec" }),
         el("span.tag", { id: "sys-tag", hidden: true }),
         el("button.btn-link.sys-reset", { id: "sys-reset", type: "button", text: "Back to the optimiser's pick", hidden: true,
           on: { click: () => ctx.actions.clearOverride() } }),
       ]),
       el("div.gauges", { id: "gauges" }),
       el("p.gauge-legend", { text: "Bars span every system priced, better to the right · ● this system · | the optimiser's pick" }),
-      el("p.sys-perf.mono", { id: "config-line" }),
+      el("p.sys-perf.num", { id: "config-line" }),
       el("p.note.sys-note", { id: "sys-note", hidden: true }),
     ]),
   ]));
@@ -133,7 +133,8 @@ export function mount(pane, state, ctx) {
         el("div.chart-box", { style: "height:230px" }, [el("canvas", { id: "c-day" })]),
         el("div", { id: "period-ribbon", "aria-hidden": "true" }),
         el("div.legend", { id: "l-day" }),
-        el("div.chart-box", { style: "height:90px;margin-top:6px" }, [el("canvas", { id: "c-soc" })]),
+        el("p.chart-label", { id: "soc-label", text: "Battery charge" }),
+        el("div.chart-box", { style: "height:90px" }, [el("canvas", { id: "c-soc" })]),
       ],
       dataView: { summary: "Show the hourly table", tableId: "t-day" },
     }),
